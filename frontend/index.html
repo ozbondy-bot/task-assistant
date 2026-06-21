@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>Task Assistant</title>
+  <meta name="description" content="Умный помощник по домашним и личным делам" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="header-content">
+        <div class="user-info">
+          <div class="user-avatar" id="userAvatar">?</div>
+          <div class="user-details">
+            <span class="user-name" id="userName">Загрузка...</span>
+            <span class="user-points" id="userPoints">0 ✨</span>
+          </div>
+        </div>
+        <div class="house-name" id="houseName">🏠 Уютное гнездышко</div>
+      </div>
+    </header>
+
+    <!-- Tabs -->
+    <nav class="tab-nav">
+      <button class="tab-btn active" data-tab="house" id="tabHouse">
+        <span class="tab-icon">🏠</span>
+        <span class="tab-label">Дом</span>
+      </button>
+      <button class="tab-btn" data-tab="personal" id="tabPersonal">
+        <span class="tab-icon">👤</span>
+        <span class="tab-label">Мои дела</span>
+      </button>
+      <button class="tab-btn" data-tab="shopping" id="tabShopping">
+        <span class="tab-icon">🛒</span>
+        <span class="tab-label">Покупки</span>
+      </button>
+      <button class="tab-btn" data-tab="shop" id="tabShop">
+        <span class="tab-icon">🎁</span>
+        <span class="tab-label">Магазин</span>
+      </button>
+    </nav>
+
+    <!-- Tab content -->
+    <main class="tab-content">
+
+      <!-- HOUSEHOLD TASKS TAB -->
+      <section class="tab-pane active" id="pane-house">
+        <div class="section-header">
+          <h2>Домашние дела</h2>
+          <p class="section-sub">Свободные задачи — возьми в работу!</p>
+        </div>
+        <div id="houseTasksList" class="task-list">
+          <div class="loading-spinner">
+            <div class="spinner"></div>
+            <p>Загрузка...</p>
+          </div>
+        </div>
+        <div class="members-section">
+          <h3>Участники</h3>
+          <div id="membersList" class="members-list"></div>
+        </div>
+      </section>
+
+      <!-- PERSONAL TASKS TAB -->
+      <section class="tab-pane" id="pane-personal">
+        <div class="section-header">
+          <h2>Мои задачи</h2>
+          <p class="section-sub">Личные и взятые домашние дела</p>
+        </div>
+        <div id="personalTasksList" class="task-list"></div>
+        <button class="fab" id="addTaskBtn">
+          <span>+</span>
+        </button>
+        <!-- Add Task Modal -->
+        <div class="modal-overlay hidden" id="addTaskModal">
+          <div class="modal-card">
+            <h3>Новая задача</h3>
+            <p class="modal-hint">Напиши что угодно — я разберу дату, повторение и приоритет</p>
+            <textarea id="newTaskInput" placeholder="Например: позвонить врачу завтра или выпить воду каждый день" rows="3"></textarea>
+            <div class="modal-actions">
+              <button class="btn btn-ghost" id="cancelTaskBtn">Отмена</button>
+              <button class="btn btn-primary" id="saveTaskBtn">Добавить ✓</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SHOPPING TAB -->
+      <section class="tab-pane" id="pane-shopping">
+        <div class="section-header">
+          <h2>Список покупок</h2>
+          <p class="section-sub" id="shoppingTotal">Общая сумма: 0 ₽</p>
+        </div>
+        <div id="shoppingList" class="task-list"></div>
+        <button class="fab" id="addShopBtn">
+          <span>+</span>
+        </button>
+        <!-- Add shopping modal -->
+        <div class="modal-overlay hidden" id="addShopModal">
+          <div class="modal-card">
+            <h3>Добавить товар</h3>
+            <input id="shopItemName" type="text" placeholder="Название товара" />
+            <input id="shopItemPrice" type="number" placeholder="Цена (необязательно)" min="0" />
+            <label class="priority-toggle">
+              <input type="checkbox" id="shopItemUrgent" />
+              <span>🔴 Срочно</span>
+            </label>
+            <div class="modal-actions">
+              <button class="btn btn-ghost" id="cancelShopBtn">Отмена</button>
+              <button class="btn btn-primary" id="saveShopBtn">Добавить ✓</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SHOP / REWARDS TAB -->
+      <section class="tab-pane" id="pane-shop">
+        <div class="section-header">
+          <h2>Магазин наград</h2>
+          <p class="section-sub">Трать очки на приятные бонусы 💫</p>
+        </div>
+        <div class="points-banner" id="pointsBanner">
+          <div class="points-value" id="shopPoints">0</div>
+          <div class="points-label">твоих очков</div>
+        </div>
+        <div id="rewardsList" class="rewards-list"></div>
+
+        <!-- Leaderboard -->
+        <div class="leaderboard-section">
+          <h3>🏆 Рейтинг</h3>
+          <div id="leaderboard" class="leaderboard"></div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Toast notification -->
+  <div class="toast hidden" id="toast"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
