@@ -2,7 +2,10 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install dependencies
+# Install system dependencies (ffmpeg is needed for voice recognition)
+RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
+
+# Install python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
