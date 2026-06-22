@@ -14,7 +14,7 @@ from sqlalchemy import select, and_
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from db.models import AsyncSessionLocal, User, House, PersonalTask, ShoppingItem
+from db.models import AsyncSessionLocal, User, House, PersonalTask, ShoppingItem, TaskTemplate, TaskInstance, Completion
 from bot.parser import parse_input, get_recurrence_delta, clean_task_text
 
 logger = logging.getLogger(__name__)
@@ -33,10 +33,105 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
 
+async def generate_daily_chores_if_needed(session, house_id: int):
+    """Generate today's task instances from templates and rollover uncompleted ones."""
+    from sqlalchemy import update
+    today = datetime.now().date()
+    weekday = today.weekday()
+    day = today.day
+    month = today.month
+
+    house = await session.get(House, house_id)
+    if not house:
+        return
+
+    if house.last_summary_date == today:
+        return
+
+    result = await session.execute(
+        select(TaskTemplate).where(
+            and_(
+                TaskTemplate.house_id == house_id,
+                TaskTemplate.deleted == False
+            )
+        )
+    )
+    templates = result.scalars().all()
+
+    for tmpl in templates:
+        if tmpl.start_date and today < tmpl.start_date:
+            continue
+
+        p = tmpl.periodicity
+        should_create = False
+        if p == "daily":
+            should_create = True
+        elif p == "weekly":
+            should_create = (weekday == (tmpl.weekday if tmpl.weekday is not None else 0))
+        elif p == "twice_weekly":
+            should_create = (weekday in (0, 3))
+        elif p == "monthly":
+            should_create = (day == (tmpl.month_day if tmpl.month_day is not None else 1))
+        elif p == "twice_monthly":
+            should_create = (day in (5, 20))
+        elif p == "quarterly":
+            if day == (tmpl.month_day if tmpl.month_day is not None else 1):
+                pos = ((month - 1) % 3) + 1
+                if pos == (tmpl.weekday if tmpl.weekday is not None else 1):
+                    should_create = True
+
+        if should_create:
+            exists = await session.scalar(
+                select(TaskInstance).where(
+                    and_(
+                        TaskInstance.template_id == tmpl.id,
+                        TaskInstance.date == today
+                    )
+                )
+            )
+            if not exists:
+                inst = TaskInstance(
+                    template_id=tmpl.id,
+                    date=today,
+                    status="free",
+                    priority=0
+                )
+                session.add(inst)
+
+    # Rollover old uncompleted tasks
+    await session.execute(
+        update(TaskInstance)
+        .where(
+            and_(
+                TaskInstance.date < today,
+                TaskInstance.status != "done"
+            )
+        )
+        .values(date=today)
+    )
+
+    house.last_summary_date = today
+    await session.commit()
+    logger.info(f"Generated daily chores for house {house_id}")
+
+
 # ── FSM States ────────────────────────────────────────────────────────────────
 class EditShop(StatesGroup):
     waiting_for_input = State()
     item_id = State()
+
+
+class AddTemplateState(StatesGroup):
+    waiting_for_title = State()
+    waiting_for_points = State()
+    waiting_for_periodicity = State()
+
+
+class AddRewardState(StatesGroup):
+    waiting_for_title = State()
+    waiting_for_price = State()
+
+
 
 
 # ── Middleware: auto-register users ──────────────────────────────────────────
@@ -78,18 +173,12 @@ dp.callback_query.middleware(AutoRegisterMiddleware())
 
 
 # ── Keyboards ─────────────────────────────────────────────────────────────────
-def get_main_keyboard(mini_app_url: str) -> types.ReplyKeyboardMarkup:
+def get_main_keyboard() -> types.ReplyKeyboardMarkup:
     builder = ReplyKeyboardBuilder()
     builder.row(
-        KeyboardButton(text="📋 Сегодня"),
-        KeyboardButton(text="📅 Планы"),
-    )
-    builder.row(
-        KeyboardButton(text="🛒 Покупки"),
-        KeyboardButton(
-            text="🏠 Открыть приложение",
-            web_app=WebAppInfo(url=mini_app_url)
-        ),
+        KeyboardButton(text="🏠 Домашние дела"),
+        KeyboardButton(text="👤 Мои дела"),
+        KeyboardButton(text="🛍 Магазин и Покупки"),
     )
     return builder.as_markup(resize_keyboard=True, is_persistent=True)
 
@@ -101,19 +190,282 @@ async def cmd_start(message: types.Message, db_user: User = None):
     text = (
         f"👋 Привет, *{name}*!\n\n"
         "Это твой личный помощник по домашним и личным делам.\n\n"
-        "📋 *Сегодня* — задачи на сегодня\n"
-        "📅 *Планы* — задачи на будущее\n"
-        "🛒 *Покупки* — список покупок\n"
-        "🏠 *Открыть приложение* — полный интерфейс\n\n"
-        "Просто напиши мне что нужно сделать, и я всё запомню!\n"
+        "🏠 *Домашние дела* — свободные обязанности по дому\n"
+        "👤 *Мои дела* — твои личные задачи + взятые домашние дела\n"
+        "🛍 *Магазин и Покупки* — покупки, награды и статистика баллов\n\n"
+        "Просто напиши мне, что нужно сделать, и я всё запомню!\n"
         "_Например: «купить молоко 150» или «позвонить врачу завтра»_"
     )
-    await message.answer(text, reply_markup=get_main_keyboard(MINI_APP_URL), parse_mode="Markdown")
+    await message.answer(text, reply_markup=get_main_keyboard(), parse_mode="Markdown")
 
 
 @dp.message(Command("id"))
 async def cmd_id(message: types.Message):
     await message.answer(f"Твой Telegram ID: `{message.from_user.id}`", parse_mode="Markdown")
+
+
+# ── Household Chores (Домашние дела) ──────────────────────────────────────────
+def period_label_ru(p: str) -> str:
+    mapping = {
+        "daily": "каждый день",
+        "weekly": "раз в неделю",
+        "twice_weekly": "2 раза в неделю",
+        "monthly": "раз в месяц",
+        "twice_monthly": "2 раза в месяц",
+        "quarterly": "раз в квартал"
+    }
+    return mapping.get(p, p)
+
+
+async def render_household_chores(message: types.Message, db_user: User, is_callback=False):
+    today = datetime.now().date()
+    async with AsyncSessionLocal() as session:
+        await generate_daily_chores_if_needed(session, ACTIVE_HOUSE_ID)
+        result = await session.execute(
+            select(TaskInstance, TaskTemplate)
+            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
+            .where(
+                and_(
+                    TaskTemplate.house_id == ACTIVE_HOUSE_ID,
+                    TaskInstance.date == today,
+                    TaskInstance.status == "free",
+                    TaskTemplate.deleted == False
+                )
+            )
+            .order_by(TaskTemplate.points.desc())
+        )
+        chores = result.all()
+
+    text = "🏠 *Свободные домашние дела на сегодня:*\n\n"
+    builder = InlineKeyboardBuilder()
+
+    if chores:
+        for inst, tmpl in chores:
+            text += f"• {tmpl.title} (`+{tmpl.points} 💎`)\n"
+            builder.button(
+                text=f"Взять: {tmpl.title} (+{tmpl.points}💎)",
+                callback_data=f"claim_chore:{inst.id}"
+            )
+        text += "\n_Нажми на кнопку ниже, чтобы взять дело в работу. Оно перейдет в твой список «👤 Мои дела»._"
+    else:
+        text += "🎉 *Все домашние дела на сегодня разобраны!*"
+
+    builder.adjust(1)
+    builder.row(
+        InlineKeyboardButton(text="⚙️ Настройки", callback_data="chores_settings"),
+        InlineKeyboardButton(text="📜 Архив дома", callback_data="chores_arch:0")
+    )
+
+    markup = builder.as_markup()
+    if is_callback:
+        await message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+    else:
+        await message.answer(text, reply_markup=markup, parse_mode="Markdown")
+
+
+@dp.message(F.text == "🏠 Домашние дела")
+async def handle_household_chores_btn(message: types.Message, db_user: User = None):
+    await render_household_chores(message, db_user)
+
+
+@dp.callback_query(F.data == "chores_back")
+async def handle_chores_back(call: types.CallbackQuery, db_user: User = None):
+    await render_household_chores(call.message, db_user, is_callback=True)
+
+
+@dp.callback_query(F.data.startswith("claim_chore:"))
+async def handle_claim_chore(call: types.CallbackQuery, db_user: User = None):
+    inst_id = int(call.data.split(":")[1])
+    async with AsyncSessionLocal() as session:
+        inst = await session.get(TaskInstance, inst_id)
+        if inst:
+            if inst.status == "free":
+                inst.status = "in_progress"
+                inst.done_by_user_id = db_user.id
+                await session.commit()
+                await call.answer("🏠 Задача взята в работу! Она добавлена в «Мои дела».")
+            else:
+                await call.answer("⚠️ Кто-то уже взял эту задачу!")
+        else:
+            await call.answer("⚠️ Задача не найдена!")
+    await render_household_chores(call.message, db_user, is_callback=True)
+
+
+@dp.callback_query(F.data == "chores_settings")
+async def handle_chores_settings(call: types.CallbackQuery, db_user: User = None):
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(TaskTemplate).where(
+                and_(
+                    TaskTemplate.house_id == ACTIVE_HOUSE_ID,
+                    TaskTemplate.deleted == False
+                )
+            ).order_by(TaskTemplate.id)
+        )
+        templates = result.scalars().all()
+
+    text = "⚙️ *Настройка шаблонов домашних дел:*\n\n"
+    builder = InlineKeyboardBuilder()
+    if templates:
+        for t in templates:
+            period_lbl = period_label_ru(t.periodicity)
+            text += f"• *{t.title}* ({t.points}💎, {period_lbl})\n"
+            builder.button(text=f"❌ {t.title}", callback_data=f"del_tmpl:{t.id}")
+        text += "\n_Нажмите на кнопку с шаблоном, чтобы удалить его._"
+    else:
+        text += "Шаблонов пока нет. Добавьте первый!"
+
+    builder.adjust(1)
+    builder.row(
+        InlineKeyboardButton(text="➕ Добавить шаблон", callback_data="add_tmpl_start"),
+        InlineKeyboardButton(text="⬅️ Назад", callback_data="chores_back")
+    )
+    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+
+
+@dp.callback_query(F.data.startswith("del_tmpl:"))
+async def handle_del_tmpl(call: types.CallbackQuery, db_user: User = None):
+    tmpl_id = int(call.data.split(":")[1])
+    async with AsyncSessionLocal() as session:
+        tmpl = await session.get(TaskTemplate, tmpl_id)
+        if tmpl:
+            tmpl.deleted = True
+            await session.commit()
+            await call.answer("🗑 Шаблон удален!")
+        else:
+            await call.answer("⚠️ Шаблон не найден!")
+    await handle_chores_settings(call, db_user)
+
+
+@dp.callback_query(F.data.startswith("chores_arch:"))
+async def handle_chores_archive(call: types.CallbackQuery, db_user: User = None):
+    page = int(call.data.split(":")[1])
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Completion, User, TaskTemplate)
+            .join(User, Completion.user_id == User.id)
+            .join(TaskInstance, Completion.task_instance_id == TaskInstance.id)
+            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
+            .order_by(Completion.created_at.desc())
+            .offset(page * 5)
+            .limit(5)
+        )
+        rows = result.all()
+
+    text = "📜 *История выполненных домашних дел:*\n\n"
+    if rows:
+        for comp, usr, tmpl in rows:
+            dt_str = comp.created_at.strftime("%d.%m %H:%M")
+            text += f"• *{dt_str}* — {usr.display_name} выполнил *{tmpl.title}* (`+{comp.points} 💎`)\n"
+    else:
+        text += "История пуста!"
+
+    builder = InlineKeyboardBuilder()
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"chores_arch:{page-1}"))
+    if len(rows) == 5:
+        nav.append(InlineKeyboardButton(text="➡️", callback_data=f"chores_arch:{page+1}"))
+    if nav:
+        builder.row(*nav)
+    builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="chores_back"))
+    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+
+
+# Add template FSM flow
+@dp.callback_query(F.data == "add_tmpl_start")
+async def handle_add_tmpl_start(call: types.CallbackQuery, state: FSMContext):
+    await state.set_state(AddTemplateState.waiting_for_title)
+    await call.message.edit_text(
+        "✏️ *Добавление нового шаблона дела*\n\nВведите название домашнего дела (например: Помыть холодильник):",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="❌ Отмена", callback_data="add_tmpl_cancel")
+        ]]),
+        parse_mode="Markdown"
+    )
+
+
+@dp.callback_query(F.data == "add_tmpl_cancel")
+async def handle_add_tmpl_cancel(call: types.CallbackQuery, state: FSMContext, db_user: User = None):
+    await state.clear()
+    await call.answer("Отменено")
+    await handle_chores_settings(call, db_user)
+
+
+@dp.message(AddTemplateState.waiting_for_title)
+async def handle_add_tmpl_title(message: types.Message, state: FSMContext):
+    title = message.text.strip()
+    if not title:
+        await message.answer("Название не может быть пустым. Попробуйте еще раз:")
+        return
+    await state.update_data(title=title)
+    await state.set_state(AddTemplateState.waiting_for_points)
+    await message.answer(
+        f"Установлено название: *{title}*\n\nСколько баллов (💎) давать за выполнение? (Введите число, например: 3):",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="❌ Отмена", callback_data="add_tmpl_cancel")
+        ]]),
+        parse_mode="Markdown"
+    )
+
+
+@dp.message(AddTemplateState.waiting_for_points)
+async def handle_add_tmpl_points(message: types.Message, state: FSMContext):
+    try:
+        pts = int(message.text.strip())
+        if pts <= 0:
+            raise ValueError()
+    except ValueError:
+        await message.answer("Пожалуйста, введите целое положительное число (например: 3):")
+        return
+    
+    await state.update_data(points=pts)
+    await state.set_state(AddTemplateState.waiting_for_periodicity)
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="Каждый день", callback_data="set_tmpl_period:daily"),
+        InlineKeyboardButton(text="Раз в неделю", callback_data="set_tmpl_period:weekly")
+    )
+    builder.row(
+        InlineKeyboardButton(text="2 раза в неделю", callback_data="set_tmpl_period:twice_weekly"),
+        InlineKeyboardButton(text="Раз в месяц", callback_data="set_tmpl_period:monthly")
+    )
+    builder.row(
+        InlineKeyboardButton(text="2 раза в месяц", callback_data="set_tmpl_period:twice_monthly"),
+        InlineKeyboardButton(text="Раз в квартал", callback_data="set_tmpl_period:quarterly")
+    )
+    builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data="add_tmpl_cancel"))
+    builder.adjust(2)
+    
+    await message.answer(
+        f"Установлено баллов: *{pts}* 💎\n\nВыберите периодичность выполнения дела:",
+        reply_markup=builder.as_markup(),
+        parse_mode="Markdown"
+    )
+
+
+@dp.callback_query(AddTemplateState.waiting_for_periodicity, F.data.startswith("set_tmpl_period:"))
+async def handle_add_tmpl_periodicity(call: types.CallbackQuery, state: FSMContext, db_user: User = None):
+    periodicity = call.data.split(":")[1]
+    data = await state.get_data()
+    title = data["title"]
+    pts = data["points"]
+    
+    async with AsyncSessionLocal() as session:
+        tmpl = TaskTemplate(
+            house_id=ACTIVE_HOUSE_ID,
+            title=title,
+            points=pts,
+            periodicity=periodicity,
+            deleted=False
+        )
+        session.add(tmpl)
+        await session.commit()
+    
+    await state.clear()
+    await call.answer("✅ Шаблон успешно добавлен!")
+    await handle_chores_settings(call, db_user)
 
 
 # ── Render Today ───────────────────────────────────────────────────────────────
@@ -180,6 +532,7 @@ async def render_today(message: types.Message, db_user: User, is_callback=False)
         await rollover_overdue_tasks(session, db_user.id)
         await ensure_daily_routines(session, db_user.id)
 
+        # 1. Fetch personal tasks
         result = await session.execute(
             select(PersonalTask).where(
                 and_(
@@ -190,24 +543,60 @@ async def render_today(message: types.Message, db_user: User, is_callback=False)
                 )
             ).order_by(PersonalTask.id)
         )
-        tasks = result.scalars().all()
+        personal_tasks = result.scalars().all()
 
-    if tasks:
-        text = "📋 *Задачи на сегодня*\n👉 _Тапни для выполнения:_"
-        builder = InlineKeyboardBuilder()
-        for t in tasks:
-            rec_icon = " 🔁" if t.recurrence else ""
-            builder.button(text=f"{t.text}{rec_icon}", callback_data=f"done_task:{t.id}")
-        builder.adjust(1)
-        builder.row(
-            InlineKeyboardButton(text="➡️ Перенос", callback_data="t_menu_move"),
-            InlineKeyboardButton(text="❌ Удалить", callback_data="t_menu_del"),
-            InlineKeyboardButton(text="📜 Архив", callback_data="t_arch:0"),
+        # 2. Fetch user's claimed chores
+        chores_result = await session.execute(
+            select(TaskInstance, TaskTemplate)
+            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
+            .where(
+                and_(
+                    TaskInstance.done_by_user_id == db_user.id,
+                    TaskInstance.status == "in_progress",
+                    TaskInstance.date == today
+                )
+            )
+            .order_by(TaskInstance.id)
         )
+        my_chores = chores_result.all()
+
+    text = "👤 *Твои дела на сегодня:*\n\n"
+    builder = InlineKeyboardBuilder()
+
+    # Personal tasks rendering
+    text += "*👤 Личные задачи:*\n"
+    if personal_tasks:
+        for t in personal_tasks:
+            rec_icon = " 🔁" if t.recurrence else ""
+            text += f"• {t.text}{rec_icon}\n"
+            builder.button(text=f"✅ {t.text}", callback_data=f"done_task:{t.id}")
     else:
-        text = "🎉 *На сегодня задач нет! Всё выполнено.*"
-        builder = InlineKeyboardBuilder()
-        builder.row(InlineKeyboardButton(text="📜 Архив задач", callback_data="t_arch:0"))
+        text += "_Нет личных задач_\n"
+    text += "\n"
+
+    # Household chores rendering
+    text += "*🏠 В работе из домашних:*\n"
+    if my_chores:
+        for inst, tmpl in my_chores:
+            text += f"• {tmpl.title} (`+{tmpl.points} 💎`)\n"
+            builder.button(
+                text=f"🏠 Выполнить: {tmpl.title} (+{tmpl.points}💎)",
+                callback_data=f"done_chore_inst:{inst.id}"
+            )
+            builder.button(
+                text=f"↪ Отказаться: {tmpl.title}",
+                callback_data=f"unclaim_chore_inst:{inst.id}"
+            )
+    else:
+        text += "_Нет взятых домашних дел_\n"
+
+    # Adjust buttons layout (1 per row)
+    builder.adjust(1)
+    builder.row(
+        InlineKeyboardButton(text="➡️ Перенос", callback_data="t_menu_move"),
+        InlineKeyboardButton(text="❌ Удалить", callback_data="t_menu_del"),
+        InlineKeyboardButton(text="📜 Архив", callback_data="t_arch:0"),
+    )
 
     markup = builder.as_markup()
     if is_callback:
@@ -216,7 +605,7 @@ async def render_today(message: types.Message, db_user: User, is_callback=False)
         await message.answer(text, reply_markup=markup, parse_mode="Markdown")
 
 
-@dp.message(F.text == "📋 Сегодня")
+@dp.message(F.text == "👤 Мои дела")
 async def today_handler(m: types.Message, db_user: User = None):
     await render_today(m, db_user)
 
@@ -249,6 +638,50 @@ async def handle_done_task(call: types.CallbackQuery, db_user: User = None):
                 session.add(new_task)
             await session.commit()
     await render_today(call.message, db_user, True)
+
+
+@dp.callback_query(F.data.startswith("done_chore_inst:"))
+async def handle_done_chore_inst(call: types.CallbackQuery, db_user: User = None):
+    inst_id = int(call.data.split(":")[1])
+    async with AsyncSessionLocal() as session:
+        inst = await session.get(TaskInstance, inst_id)
+        if inst and inst.done_by_user_id == db_user.id:
+            tmpl = await session.get(TaskTemplate, inst.template_id)
+            inst.status = "done"
+            inst.done_at = datetime.utcnow()
+            
+            # Award points to user
+            user = await session.get(User, db_user.id)
+            pts = tmpl.points if tmpl else 1
+            user.points = (user.points or 0) + pts
+            
+            # Record completion
+            comp = Completion(
+                user_id=db_user.id,
+                task_instance_id=inst.id,
+                points=pts
+            )
+            session.add(comp)
+            await session.commit()
+            await call.answer(f"✅ Выполнено! Начислено +{pts} 💎")
+        else:
+            await call.answer("⚠️ Задача не найдена или не назначена на вас!")
+    await render_today(call.message, db_user, is_callback=True)
+
+
+@dp.callback_query(F.data.startswith("unclaim_chore_inst:"))
+async def handle_unclaim_chore_inst(call: types.CallbackQuery, db_user: User = None):
+    inst_id = int(call.data.split(":")[1])
+    async with AsyncSessionLocal() as session:
+        inst = await session.get(TaskInstance, inst_id)
+        if inst and inst.done_by_user_id == db_user.id:
+            inst.status = "free"
+            inst.done_by_user_id = None
+            await session.commit()
+            await call.answer("↪ Задача возвращена в общий пул свободных дел.")
+        else:
+            await call.answer("⚠️ Задача не найдена или не назначена на вас!")
+    await render_today(call.message, db_user, is_callback=True)
 
 
 # ── Move / Delete tasks ───────────────────────────────────────────────────────
@@ -562,6 +995,8 @@ async def render_shop(message: types.Message, db_user: User, is_callback=False):
         builder = InlineKeyboardBuilder()
         builder.row(InlineKeyboardButton(text="📜 Архив покупок", callback_data="s_arch:0"))
 
+    builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="shop_and_purchases_back"))
+
     markup = builder.as_markup()
     if is_callback:
         await message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
@@ -569,9 +1004,9 @@ async def render_shop(message: types.Message, db_user: User, is_callback=False):
         await message.answer(text, reply_markup=markup, parse_mode="Markdown")
 
 
-@dp.message(F.text == "🛒 Покупки")
-async def shop_handler(m: types.Message, db_user: User = None):
-    await render_shop(m, db_user)
+@dp.callback_query(F.data == "shop_view_items")
+async def shop_view_items_handler(call: types.CallbackQuery, db_user: User = None):
+    await render_shop(call.message, db_user, True)
 
 
 @dp.callback_query(F.data == "s_cancel")
@@ -712,6 +1147,289 @@ async def restore_shop(call: types.CallbackQuery, db_user: User = None):
             await session.commit()
     await call.answer("🔄 Возвращено в список!")
     await render_shop(call.message, db_user, True)
+
+
+# ── Shop and Purchases (Магазин и Покупки) ────────────────────────────────────
+async def render_shop_and_purchases(message: types.Message, db_user: User, is_callback=False):
+    async with AsyncSessionLocal() as session:
+        user = await session.get(User, db_user.id)
+        points = user.points or 0
+
+        leaderboard_result = await session.execute(
+            select(User)
+            .where(User.house_id == ACTIVE_HOUSE_ID)
+            .order_by(User.points.desc())
+        )
+        leaderboard = leaderboard_result.scalars().all()
+
+        shopping_result = await session.execute(
+            select(ShoppingItem)
+            .where(
+                and_(
+                    ShoppingItem.house_id == ACTIVE_HOUSE_ID,
+                    ShoppingItem.is_bought == False,
+                    ShoppingItem.is_deleted == False
+                )
+            )
+            .order_by(ShoppingItem.priority.desc(), ShoppingItem.id.asc())
+        )
+        shopping_items = shopping_result.scalars().all()
+
+    text = "🛍 *Магазин и Покупки*\n\n"
+    text += f"✨ *Твой баланс:* `{points} 💎`\n\n"
+
+    text += "🏆 *Рейтинг участников:*\n"
+    medals = ["🥇", "🥈", "🥉"]
+    for idx, usr in enumerate(leaderboard):
+        medal = medals[idx] if idx < len(medals) else "👤"
+        text += f"{medal} {usr.display_name} — `{usr.points or 0} 💎`\n"
+    text += "\n"
+
+    text += "🛒 *Список покупок:*\n"
+    if shopping_items:
+        for item in shopping_items[:5]:
+            prefix = "🔴 " if item.priority == "high" else ""
+            price_str = f" ({item.price}₽)" if item.price > 0 else ""
+            text += f"• {prefix}{item.item_name}{price_str}\n"
+        if len(shopping_items) > 5:
+            text += f"_...и еще {len(shopping_items) - 5} товаров_\n"
+    else:
+        text += "_Список покупок пуст_\n"
+
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="🛒 Перейти в покупки", callback_data="shop_view_items"),
+        InlineKeyboardButton(text="🎁 Магазин наград", callback_data="rewards_shop_view")
+    )
+
+    markup = builder.as_markup()
+    if is_callback:
+        await message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+    else:
+        await message.answer(text, reply_markup=markup, parse_mode="Markdown")
+
+
+@dp.message(F.text == "🛍 Магазин и Покупки")
+async def handle_shop_and_purchases_btn(message: types.Message, db_user: User = None):
+    await render_shop_and_purchases(message, db_user)
+
+
+@dp.callback_query(F.data == "shop_and_purchases_back")
+async def handle_shop_and_purchases_back(call: types.CallbackQuery, db_user: User = None):
+    await render_shop_and_purchases(call.message, db_user, is_callback=True)
+
+
+# ── Rewards Shop (Магазин наград) ─────────────────────────────────────────────
+async def render_rewards_settings(message: types.Message, db_user: User, is_callback=False):
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Reward).where(Reward.house_id == ACTIVE_HOUSE_ID).order_by(Reward.price)
+        )
+        rewards = result.scalars().all()
+
+    text = "⚙️ *Управление наградами:*\n\n"
+    builder = InlineKeyboardBuilder()
+    if rewards:
+        for r in rewards:
+            text += f"• *{r.title}* — `{r.price} 💎`\n"
+            builder.button(text=f"❌ {r.title}", callback_data=f"del_reward:{r.id}")
+        text += "\n_Нажмите на кнопку с наградой, чтобы удалить её._"
+    else:
+        text += "Наград пока нет."
+
+    builder.adjust(1)
+    builder.row(
+        InlineKeyboardButton(text="➕ Добавить награду", callback_data="add_reward_start"),
+        InlineKeyboardButton(text="⬅️ Назад", callback_data="rewards_back")
+    )
+    markup = builder.as_markup()
+    if is_callback:
+        await message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+    else:
+        await message.answer(text, reply_markup=markup, parse_mode="Markdown")
+
+
+@dp.callback_query(F.data == "rewards_shop_view")
+async def handle_rewards_shop_view(call: types.CallbackQuery, db_user: User = None):
+    async with AsyncSessionLocal() as session:
+        user = await session.get(User, db_user.id)
+        points = user.points or 0
+
+        result = await session.execute(
+            select(Reward).where(Reward.house_id == ACTIVE_HOUSE_ID).order_by(Reward.price)
+        )
+        rewards = result.scalars().all()
+
+    text = "🎁 *Магазин наград*\n\n"
+    text += f"✨ *Твой баланс:* `{points} 💎`\n"
+    text += "Выбери награду для покупки:\n\n"
+
+    builder = InlineKeyboardBuilder()
+    if rewards:
+        for r in rewards:
+            text += f"• *{r.title}* — `{r.price} 💎`\n"
+            builder.button(text=f"Купить: {r.title} ({r.price}💎)", callback_data=f"buy_reward:{r.id}")
+    else:
+        text += "_Награды пока не добавлены._"
+
+    builder.adjust(1)
+    builder.row(
+        InlineKeyboardButton(text="⚙️ Управление наградами", callback_data="rewards_settings"),
+        InlineKeyboardButton(text="📜 Мои покупки", callback_data="rewards_purchases:0")
+    )
+    builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="shop_and_purchases_back"))
+
+    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+
+
+@dp.callback_query(F.data == "rewards_back")
+async def handle_rewards_back(call: types.CallbackQuery, db_user: User = None):
+    await handle_rewards_shop_view(call, db_user)
+
+
+@dp.callback_query(F.data.startswith("buy_reward:"))
+async def handle_buy_reward(call: types.CallbackQuery, db_user: User = None):
+    reward_id = int(call.data.split(":")[1])
+    async with AsyncSessionLocal() as session:
+        reward = await session.get(Reward, reward_id)
+        if not reward:
+            await call.answer("⚠️ Награда не найдена!")
+            return
+        
+        user = await session.get(User, db_user.id)
+        if (user.points or 0) < reward.price:
+            await call.answer("⚠️ Недостаточно баллов для покупки!")
+            return
+        
+        user.points -= reward.price
+        purchase = RewardPurchase(
+            user_id=db_user.id,
+            reward_title=reward.title,
+            price=reward.price,
+            status="purchased"
+        )
+        session.add(purchase)
+        await session.commit()
+        await call.answer(f"🎉 Куплено: {reward.title}! Списано {reward.price} 💎")
+        
+    await handle_rewards_shop_view(call, db_user)
+
+
+@dp.callback_query(F.data == "rewards_settings")
+async def handle_rewards_settings_btn(call: types.CallbackQuery, db_user: User = None):
+    await render_rewards_settings(call.message, db_user, is_callback=True)
+
+
+@dp.callback_query(F.data.startswith("del_reward:"))
+async def handle_del_reward(call: types.CallbackQuery, db_user: User = None):
+    reward_id = int(call.data.split(":")[1])
+    async with AsyncSessionLocal() as session:
+        reward = await session.get(Reward, reward_id)
+        if reward:
+            await session.delete(reward)
+            await session.commit()
+            await call.answer("🗑 Награда удалена!")
+        else:
+            await call.answer("⚠️ Награда не найдена!")
+    await render_rewards_settings(call.message, db_user, is_callback=True)
+
+
+@dp.callback_query(F.data.startswith("rewards_purchases:"))
+async def handle_rewards_purchases(call: types.CallbackQuery, db_user: User = None):
+    page = int(call.data.split(":")[1])
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(RewardPurchase, User)
+            .join(User, RewardPurchase.user_id == User.id)
+            .where(User.house_id == ACTIVE_HOUSE_ID)
+            .order_by(RewardPurchase.created_at.desc())
+            .offset(page * 5)
+            .limit(5)
+        )
+        rows = result.all()
+
+    text = "📜 *История купленных наград:*\n\n"
+    if rows:
+        for purchase, usr in rows:
+            dt_str = purchase.created_at.strftime("%d.%m %H:%M")
+            text += f"• *{dt_str}* — {usr.display_name} купил *{purchase.reward_title}* (`-{purchase.price} 💎`)\n"
+    else:
+        text += "Покупок пока не было."
+
+    builder = InlineKeyboardBuilder()
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"rewards_purchases:{page-1}"))
+    if len(rows) == 5:
+        nav.append(InlineKeyboardButton(text="➡️", callback_data=f"rewards_purchases:{page+1}"))
+    if nav:
+        builder.row(*nav)
+    builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="rewards_back"))
+    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+
+
+# Add reward FSM flow
+@dp.callback_query(F.data == "add_reward_start")
+async def handle_add_reward_start(call: types.CallbackQuery, state: FSMContext):
+    await state.set_state(AddRewardState.waiting_for_title)
+    await call.message.edit_text(
+        "✏️ *Добавление новой награды*\n\nВведите название награды (например: Пицца за счет дома):",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="❌ Отмена", callback_data="add_reward_cancel")
+        ]]),
+        parse_mode="Markdown"
+    )
+
+
+@dp.callback_query(F.data == "add_reward_cancel")
+async def handle_add_reward_cancel(call: types.CallbackQuery, state: FSMContext, db_user: User = None):
+    await state.clear()
+    await call.answer("Отменено")
+    await render_rewards_settings(call.message, db_user, is_callback=True)
+
+
+@dp.message(AddRewardState.waiting_for_title)
+async def handle_add_reward_title(message: types.Message, state: FSMContext):
+    title = message.text.strip()
+    if not title:
+        await message.answer("Название не может быть пустым. Попробуйте еще раз:")
+        return
+    await state.update_data(title=title)
+    await state.set_state(AddRewardState.waiting_for_price)
+    await message.answer(
+        f"Установлено название: *{title}*\n\nСколько баллов (💎) должна стоить эта награда? (Введите число, например: 50):",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="❌ Отмена", callback_data="add_reward_cancel")
+        ]]),
+        parse_mode="Markdown"
+    )
+
+
+@dp.message(AddRewardState.waiting_for_price)
+async def handle_add_reward_price(message: types.Message, state: FSMContext, db_user: User = None):
+    try:
+        price = int(message.text.strip())
+        if price <= 0:
+            raise ValueError()
+    except ValueError:
+        await message.answer("Пожалуйста, введите целое положительное число (например: 50):")
+        return
+    
+    data = await state.get_data()
+    title = data["title"]
+    
+    async with AsyncSessionLocal() as session:
+        reward = Reward(
+            house_id=ACTIVE_HOUSE_ID,
+            title=title,
+            price=price
+        )
+        session.add(reward)
+        await session.commit()
+        
+    await state.clear()
+    await message.answer(f"✅ Награда успешно добавлена: *{title}* за *{price}* 💎")
+    await render_rewards_settings(message, db_user, is_callback=False)
 
 
 # ── Text/Voice input ──────────────────────────────────────────────────────────
