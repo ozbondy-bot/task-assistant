@@ -1,7 +1,8 @@
 import os
 import logging
 import asyncio
-from datetime import datetime, timedelta
+import calendar
+from datetime import datetime, timedelta, date
 from aiogram import Bot, Dispatcher, types, F, BaseMiddleware
 from aiogram.filters import CommandStart, Command, StateFilter
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
@@ -9,7 +10,7 @@ from aiogram.types import KeyboardButton, InlineKeyboardButton, WebAppInfo
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, Date
 
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -125,11 +126,23 @@ class AddTemplateState(StatesGroup):
     waiting_for_title = State()
     waiting_for_points = State()
     waiting_for_periodicity = State()
+    waiting_for_period_days = State()
 
 
 class AddRewardState(StatesGroup):
     waiting_for_title = State()
     waiting_for_price = State()
+
+
+class AddPersonalTaskState(StatesGroup):
+    waiting_for_text = State()
+
+
+class EditTemplateState(StatesGroup):
+    waiting_for_title = State()
+    waiting_for_points = State()
+    waiting_for_periodicity = State()
+    waiting_for_period_days = State()
 
 
 
@@ -238,20 +251,11 @@ async def render_household_chores(message: types.Message, db_user: User, is_call
 
     total_cookies = sum(tmpl.points for inst, tmpl in chores)
 
-    if chores:
-        text = (
-            "🌅 *Доброе утро! Твои задачи на сегодня:*\n\n"
-            "🎯 *План на сегодня*\n"
-            f"(_Можно залутать {total_cookies} 🍪_)\n\n"
-            "👉 Чтобы взять задачу в работу, нажми на её название 👇"
-        )
-    else:
-        text = (
-            "🌅 *Доброе утро! Твои задачи на сегодня:*\n\n"
-            "🎯 *План на сегодня*\n"
-            "(_Можно залутать 0 🍪_)\n\n"
-            "🎉 *Все домашние дела на сегодня разобраны!*"
-        )
+    text = (
+        "🌅 Привет!\n"
+        f"🎯 Сегодня можно залутать {total_cookies} 🍪)\n"
+        "👉 Чтобы взять задачу в работу, нажми на её название 👇"
+    )
 
     builder = InlineKeyboardBuilder()
 
@@ -265,9 +269,8 @@ async def render_household_chores(message: types.Message, db_user: User, is_call
             )
 
     builder.row(
-        InlineKeyboardButton(text="➕", callback_data="chores_add_menu"),
-        InlineKeyboardButton(text="⚙️", callback_data="chores_settings"),
-        InlineKeyboardButton(text="📁", callback_data="chores_arch:0")
+        InlineKeyboardButton(text="Добавить", callback_data="chores_add_menu"),
+        InlineKeyboardButton(text="Настройки", callback_data="chores_settings"),
     )
 
     markup = builder.as_markup()
@@ -291,10 +294,9 @@ async def handle_chores_back(call: types.CallbackQuery, db_user: User = None):
 async def handle_chores_add_menu(call: types.CallbackQuery, db_user: User = None):
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text="📋", callback_data="add_from_templates_list"),
-        InlineKeyboardButton(text="➕", callback_data="add_tmpl_start")
+        InlineKeyboardButton(text="Добавить из базы", callback_data="add_from_templates_list"),
+        InlineKeyboardButton(text="Создать новую", callback_data="add_tmpl_start")
     )
-    builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="chores_back"))
     await call.message.edit_text(
         "➕ *Добавить задачу:*",
         reply_markup=builder.as_markup(),
@@ -304,6 +306,7 @@ async def handle_chores_add_menu(call: types.CallbackQuery, db_user: User = None
 
 @dp.callback_query(F.data == "add_from_templates_list")
 async def handle_add_from_templates_list(call: types.CallbackQuery, db_user: User = None):
+    today = datetime.now().date()
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(TaskTemplate).where(
@@ -315,18 +318,31 @@ async def handle_add_from_templates_list(call: types.CallbackQuery, db_user: Use
         )
         templates = result.scalars().all()
 
-    text = "📋 *Выберите задачу из списка дел для добавления на сегодня:*"
-    builder = InlineKeyboardBuilder()
-    if templates:
-        for t in templates:
-            builder.button(
-                text=f"{t.title} ({t.points}🍪)",
-                callback_data=f"spawn_chore:{t.id}"
-            )
-    else:
-        text = "⚠️ Шаблонов дел пока нет!"
+        text = "📋 *Выберите задачу из списка дел для добавления на сегодня:*"
+        builder = InlineKeyboardBuilder()
+        if templates:
+            for t in templates:
+                last_done_date, nd = await get_template_next_date_val(session, t, today)
+                if t.periodicity == "once":
+                    col2_text = f"{t.points}🍪 Одноразовая ✅"
+                else:
+                    p_val = t.period_days or 1 if t.periodicity == "every_x_days" else 1
+                    if t.periodicity == "daily":
+                        p_val = "1"
+                    elif t.periodicity == "weekly":
+                        p_val = "7"
+                    elif t.periodicity == "monthly":
+                        p_val = "30"
+                    nd_str = nd.strftime("%d.%m")
+                    col2_text = f"{t.points}🍪 {p_val}🔄 {nd_str}📅"
+                
+                builder.row(
+                    InlineKeyboardButton(text=t.title, callback_data=f"spawn_chore:{t.id}"),
+                    InlineKeyboardButton(text=col2_text, callback_data="noop")
+                )
+        else:
+            text = "⚠️ Шаблонов дел пока нет!"
 
-    builder.adjust(1)
     builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="chores_add_menu"))
     await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
 
@@ -346,9 +362,9 @@ async def handle_spawn_chore(call: types.CallbackQuery, db_user: User = None):
             )
             session.add(inst)
             await session.commit()
-            await call.answer(f"✅ Добавлено на сегодня: {tmpl.title}")
+            await call.answer(f"✅ Добавлено на сегодня: {tmpl.title}", show_alert=False)
         else:
-            await call.answer("⚠️ Задача не найдена!")
+            await call.answer("⚠️ Задача не найдена!", show_alert=False)
     await render_household_chores(call.message, db_user, is_callback=True)
 
 
@@ -360,6 +376,195 @@ NUDGE_PHRASES = [
     "Освободилось немного времени? Идеальный момент, чтобы закрыть: <b>{task_title}</b> ✨"
 ]
 nudge_cache = {}
+
+
+def create_calendar_keyboard(tid: int, year: int, month: int, today_date: date) -> InlineKeyboardMarkup:
+    kb = []
+    month_names_ru = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"]
+    kb.append([InlineKeyboardButton(text=f"🗓 {month_names_ru[month-1]} {year}", callback_data="noop")])
+    
+    prev_y, prev_m = (year, month - 1) if month > 1 else (year - 1, 12)
+    next_y, next_m = (year, month + 1) if month < 12 else (year + 1, 1)
+    
+    kb.append([
+        InlineKeyboardButton(text="⬅️ Пред.", callback_data=f"cal_nav:{tid}:{prev_y}:{prev_m}"),
+        InlineKeyboardButton(text="След. ➡️", callback_data=f"cal_nav:{tid}:{next_y}:{next_m}")
+    ])
+    
+    weeks_ru = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+    kb.append([InlineKeyboardButton(text=w, callback_data="noop") for w in weeks_ru])
+    
+    cal = calendar.Calendar(firstweekday=0)
+    month_days = cal.monthdayscalendar(year, month)
+    
+    for week in month_days:
+        row = []
+        for day in week:
+            if day == 0: 
+                row.append(InlineKeyboardButton(text=" ", callback_data="noop"))
+            else:
+                btn_text = f"[{day}]" if year == today_date.year and month == today_date.month and day == today_date.day else str(day)
+                row.append(InlineKeyboardButton(text=btn_text, callback_data=f"shift:once:{tid}:{year}-{month:02d}-{day:02d}"))
+        kb.append(row)
+        
+    kb.append([InlineKeyboardButton(text="🔙 Назад", callback_data=f"resched_menu:{tid}")])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+def create_calendar_keyboard_custom(target_id: int, year: int, month: int, today_date: date, callback_prefix: str) -> InlineKeyboardMarkup:
+    kb = []
+    month_names_ru = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"]
+    kb.append([InlineKeyboardButton(text=f"🗓 {month_names_ru[month-1]} {year}", callback_data="noop")])
+    
+    prev_y, prev_m = (year, month - 1) if month > 1 else (year - 1, 12)
+    next_y, next_m = (year, month + 1) if month < 12 else (year + 1, 1)
+    
+    kb.append([
+        InlineKeyboardButton(text="⬅️ Пред.", callback_data=f"cal_nav_{callback_prefix}:{target_id}:{prev_y}:{prev_m}"),
+        InlineKeyboardButton(text="След. ➡️", callback_data=f"cal_nav_{callback_prefix}:{target_id}:{next_y}:{next_m}")
+    ])
+    
+    weeks_ru = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+    kb.append([InlineKeyboardButton(text=w, callback_data="noop") for w in weeks_ru])
+    
+    cal = calendar.Calendar(firstweekday=0)
+    month_days = cal.monthdayscalendar(year, month)
+    
+    for week in month_days:
+        row = []
+        for day in week:
+            if day == 0: 
+                row.append(InlineKeyboardButton(text=" ", callback_data="noop"))
+            else:
+                btn_text = f"[{day}]" if year == today_date.year and month == today_date.month and day == today_date.day else str(day)
+                row.append(InlineKeyboardButton(text=btn_text, callback_data=f"shift_{callback_prefix}:{target_id}:{year}-{month:02d}-{day:02d}"))
+        kb.append(row)
+        
+    back_cb = f"shift_{callback_prefix}_menu:{target_id}"
+    kb.append([InlineKeyboardButton(text="🔙 Назад", callback_data=back_cb)])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+def format_calendar_header(today_date: date) -> str:
+    days_full_ru = ["Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"]
+    weekday_idx = (today_date.weekday() + 1) % 7
+    return f"📌 *Выберите дату переноса*\n_({days_full_ru[weekday_idx]}, {today_date.strftime('%d.%m.%Y')})_\n\n"
+
+
+def find_scheduled_date_on_or_after(t: TaskTemplate, search_date: date) -> date:
+    curr = search_date
+    p = t.periodicity
+    if p == "weekly":
+        target_wd = t.weekday if t.weekday is not None else 0
+        for _ in range(365):
+            if curr.weekday() == target_wd:
+                return curr
+            curr += timedelta(days=1)
+    elif p == "twice_weekly":
+        for _ in range(365):
+            if curr.weekday() in (0, 3):
+                return curr
+            curr += timedelta(days=1)
+    elif p == "monthly":
+        target_md = t.month_day if t.month_day is not None else 1
+        for _ in range(365):
+            if curr.day == target_md:
+                return curr
+            curr += timedelta(days=1)
+    elif p == "twice_monthly":
+        for _ in range(365):
+            if curr.day in (5, 20):
+                return curr
+            curr += timedelta(days=1)
+    elif p == "quarterly":
+        target_qm = t.weekday if t.weekday is not None else 1
+        target_md = t.month_day if t.month_day is not None else 1
+        for _ in range(365 * 2):
+            if curr.day == target_md:
+                pos = ((curr.month - 1) % 3) + 1
+                if pos == target_qm:
+                    return curr
+            curr += timedelta(days=1)
+    return curr
+
+
+def get_template_next_date(t: TaskTemplate, last_done_date: date, active_inst_date: date, today_date: date) -> date:
+    if active_inst_date:
+        return max(active_inst_date, today_date)
+        
+    ref_start = t.start_date or today_date
+    
+    if t.periodicity == "once":
+        if last_done_date:
+            return date(2099, 12, 31)
+        else:
+            return max(ref_start, today_date)
+            
+    if t.periodicity == "daily":
+        if last_done_date:
+            if last_done_date >= today_date:
+                return today_date + timedelta(days=1)
+            else:
+                return today_date
+        else:
+            return max(ref_start, today_date)
+            
+    if t.periodicity == "every_x_days":
+        p_days = t.period_days or 1
+        if last_done_date:
+            next_date = last_done_date + timedelta(days=p_days)
+            return max(next_date, today_date)
+        else:
+            return max(ref_start, today_date)
+            
+    # For weekly, twice_weekly, monthly, twice_monthly, quarterly:
+    search_start = last_done_date if last_done_date else ref_start
+    search_start = max(search_start, ref_start)
+    
+    S = find_scheduled_date_on_or_after(t, search_start)
+    
+    if last_done_date:
+        threshold = 4
+        if t.periodicity == "twice_weekly":
+            threshold = 2
+        elif t.periodicity == "monthly":
+            threshold = 15
+        elif t.periodicity == "twice_monthly":
+            threshold = 6
+        elif t.periodicity == "quarterly":
+            threshold = 45
+            
+        if S >= last_done_date and (S - last_done_date).days < threshold:
+            S = find_scheduled_date_on_or_after(t, S + timedelta(days=1))
+            
+    return max(S, today_date)
+
+
+async def get_template_next_date_val(session: AsyncSession, t: TaskTemplate, today_date: date):
+    # 1. last done date
+    last_comp = await session.execute(
+        select(Completion.created_at)
+        .join(TaskInstance, Completion.task_instance_id == TaskInstance.id)
+        .where(TaskInstance.template_id == t.id)
+        .order_by(Completion.created_at.desc())
+        .limit(1)
+    )
+    last_done_dt = last_comp.scalar()
+    last_done_date = last_done_dt.date() if last_done_dt else None
+
+    # 2. active inst date
+    active_inst_date = await session.scalar(
+        select(TaskInstance.date).where(
+            and_(
+                TaskInstance.template_id == t.id,
+                TaskInstance.status.in_(["free", "shifted", "in_progress"])
+            )
+        ).order_by(TaskInstance.date.desc()).limit(1)
+    )
+
+    nd = get_template_next_date(t, last_done_date, active_inst_date, today_date)
+    return last_done_date, nd
+
 
 def get_period_label(tmpl: TaskTemplate) -> str:
     p = tmpl.periodicity
@@ -384,69 +589,304 @@ def get_period_label(tmpl: TaskTemplate) -> str:
     return mapping.get(p, p)
 
 
-@dp.callback_query(F.data.startswith("tmpl_set:") & F.data.endswith(":today"))
-async def handle_tmpl_set_today(call: types.CallbackQuery, db_user: User = None):
+async def redirect_to_template_settings(message: types.Message, tid: int, src: str, db_user: User, is_callback=True):
+    today = datetime.now().date()
+    async with AsyncSessionLocal() as session:
+        tmpl = await session.get(TaskTemplate, tid)
+        if not tmpl:
+            if src == "today_list":
+                await render_today(message, db_user, is_callback=is_callback)
+            else:
+                await render_chores_settings(message, db_user, is_callback=is_callback)
+            return
+            
+        last_done_date, nd = await get_template_next_date_val(session, tmpl, today)
+        last_done_str = last_done_date.strftime("%d.%m.%Y") if last_done_date else "никогда"
+        next_done_str = nd.strftime("%d.%m.%Y") if nd.year < 2099 else "никогда"
+
+    period_lbl = get_period_label(tmpl).capitalize()
+    pts_str = "2-8" if tmpl.title == "Готовка" else str(tmpl.points)
+
+    back_target = "chores_settings"
+    if src == "today_list":
+        back_target = f"tmpl_set:{tmpl.id}:today"
+    elif src.startswith("chores_arch_"):
+        page_val = src.replace("chores_arch_", "")
+        back_target = f"chores_arch:{page_val}"
+
+    text = (
+        f"⚙️ <b>Настройки:</b> {tmpl.title}\n"
+        f"Награда: {pts_str}🍪 | {period_lbl}\n"
+        f"📅 Последнее выполнение: {last_done_str}\n"
+        f"🔮 Следующее выполнение: {next_done_str}"
+    )
+
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="📝 Имя", callback_data=f"te_f:title:{tmpl.id}:{src}"),
+        InlineKeyboardButton(text="🍪 Баллы", callback_data=f"te_f:points:{tmpl.id}:{src}"),
+        InlineKeyboardButton(text="🔄 Цикл", callback_data=f"te_f:period:{tmpl.id}:{src}")
+    )
+    builder.row(
+        InlineKeyboardButton(text="🗑 Удалить", callback_data=f"te_del:{tmpl.id}:{src}"),
+        InlineKeyboardButton(text="➖", callback_data="noop"),
+        InlineKeyboardButton(text="🔙 Назад", callback_data=back_target)
+    )
+    if is_callback:
+        await message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    else:
+        await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+
+
+@dp.callback_query(F.data.startswith("tmpl_set:"))
+async def handle_tmpl_set(call: types.CallbackQuery, db_user: User = None):
     parts = call.data.split(":")
     tmpl_id = int(parts[1])
+    src = parts[2]
     today = datetime.now().date()
     
     async with AsyncSessionLocal() as session:
         tmpl = await session.get(TaskTemplate, tmpl_id)
         if not tmpl:
-            await call.answer("Шаблон не найден", show_alert=True)
+            await call.answer("Шаблон не найден", show_alert=False)
             return
-        
-        result = await session.execute(
-            select(TaskInstance).where(
-                and_(
-                    TaskInstance.template_id == tmpl.id,
-                    TaskInstance.date == today,
-                    TaskInstance.status == "free"
-                )
-            )
-        )
-        inst = result.scalars().first()
-        if not inst:
-            result = await session.execute(
-                select(TaskInstance).where(
-                    and_(
-                        TaskInstance.template_id == tmpl.id,
-                        TaskInstance.status.in_(["free", "shifted", "in_progress"])
-                    )
-                ).order_by(TaskInstance.id.desc())
-            )
-            inst = result.scalars().first()
             
-        if not inst:
-            await call.answer("Копия задачи на сегодня не найдена", show_alert=True)
-            return
+        last_done_date, nd = await get_template_next_date_val(session, tmpl, today)
+        last_done_str = last_done_date.strftime("%d.%m.%Y") if last_done_date else "никогда"
+        next_done_str = nd.strftime("%d.%m.%Y") if nd.year < 2099 else "нет"
 
-        last_comp = await session.execute(
-            select(Completion.created_at)
-            .join(TaskInstance, Completion.task_instance_id == TaskInstance.id)
-            .where(TaskInstance.template_id == tmpl.id)
-            .order_by(Completion.created_at.desc())
-            .limit(1)
-        )
-        last_done_dt = last_comp.scalar()
-        last_done_str = last_done_dt.strftime("%d.%m.%Y") if last_done_dt else "никогда"
-        next_done_str = inst.date.strftime("%d.%m.%Y") if inst else today.strftime("%d.%m.%Y")
-
-    period_lbl = get_period_label(tmpl)
+    period_lbl = get_period_label(tmpl).capitalize()
     pts_str = "2-8" if tmpl.title == "Готовка" else str(tmpl.points)
 
-    text = (
-        f"📋 *{tmpl.title}* | Награда: {pts_str}🍪 | {period_lbl.capitalize()}\n"
-        f"📅 last: *{last_done_str}* | 🔮next : *{next_done_str}*"
-    )
+    if src == "today" or src.startswith("chores_arch_"):
+        if src == "today":
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(
+                    select(TaskInstance).where(
+                        and_(
+                            TaskInstance.template_id == tmpl.id,
+                            TaskInstance.date == today,
+                            TaskInstance.status == "free"
+                        )
+                    )
+                )
+                inst = result.scalars().first()
+                if not inst:
+                    result = await session.execute(
+                        select(TaskInstance).where(
+                            and_(
+                                TaskInstance.template_id == tmpl.id,
+                                TaskInstance.status.in_(["free", "shifted", "in_progress"])
+                            )
+                        ).order_by(TaskInstance.id.desc())
+                    )
+                    inst = result.scalars().first()
+                    
+                if not inst:
+                    await call.answer("Копия задачи не найдена", show_alert=False)
+                    return
+                    
+                inst_id = inst.id
 
+            builder = InlineKeyboardBuilder()
+            builder.row(
+                InlineKeyboardButton(text="🔔 Намек", callback_data=f"nudge:{inst_id}"),
+                InlineKeyboardButton(text="📅 Сдвиг", callback_data=f"resched_menu:{inst_id}"),
+                InlineKeyboardButton(text="🗑 Копию", callback_data=f"del_inst:{inst_id}")
+            )
+            builder.row(
+                InlineKeyboardButton(text="⚙️ Настройки", callback_data=f"tmpl_set:{tmpl.id}:today_list"),
+                InlineKeyboardButton(text="🔙 Назад", callback_data="chores_back")
+            )
+        else:
+            page_val = src.replace("chores_arch_", "")
+            builder = InlineKeyboardBuilder()
+            builder.row(
+                InlineKeyboardButton(text="🔙 Назад", callback_data=f"chores_arch:{page_val}")
+            )
+
+        text = (
+            f"📋{tmpl.title} {pts_str}🍪\n"
+            f"⏱️{period_lbl}\n"
+            f"📅last: {last_done_str}\n"
+            f"🔮next : {next_done_str}"
+        )
+        await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode=None)
+    else:
+        await redirect_to_template_settings(call.message, tmpl.id, src, db_user, is_callback=True)
+
+
+@dp.callback_query(F.data.startswith("te_cancel:"))
+async def handle_te_cancel(call: types.CallbackQuery, state: FSMContext, db_user: User = None):
+    parts = call.data.split(":")
+    tid = int(parts[1])
+    src = parts[2]
+    await state.clear()
+    await call.answer("Отменено", show_alert=False)
+    await redirect_to_template_settings(call.message, tid, src, db_user, is_callback=True)
+
+
+@dp.callback_query(F.data.startswith("te_f:title:"))
+async def handle_te_title_start(call: types.CallbackQuery, state: FSMContext):
+    parts = call.data.split(":")
+    tid = int(parts[3])
+    src = parts[4]
+    await state.update_data(edit_tid=tid, edit_src=src)
+    await state.set_state(EditTemplateState.waiting_for_title)
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data=f"te_cancel:{tid}:{src}"))
+    await call.message.edit_text("Введите новое название для шаблона:", reply_markup=builder.as_markup())
+
+
+@dp.message(StateFilter(EditTemplateState.waiting_for_title))
+async def handle_te_title_input(message: types.Message, state: FSMContext, db_user: User = None):
+    title = message.text.strip()
+    if not title:
+        await message.answer("Название не может быть пустым. Попробуйте еще раз:")
+        return
+        
+    data = await state.get_data()
+    tid = data["edit_tid"]
+    src = data["edit_src"]
+    
+    async with AsyncSessionLocal() as session:
+        tmpl = await session.get(TaskTemplate, tid)
+        if tmpl:
+            tmpl.title = title
+            await session.commit()
+            await message.answer(f"✅ Название успешно обновлено на: *{title}*", parse_mode="Markdown")
+            
+    await state.clear()
+    await redirect_to_template_settings(message, tid, src, db_user, is_callback=False)
+
+
+@dp.callback_query(F.data.startswith("te_f:points:"))
+async def handle_te_points_start(call: types.CallbackQuery, state: FSMContext):
+    parts = call.data.split(":")
+    tid = int(parts[3])
+    src = parts[4]
+    await state.update_data(edit_tid=tid, edit_src=src)
+    await state.set_state(EditTemplateState.waiting_for_points)
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data=f"te_cancel:{tid}:{src}"))
+    await call.message.edit_text("Введите новое количество баллов (печенек):", reply_markup=builder.as_markup())
+
+
+@dp.message(StateFilter(EditTemplateState.waiting_for_points))
+async def handle_te_points_input(message: types.Message, state: FSMContext, db_user: User = None):
+    try:
+        pts = int(message.text.strip())
+        if pts < 0:
+            raise ValueError()
+    except ValueError:
+        await message.answer("Пожалуйста, введите неотрицательное целое число:")
+        return
+        
+    data = await state.get_data()
+    tid = data["edit_tid"]
+    src = data["edit_src"]
+    
+    async with AsyncSessionLocal() as session:
+        tmpl = await session.get(TaskTemplate, tid)
+        if tmpl:
+            tmpl.points = pts
+            await session.commit()
+            await message.answer(f"✅ Баллы успешно обновлены на: *{pts}*", parse_mode="Markdown")
+            
+    await state.clear()
+    await redirect_to_template_settings(message, tid, src, db_user, is_callback=False)
+
+
+@dp.callback_query(F.data.startswith("te_f:period:"))
+async def handle_te_period_start(call: types.CallbackQuery, state: FSMContext):
+    parts = call.data.split(":")
+    tid = int(parts[3])
+    src = parts[4]
+    await state.update_data(edit_tid=tid, edit_src=src)
+    await state.set_state(EditTemplateState.waiting_for_periodicity)
+    
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text="🔔 Намек", callback_data=f"nudge:{inst.id}"),
-        InlineKeyboardButton(text="📅 Сдвиг", callback_data=f"resched_menu:{inst.id}"),
-        InlineKeyboardButton(text="🗑 Копию", callback_data=f"del_inst:{inst.id}")
+        InlineKeyboardButton(text="1 Раз", callback_data="te_period_sel:once"),
+        InlineKeyboardButton(text="Каждый день", callback_data="te_period_sel:daily"),
+        InlineKeyboardButton(text="Каждые X дней", callback_data="te_period_sel:every_x_days")
     )
-    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+    builder.row(
+        InlineKeyboardButton(text="❌ Отмена", callback_data=f"te_cancel:{tid}:{src}")
+    )
+    await call.message.edit_text("Выберите периодичность для шаблона:", reply_markup=builder.as_markup())
+
+
+@dp.callback_query(StateFilter(EditTemplateState.waiting_for_periodicity), F.data.startswith("te_period_sel:"))
+async def handle_te_period_selected(call: types.CallbackQuery, state: FSMContext, db_user: User = None):
+    p = call.data.split(":")[1]
+    data = await state.get_data()
+    tid = data["edit_tid"]
+    src = data["edit_src"]
+    
+    if p in ["once", "daily"]:
+        async with AsyncSessionLocal() as session:
+            tmpl = await session.get(TaskTemplate, tid)
+            if tmpl:
+                tmpl.periodicity = p
+                tmpl.period_days = 0 if p == "once" else 1
+                await session.commit()
+                await call.answer("✅ Периодичность обновлена!", show_alert=False)
+        await state.clear()
+        await redirect_to_template_settings(call.message, tid, src, db_user, is_callback=True)
+    else:
+        await state.set_state(EditTemplateState.waiting_for_period_days)
+        builder = InlineKeyboardBuilder()
+        builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data=f"te_cancel:{tid}:{src}"))
+        await call.message.edit_text("Укажите число дней, с каким интервалом повторять задачу (например, 5):", reply_markup=builder.as_markup())
+
+
+@dp.message(StateFilter(EditTemplateState.waiting_for_period_days))
+async def handle_te_period_days_input(message: types.Message, state: FSMContext, db_user: User = None):
+    try:
+        days = int(message.text.strip())
+        if days <= 0:
+            raise ValueError()
+    except ValueError:
+        await message.answer("Пожалуйста, введите целое положительное число:")
+        return
+        
+    data = await state.get_data()
+    tid = data["edit_tid"]
+    src = data["edit_src"]
+    
+    async with AsyncSessionLocal() as session:
+        tmpl = await session.get(TaskTemplate, tid)
+        if tmpl:
+            tmpl.periodicity = "every_x_days"
+            tmpl.period_days = days
+            await session.commit()
+            await message.answer(f"✅ Периодичность обновлена: каждые {days} дней!")
+            
+    await state.clear()
+    await redirect_to_template_settings(message, tid, src, db_user, is_callback=False)
+
+
+@dp.callback_query(F.data.startswith("te_del:"))
+async def handle_te_del(call: types.CallbackQuery, db_user: User = None):
+    parts = call.data.split(":")
+    tid = int(parts[1])
+    src = parts[2]
+    async with AsyncSessionLocal() as session:
+        tmpl = await session.get(TaskTemplate, tid)
+        if tmpl:
+            tmpl.deleted = True
+            await session.commit()
+            await call.answer("🗑 Шаблон удален!", show_alert=False)
+        else:
+            await call.answer("Шаблон не найден", show_alert=False)
+            
+    if src == "today_list":
+        await render_today(call.message, db_user, is_callback=True)
+    else:
+        await render_chores_settings(call.message, db_user, is_callback=True)
 
 
 @dp.callback_query(F.data.startswith("nudge:"))
@@ -455,13 +895,13 @@ async def handle_nudge(call: types.CallbackQuery, db_user: User = None):
     today = datetime.now().date()
     
     if nudge_cache.get(inst_id) == today:
-        await call.answer("Тише-тише, намек уже отправлен. Ждем реакции! 🤫", show_alert=True)
+        await call.answer("Тише-тише, намек уже отправлен. Ждем реакции! 🤫", show_alert=False)
         return
         
     async with AsyncSessionLocal() as session:
         inst = await session.get(TaskInstance, inst_id)
         if not inst:
-            await call.answer("Задача не найдена")
+            await call.answer("Задача не найдена", show_alert=False)
             return
             
         tmpl = await session.get(TaskTemplate, inst.template_id)
@@ -489,7 +929,7 @@ async def handle_nudge(call: types.CallbackQuery, db_user: User = None):
             except Exception as e:
                 logger.error(f"Failed to send nudge to {other.telegram_id}: {e}")
                 
-    await call.answer("Намек успешно отправлен! 🔔", show_alert=True)
+    await call.answer("Намек успешно отправлен! 🔔", show_alert=False)
     await render_household_chores(call.message, db_user, is_callback=True)
 
 
@@ -505,21 +945,17 @@ async def handle_resched_menu(call: types.CallbackQuery, db_user: User = None):
         inst = await session.get(TaskInstance, inst_id)
         tmpl_id = inst.template_id if inst else 0
         
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        InlineKeyboardButton(
-            text=f"{d1.strftime('%d.%m')} ({days_ru[d1.weekday()]})",
-            callback_data=f"shift:once:{inst_id}:{d1.strftime('%Y-%m-%d')}"
-        ),
-        InlineKeyboardButton(
-            text=f"{d2.strftime('%d.%m')} ({days_ru[d2.weekday()]})",
-            callback_data=f"shift:once:{inst_id}:{d2.strftime('%Y-%m-%d')}"
-        )
-    )
-    builder.row(
-        InlineKeyboardButton(text="🔙 Назад", callback_data=f"tmpl_set:{tmpl_id}:today")
-    )
-    await call.message.edit_text("На какой день перенести задачу?", reply_markup=builder.as_markup())
+    keyboard = [
+        [
+            InlineKeyboardButton(text=f"{d1.strftime('%d.%m')} ({days_ru[d1.weekday()]})", callback_data=f"shift:once:{inst_id}:{d1.strftime('%Y-%m-%d')}"),
+            InlineKeyboardButton(text=f"{d2.strftime('%d.%m')} ({days_ru[d2.weekday()]})", callback_data=f"shift:once:{inst_id}:{d2.strftime('%Y-%m-%d')}"),
+            InlineKeyboardButton(text="Другая дата", callback_data=f"rc_months:{inst_id}")
+        ],
+        [
+            InlineKeyboardButton(text="🔙 Назад", callback_data=f"tmpl_set:{tmpl_id}:today")
+        ]
+    ]
+    await call.message.edit_text("На какой день перенести задачу?", reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
 
 
 @dp.callback_query(F.data.startswith("shift:once:"))
@@ -532,7 +968,7 @@ async def handle_shift_once(call: types.CallbackQuery, db_user: User = None):
     async with AsyncSessionLocal() as session:
         inst = await session.get(TaskInstance, inst_id)
         if not inst:
-            await call.answer("Ошибка: задача не найдена.", show_alert=True)
+            await call.answer("Ошибка: задача не найдена.", show_alert=False)
             return
             
         tmpl = await session.get(TaskTemplate, inst.template_id)
@@ -557,7 +993,9 @@ async def handle_shift_once(call: types.CallbackQuery, db_user: User = None):
             session.add(new_inst)
             
         await session.commit()
-        await call.answer(f"✅ Перенесено на {new_date.strftime('%d.%m')}!", show_alert=True)
+        title = tmpl.title if tmpl else "Домашнее дело"
+        await call.answer(f"✅ Перенесено на {new_date.strftime('%d.%m')}!", show_alert=False)
+        await call.message.answer(f"🔄 Задача '{title}' перенесена на {new_date.strftime('%d.%m.%Y')}!")
         
     await render_household_chores(call.message, db_user, is_callback=True)
 
@@ -568,13 +1006,37 @@ async def handle_del_inst(call: types.CallbackQuery, db_user: User = None):
     async with AsyncSessionLocal() as session:
         inst = await session.get(TaskInstance, inst_id)
         if inst:
+            tmpl = await session.get(TaskTemplate, inst.template_id)
             inst.status = "skipped"
             await session.commit()
-            await call.answer("🗑 Копия задачи убрана на сегодня!", show_alert=True)
+            title = tmpl.title if tmpl else "Домашнее дело"
+            await call.answer("🗑 Копия удалена!", show_alert=False)
+            await call.message.answer(f"🗑 Копия домашнего дела '{title}' удалена на сегодня!")
         else:
-            await call.answer("⚠️ Задача не найдена!")
+            await call.answer("⚠️ Задача не найдена!", show_alert=False)
             
     await render_household_chores(call.message, db_user, is_callback=True)
+
+
+@dp.callback_query(F.data.startswith("rc_months:"))
+async def handle_rc_months(call: types.CallbackQuery, db_user: User = None):
+    inst_id = int(call.data.split(":")[1])
+    today = datetime.now().date()
+    markup = create_calendar_keyboard(inst_id, today.year, today.month, today)
+    header = format_calendar_header(today)
+    await call.message.edit_text(header, reply_markup=markup, parse_mode="Markdown")
+
+
+@dp.callback_query(F.data.startswith("cal_nav:"))
+async def handle_cal_nav(call: types.CallbackQuery, db_user: User = None):
+    parts = call.data.split(":")
+    inst_id = int(parts[1])
+    year = int(parts[2])
+    month = int(parts[3])
+    today = datetime.now().date()
+    markup = create_calendar_keyboard(inst_id, year, month, today)
+    header = format_calendar_header(today)
+    await call.message.edit_text(header, reply_markup=markup, parse_mode="Markdown")
 
 
 @dp.callback_query(F.data == "chores_leaderboard")
@@ -608,16 +1070,16 @@ async def handle_claim_chore(call: types.CallbackQuery, db_user: User = None):
                 inst.status = "in_progress"
                 inst.done_by_user_id = db_user.id
                 await session.commit()
-                await call.answer("🏠 Задача взята в работу! Она добавлена в «Мои дела».")
+                await call.answer("🏠 Задача взята в работу! Она добавлена в «Мои дела».", show_alert=False)
             else:
-                await call.answer("⚠️ Кто-то уже взял эту задачу!")
+                await call.answer("⚠️ Кто-то уже взял эту задачу!", show_alert=False)
         else:
-            await call.answer("⚠️ Задача не найдена!")
+            await call.answer("⚠️ Задача не найдена!", show_alert=False)
     await render_household_chores(call.message, db_user, is_callback=True)
 
 
-@dp.callback_query(F.data == "chores_settings")
-async def handle_chores_settings(call: types.CallbackQuery, db_user: User = None):
+async def render_chores_settings(message: types.Message, db_user: User = None, is_callback=False):
+    today = datetime.now().date()
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(TaskTemplate).where(
@@ -629,37 +1091,38 @@ async def handle_chores_settings(call: types.CallbackQuery, db_user: User = None
         )
         templates = result.scalars().all()
 
-    text = "⚙️ *Настройка шаблонов домашних дел:*\n\n"
-    builder = InlineKeyboardBuilder()
-    if templates:
-        for t in templates:
-            period_lbl = period_label_ru(t.periodicity)
-            text += f"• *{t.title}* ({t.points}🍪, {period_lbl})\n"
-            builder.button(text=f"❌ {t.title}", callback_data=f"del_tmpl:{t.id}")
-        text += "\n_Нажмите на кнопку с шаблоном, чтобы удалить его._"
-    else:
-        text += "Шаблонов пока нет. Добавьте первый!"
+        builder = InlineKeyboardBuilder()
+        if templates:
+            for t in templates:
+                last_done_date, nd = await get_template_next_date_val(session, t, today)
+                pts_str = "2-8" if t.title == "Готовка" else str(t.points)
+                period_lbl = get_period_label(t)
+                last_str = last_done_date.strftime("%d.%m") if last_done_date else "никогда"
+                next_str = nd.strftime("%d.%m") if nd.year < 2099 else "нет"
+                gear_text = f"⚙️ {pts_str}🍪 {period_lbl} /{next_str}"
+                builder.row(
+                    InlineKeyboardButton(text=t.title, callback_data="noop"),
+                    InlineKeyboardButton(text=gear_text, callback_data=f"tmpl_set:{t.id}:settings")
+                )
 
-    builder.adjust(1)
+    text = "🛠 <b>Список задач дома:</b>" if templates else "Задач пока нет."
     builder.row(
-        InlineKeyboardButton(text="➕ Добавить шаблон", callback_data="add_tmpl_start"),
-        InlineKeyboardButton(text="⬅️ Назад", callback_data="chores_back")
+        InlineKeyboardButton(text="➕ Добавить", callback_data="add_tmpl_start"),
+        InlineKeyboardButton(text="🗑 Удалить", callback_data="settings_del_menu"),
     )
-    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+
+    if is_callback:
+        await message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    else:
+        await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
 
-@dp.callback_query(F.data.startswith("del_tmpl:"))
-async def handle_del_tmpl(call: types.CallbackQuery, db_user: User = None):
-    tmpl_id = int(call.data.split(":")[1])
-    async with AsyncSessionLocal() as session:
-        tmpl = await session.get(TaskTemplate, tmpl_id)
-        if tmpl:
-            tmpl.deleted = True
-            await session.commit()
-            await call.answer("🗑 Шаблон удален!")
-        else:
-            await call.answer("⚠️ Шаблон не найден!")
-    await handle_chores_settings(call, db_user)
+@dp.callback_query(F.data == "chores_settings")
+async def handle_chores_settings(call: types.CallbackQuery, db_user: User = None):
+    await render_chores_settings(call.message, db_user, is_callback=True)
+
+
+# Obsolete del_tmpl callback query handler removed (handled by te_del)
 
 
 @dp.callback_query(F.data.startswith("chores_arch:"))
@@ -671,29 +1134,68 @@ async def handle_chores_archive(call: types.CallbackQuery, db_user: User = None)
             .join(User, Completion.user_id == User.id)
             .join(TaskInstance, Completion.task_instance_id == TaskInstance.id)
             .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
+            .where(TaskTemplate.house_id == ACTIVE_HOUSE_ID)
             .order_by(Completion.created_at.desc())
-            .offset(page * 5)
-            .limit(5)
         )
-        rows = result.all()
-
-    text = "📜 *История выполненных домашних дел:*\n\n"
-    if rows:
-        for comp, usr, tmpl in rows:
-            dt_str = comp.created_at.strftime("%d.%m %H:%M")
-            text += f"• *{dt_str}* — {usr.display_name} выполнил *{tmpl.title}* (`+{comp.points} 🍪`)\n"
-    else:
-        text += "История пуста!"
-
-    builder = InlineKeyboardBuilder()
-    nav = []
-    if page > 0:
-        nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"chores_arch:{page-1}"))
-    if len(rows) == 5:
-        nav.append(InlineKeyboardButton(text="➡️", callback_data=f"chores_arch:{page+1}"))
-    if nav:
-        builder.row(*nav)
-    builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="chores_back"))
+        all_completions = result.all()
+        
+        house = await session.get(House, ACTIVE_HOUSE_ID)
+        tz_str = house.timezone or "Europe/Moscow"
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo(tz_str)
+        from datetime import timezone as dt_timezone
+        
+        from collections import defaultdict
+        grouped = defaultdict(list)
+        for comp, usr, tmpl in all_completions:
+            utc_dt = comp.created_at.replace(tzinfo=dt_timezone.utc)
+            local_dt = utc_dt.astimezone(tz)
+            local_date = local_dt.date()
+            grouped[local_date].append((comp, usr, tmpl, local_dt))
+            
+        sorted_dates = sorted(grouped.keys(), reverse=True)
+        
+        if not sorted_dates:
+            text = "📜 *История выполненных домашних дел:*\n\nИстория пуста!"
+            builder = InlineKeyboardBuilder()
+            builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="chores_back"))
+            await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+            return
+            
+        if page < 0:
+            page = 0
+        if page >= len(sorted_dates):
+            page = len(sorted_dates) - 1
+            
+        target_date = sorted_dates[page]
+        completions_for_day = grouped[target_date]
+        
+        text = f"📅 *{target_date.strftime('%d.%m.%Y')}*\n\n"
+        
+        builder = InlineKeyboardBuilder()
+        for comp, usr, tmpl, local_dt in completions_for_day:
+            u_name = usr.display_name or usr.username or "Кто-то"
+            time_str = local_dt.strftime("%H:%M")
+            pts_val = "2-8" if tmpl.title == "Готовка" else str(comp.points)
+            
+            text += f"• {time_str} — {u_name} выполнил *{tmpl.title}* (+{pts_val}🍪)\n"
+            
+            pts_str = f"{pts_val}🍪 ℹ️"
+            builder.row(
+                InlineKeyboardButton(text=tmpl.title, callback_data="noop"),
+                InlineKeyboardButton(text=pts_str, callback_data=f"tmpl_set:{tmpl.id}:chores_arch_{page}")
+            )
+            
+        nav = []
+        if page > 0:
+            nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"chores_arch:{page-1}"))
+        if page < len(sorted_dates) - 1:
+            nav.append(InlineKeyboardButton(text="➡️", callback_data=f"chores_arch:{page+1}"))
+        if nav:
+            builder.row(*nav)
+        
+        builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="chores_back"))
+            
     await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
 
 
@@ -702,22 +1204,22 @@ async def handle_chores_archive(call: types.CallbackQuery, db_user: User = None)
 async def handle_add_tmpl_start(call: types.CallbackQuery, state: FSMContext):
     await state.set_state(AddTemplateState.waiting_for_title)
     await call.message.edit_text(
-        "✏️ *Добавление нового шаблона дела*\n\nВведите название домашнего дела (например: Помыть холодильник):",
+        "Пиши название задачи 📝:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="❌ Отмена", callback_data="add_tmpl_cancel")
         ]]),
-        parse_mode="Markdown"
+        parse_mode=None
     )
 
 
 @dp.callback_query(F.data == "add_tmpl_cancel")
 async def handle_add_tmpl_cancel(call: types.CallbackQuery, state: FSMContext, db_user: User = None):
     await state.clear()
-    await call.answer("Отменено")
-    await handle_chores_settings(call, db_user)
+    await call.answer("Отменено", show_alert=False)
+    await render_chores_settings(call.message, db_user, is_callback=True)
 
 
-@dp.message(AddTemplateState.waiting_for_title)
+@dp.message(StateFilter(AddTemplateState.waiting_for_title))
 async def handle_add_tmpl_title(message: types.Message, state: FSMContext):
     title = message.text.strip()
     if not title:
@@ -726,22 +1228,22 @@ async def handle_add_tmpl_title(message: types.Message, state: FSMContext):
     await state.update_data(title=title)
     await state.set_state(AddTemplateState.waiting_for_points)
     await message.answer(
-        f"Установлено название: *{title}*\n\nСколько баллов (🍪) давать за выполнение? (Введите число, например: 3):",
+        "Сколько печенек 🍪 за нее дадим?",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="❌ Отмена", callback_data="add_tmpl_cancel")
         ]]),
-        parse_mode="Markdown"
+        parse_mode=None
     )
 
 
-@dp.message(AddTemplateState.waiting_for_points)
+@dp.message(StateFilter(AddTemplateState.waiting_for_points))
 async def handle_add_tmpl_points(message: types.Message, state: FSMContext):
     try:
         pts = int(message.text.strip())
         if pts <= 0:
             raise ValueError()
     except ValueError:
-        await message.answer("Пожалуйста, введите целое положительное число (например: 3):")
+        await message.answer("Нужно число! Попробуйте еще раз:")
         return
     
     await state.update_data(points=pts)
@@ -749,40 +1251,40 @@ async def handle_add_tmpl_points(message: types.Message, state: FSMContext):
     
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text="Каждый день", callback_data="set_tmpl_period:daily"),
-        InlineKeyboardButton(text="Раз в неделю", callback_data="set_tmpl_period:weekly")
+        InlineKeyboardButton(text="Единоразово", callback_data="set_tmpl_period:once"),
+        InlineKeyboardButton(text="Каждые X дней", callback_data="set_tmpl_period:every_x_days")
     )
-    builder.row(
-        InlineKeyboardButton(text="2 раза в неделю", callback_data="set_tmpl_period:twice_weekly"),
-        InlineKeyboardButton(text="Раз в месяц", callback_data="set_tmpl_period:monthly")
-    )
-    builder.row(
-        InlineKeyboardButton(text="2 раза в месяц", callback_data="set_tmpl_period:twice_monthly"),
-        InlineKeyboardButton(text="Раз в квартал", callback_data="set_tmpl_period:quarterly")
-    )
-    builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data="add_tmpl_cancel"))
-    builder.adjust(2)
     
     await message.answer(
-        f"Установлено баллов: *{pts}* 🍪\n\nВыберите периодичность выполнения дела:",
-        reply_markup=builder.as_markup(),
-        parse_mode="Markdown"
+        "Отлично! Как часто это делаем? 📅",
+        reply_markup=builder.as_markup()
     )
 
 
-@dp.callback_query(AddTemplateState.waiting_for_periodicity, F.data.startswith("set_tmpl_period:"))
+@dp.callback_query(StateFilter(AddTemplateState.waiting_for_periodicity), F.data.startswith("set_tmpl_period:"))
 async def handle_add_tmpl_periodicity(call: types.CallbackQuery, state: FSMContext, db_user: User = None):
     periodicity = call.data.split(":")[1]
     data = await state.get_data()
     title = data["title"]
     pts = data["points"]
     
+    if periodicity == "every_x_days":
+        await state.set_state(AddTemplateState.waiting_for_period_days)
+        builder = InlineKeyboardBuilder()
+        builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data="add_tmpl_cancel"))
+        await call.message.edit_text(
+            "Укажите число дней, с каким интервалом повторять задачу (например, 5):",
+            reply_markup=builder.as_markup()
+        )
+        return
+        
     async with AsyncSessionLocal() as session:
         tmpl = TaskTemplate(
             house_id=ACTIVE_HOUSE_ID,
             title=title,
             points=pts,
             periodicity=periodicity,
+            period_days=1 if periodicity == "daily" else None,
             deleted=False
         )
         session.add(tmpl)
@@ -799,32 +1301,55 @@ async def handle_add_tmpl_periodicity(call: types.CallbackQuery, state: FSMConte
         await session.commit()
     
     await state.clear()
-    await call.answer("✅ Шаблон успешно добавлен!")
-    await handle_chores_settings(call, db_user)
+    await call.answer("✅ Шаблон успешно добавлен!", show_alert=False)
+    await render_chores_settings(call.message, db_user, is_callback=True)
+
+
+@dp.message(StateFilter(AddTemplateState.waiting_for_period_days))
+async def handle_add_tmpl_period_days(message: types.Message, state: FSMContext, db_user: User = None):
+    try:
+        p_days = int(message.text.strip())
+        if p_days <= 0:
+            raise ValueError()
+    except ValueError:
+        await message.answer("Пожалуйста, введите корректное число дней!")
+        return
+        
+    data = await state.get_data()
+    title = data["title"]
+    pts = data["points"]
+    
+    async with AsyncSessionLocal() as session:
+        tmpl = TaskTemplate(
+            house_id=ACTIVE_HOUSE_ID,
+            title=title,
+            points=pts,
+            periodicity="every_x_days",
+            period_days=p_days,
+            deleted=False
+        )
+        session.add(tmpl)
+        await session.flush()
+        
+        # Spawn instance for today as well
+        inst = TaskInstance(
+            template_id=tmpl.id,
+            date=datetime.now().date(),
+            status="free",
+            priority=0
+        )
+        session.add(inst)
+        await session.commit()
+        
+    await state.clear()
+    await message.answer(f"✅ Шаблон успешно добавлен: *{title}*!")
+    await render_chores_settings(message, db_user, is_callback=False)
 
 
 # ── Render Today ───────────────────────────────────────────────────────────────
 async def rollover_overdue_tasks(session: AsyncSession, user_id: int):
-    """Move overdue uncompleted tasks to today."""
-    from sqlalchemy import update, text
-    today = datetime.now().date()
-    result = await session.execute(
-        select(PersonalTask).where(
-            and_(
-                PersonalTask.user_id == user_id,
-                PersonalTask.date_execution < today,
-                PersonalTask.is_completed == False,
-                PersonalTask.is_deleted == False,
-            )
-        )
-    )
-    tasks = result.scalars().all()
-    for task in tasks:
-        clean = clean_task_text(task.text)
-        task.text = clean
-        task.date_execution = today
-    if tasks:
-        await session.commit()
+    """Move overdue uncompleted tasks to today (disabled date shifting to preserve original date)."""
+    pass
 
 
 
@@ -833,12 +1358,12 @@ async def render_today(message: types.Message, db_user: User, is_callback=False)
     async with AsyncSessionLocal() as session:
         await rollover_overdue_tasks(session, db_user.id)
 
-        # 1. Fetch personal tasks
+        # 1. Fetch personal tasks (execution date <= today)
         result = await session.execute(
             select(PersonalTask).where(
                 and_(
                     PersonalTask.user_id == db_user.id,
-                    PersonalTask.date_execution == today,
+                    PersonalTask.date_execution <= today,
                     PersonalTask.is_completed == False,
                     PersonalTask.is_deleted == False,
                 )
@@ -846,7 +1371,7 @@ async def render_today(message: types.Message, db_user: User, is_callback=False)
         )
         personal_tasks = result.scalars().all()
 
-        # 2. Fetch user's claimed chores
+        # 2. Fetch user's claimed chores (chores date <= today)
         chores_result = await session.execute(
             select(TaskInstance, TaskTemplate)
             .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
@@ -854,7 +1379,7 @@ async def render_today(message: types.Message, db_user: User, is_callback=False)
                 and_(
                     TaskInstance.done_by_user_id == db_user.id,
                     TaskInstance.status == "in_progress",
-                    TaskInstance.date == today
+                    TaskInstance.date <= today
                 )
             )
             .order_by(TaskInstance.id)
@@ -862,16 +1387,19 @@ async def render_today(message: types.Message, db_user: User, is_callback=False)
         my_chores = chores_result.all()
 
     text = "👤 *Твои дела на сегодня:*\n\n"
-    builder = InlineKeyboardBuilder()
+    keyboard = []
 
     # Personal tasks rendering
     text += "*👤 Личные задачи:*\n"
     if personal_tasks:
         for t in personal_tasks:
             clean = clean_task_text(t.text)
+            is_urgent = "🔴" in t.text
+            prefix = "🔴 " if is_urgent else "🟡 " if t.date_execution < today else ""
+            display_text = f"{prefix}{clean}"
             rec_icon = " 🔁" if t.recurrence else ""
-            text += f"• {clean}{rec_icon}\n"
-            builder.button(text=clean, callback_data=f"done_task:{t.id}")
+            text += f"• {display_text}{rec_icon}\n"
+            keyboard.append([InlineKeyboardButton(text=display_text, callback_data=f"done_task:{t.id}")])
     else:
         text += "_Нет личных задач_\n"
     text += "\n"
@@ -881,22 +1409,25 @@ async def render_today(message: types.Message, db_user: User, is_callback=False)
     if my_chores:
         for inst, tmpl in my_chores:
             pts_str = "2-8" if tmpl.title == "Готовка" else str(tmpl.points)
-            text += f"• {tmpl.title} (`+{pts_str} 🍪`)\n"
-            builder.button(
-                text=f"🏠 {tmpl.title} (+{pts_str}🍪)",
-                callback_data=f"done_chore_inst:{inst.id}"
-            )
+            prefix = "🟡 " if inst.date < today else ""
+            text += f"• {prefix}{tmpl.title} (`+{pts_str} 🍪`)\n"
+            keyboard.append([
+                InlineKeyboardButton(
+                    text=f"🏠 {prefix}{tmpl.title} (+{pts_str}🍪)",
+                    callback_data=f"done_chore_inst:{inst.id}"
+                )
+            ])
     else:
         text += "_Нет взятых домашних дел_\n"
 
-    # Adjust buttons layout (1 per row)
-    builder.adjust(1)
-    builder.row(
-        InlineKeyboardButton(text="✏️ Изменить", callback_data="my_edit_menu"),
-        InlineKeyboardButton(text="🗄️ Архив", callback_data="t_arch:0"),
-    )
+    # Add bottom toolbar as a single horizontal row
+    keyboard.append([
+        InlineKeyboardButton(text="Добавить", callback_data="my_add"),
+        InlineKeyboardButton(text="Сдвиг", callback_data="my_shift_select"),
+        InlineKeyboardButton(text="Удалить", callback_data="my_delete_select"),
+    ])
 
-    markup = builder.as_markup()
+    markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
     if is_callback:
         await message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
     else:
@@ -913,16 +1444,69 @@ async def t_cancel(call: types.CallbackQuery, db_user: User = None):
     await render_today(call.message, db_user, True)
 
 
-@dp.callback_query(F.data == "my_edit_menu")
-async def handle_my_edit_menu(call: types.CallbackQuery, db_user: User = None):
+# Personal task addition FSM callbacks
+@dp.callback_query(F.data == "my_add")
+async def handle_my_add(call: types.CallbackQuery, state: FSMContext):
+    await state.set_state(AddPersonalTaskState.waiting_for_text)
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data="my_add_cancel"))
+    await call.message.edit_text(
+        "Пиши название личной задачи 📝:",
+        reply_markup=builder.as_markup()
+    )
+
+
+@dp.callback_query(F.data == "my_add_cancel")
+async def handle_my_add_cancel(call: types.CallbackQuery, state: FSMContext, db_user: User = None):
+    await state.clear()
+    await call.answer("Отменено", show_alert=False)
+    await render_today(call.message, db_user, is_callback=True)
+
+
+@dp.message(StateFilter(AddPersonalTaskState.waiting_for_text))
+async def handle_my_add_text(message: types.Message, state: FSMContext, db_user: User = None):
+    text = message.text.strip()
+    if not text:
+        await message.answer("Название не может быть пустым. Попробуйте еще раз:")
+        return
+        
+    import re
+    is_urgent = "срочно" in text.lower()
+    clean_text = re.sub(r'срочно', '', text, flags=re.IGNORECASE).strip().capitalize()
+    
+    if is_urgent:
+        db_text = f"🔴 {clean_text}"
+    else:
+        db_text = clean_text
+        
     today = datetime.now().date()
     async with AsyncSessionLocal() as session:
-        # Fetch active personal tasks for today
+        task = PersonalTask(
+            user_id=db_user.id,
+            text=db_text,
+            date_execution=today,
+            category="inbox",
+            is_completed=False,
+            is_deleted=False
+        )
+        session.add(task)
+        await session.commit()
+        
+    await state.clear()
+    await message.answer(f"✅ Добавил личную задачу: *{clean_text}*", parse_mode="Markdown")
+    await render_today(message, db_user, is_callback=False)
+
+
+# Reschedule select menu
+@dp.callback_query(F.data == "my_shift_select")
+async def handle_my_shift_select(call: types.CallbackQuery, db_user: User = None):
+    today = datetime.now().date()
+    async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(PersonalTask).where(
                 and_(
                     PersonalTask.user_id == db_user.id,
-                    PersonalTask.date_execution == today,
+                    PersonalTask.date_execution <= today,
                     PersonalTask.is_completed == False,
                     PersonalTask.is_deleted == False,
                 )
@@ -930,7 +1514,6 @@ async def handle_my_edit_menu(call: types.CallbackQuery, db_user: User = None):
         )
         personal_tasks = result.scalars().all()
 
-        # Fetch claimed chores in progress for today
         chores_result = await session.execute(
             select(TaskInstance, TaskTemplate)
             .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
@@ -938,92 +1521,261 @@ async def handle_my_edit_menu(call: types.CallbackQuery, db_user: User = None):
                 and_(
                     TaskInstance.done_by_user_id == db_user.id,
                     TaskInstance.status == "in_progress",
-                    TaskInstance.date == today
+                    TaskInstance.date <= today
                 )
-            ).order_by(TaskInstance.id)
+            )
+            .order_by(TaskInstance.id)
         )
         my_chores = chores_result.all()
 
     if not personal_tasks and not my_chores:
-        await call.answer("⚠️ Нет активных задач для редактирования!")
+        await call.answer("Нет активных задач для переноса!", show_alert=False)
         return
 
-    text = "✏️ *Выберите задачу для редактирования:*"
     builder = InlineKeyboardBuilder()
-
     for t in personal_tasks:
         clean = clean_task_text(t.text)
-        builder.button(text=f"👤 {clean}", callback_data=f"edit_task_opts:{t.id}")
-
+        is_urgent = "🔴" in t.text or "срочно" in t.text.lower()
+        prefix = "🔴 " if is_urgent else "🟡 " if t.date_execution < today else ""
+        builder.row(InlineKeyboardButton(text=f"{prefix}{clean}", callback_data=f"shift_pt_menu:{t.id}"))
+        
     for inst, tmpl in my_chores:
-        builder.button(text=f"🏠 {tmpl.title}", callback_data=f"edit_chore_opts:{inst.id}")
+        prefix = "🟡 " if inst.date < today else ""
+        builder.row(InlineKeyboardButton(text=f"{prefix}🏠 {tmpl.title}", callback_data=f"shift_chore_menu:{inst.id}"))
 
-    builder.adjust(1)
-    builder.row(
-        InlineKeyboardButton(text="🔙 Назад", callback_data="t_cancel")
-    )
-    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="t_cancel"))
+    await call.message.edit_text("🔄 Выберите задачу для переноса:", reply_markup=builder.as_markup())
 
 
-@dp.callback_query(F.data.startswith("edit_task_opts:"))
-async def handle_edit_task_opts(call: types.CallbackQuery, db_user: User = None):
-    task_id = int(call.data.split(":")[1])
+# Reschedule choice menu (tomorrow/day after/calendar)
+@dp.callback_query(F.data.startswith("shift_pt_menu:"))
+async def handle_shift_pt_menu(call: types.CallbackQuery, db_user: User = None):
+    t_id = int(call.data.split(":")[1])
+    today = datetime.now().date()
+    d1 = today + timedelta(days=1)
+    d2 = today + timedelta(days=2)
+    days_ru = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
+    
+    keyboard = [
+        [
+            InlineKeyboardButton(text=f"{d1.strftime('%d.%m')} ({days_ru[d1.weekday()]})", callback_data=f"shift_pt:{t_id}:{d1.strftime('%Y-%m-%d')}"),
+            InlineKeyboardButton(text=f"{d2.strftime('%d.%m')} ({days_ru[d2.weekday()]})", callback_data=f"shift_pt:{t_id}:{d2.strftime('%Y-%m-%d')}"),
+            InlineKeyboardButton(text="Другая дата", callback_data=f"rc_months_pt:{t_id}")
+        ],
+        [
+            InlineKeyboardButton(text="🔙 Назад", callback_data="my_shift_select")
+        ]
+    ]
+    await call.message.edit_text("На какой день перенести задачу?", reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
+
+
+@dp.callback_query(F.data.startswith("shift_chore_menu:"))
+async def handle_shift_chore_menu(call: types.CallbackQuery, db_user: User = None):
+    inst_id = int(call.data.split(":")[1])
+    today = datetime.now().date()
+    d1 = today + timedelta(days=1)
+    d2 = today + timedelta(days=2)
+    days_ru = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
+    
+    keyboard = [
+        [
+            InlineKeyboardButton(text=f"{d1.strftime('%d.%m')} ({days_ru[d1.weekday()]})", callback_data=f"shift_chore:{inst_id}:{d1.strftime('%Y-%m-%d')}"),
+            InlineKeyboardButton(text=f"{d2.strftime('%d.%m')} ({days_ru[d2.weekday()]})", callback_data=f"shift_chore:{inst_id}:{d2.strftime('%Y-%m-%d')}"),
+            InlineKeyboardButton(text="Другая дата", callback_data=f"rc_months_chore:{inst_id}")
+        ],
+        [
+            InlineKeyboardButton(text="🔙 Назад", callback_data="my_shift_select")
+        ]
+    ]
+    await call.message.edit_text("На какой день перенести задачу?", reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
+
+
+# Calendar navigation & shift execution callbacks
+@dp.callback_query(F.data.startswith("rc_months_pt:"))
+async def handle_rc_months_pt(call: types.CallbackQuery, db_user: User = None):
+    t_id = int(call.data.split(":")[1])
+    today = datetime.now().date()
+    markup = create_calendar_keyboard_custom(t_id, today.year, today.month, today, "pt")
+    header = format_calendar_header(today)
+    await call.message.edit_text(header, reply_markup=markup, parse_mode="Markdown")
+
+
+@dp.callback_query(F.data.startswith("cal_nav_pt:"))
+async def handle_cal_nav_pt(call: types.CallbackQuery, db_user: User = None):
+    parts = call.data.split(":")
+    t_id = int(parts[1])
+    year = int(parts[2])
+    month = int(parts[3])
+    today = datetime.now().date()
+    markup = create_calendar_keyboard_custom(t_id, year, month, today, "pt")
+    header = format_calendar_header(today)
+    await call.message.edit_text(header, reply_markup=markup, parse_mode="Markdown")
+
+
+@dp.callback_query(F.data.startswith("shift_pt:"))
+async def handle_shift_pt(call: types.CallbackQuery, db_user: User = None):
+    parts = call.data.split(":")
+    t_id = int(parts[1])
+    date_str = parts[2]
+    new_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+    
     async with AsyncSessionLocal() as session:
-        task = await session.get(PersonalTask, task_id)
-        if not task:
-            await call.answer("⚠️ Задача не найдена!")
-            await handle_my_edit_menu(call, db_user)
-            return
-        clean = clean_task_text(task.text)
+        task = await session.get(PersonalTask, t_id)
+        if task:
+            task.date_execution = new_date
+            await session.commit()
+            clean_text = clean_task_text(task.text)
+            await call.answer(f"✅ Перенесено на {new_date.strftime('%d.%m')}!", show_alert=False)
+            await call.message.answer(f"🔄 Задача '{clean_text}' перенесена на {new_date.strftime('%d.%m.%Y')}!")
+        else:
+            await call.answer("⚠️ Задача не найдена!", show_alert=False)
+            
+    await render_today(call.message, db_user, is_callback=False)
 
-    text = f"⚙️ *Редактирование задачи:*\n\n*{clean}*"
+
+@dp.callback_query(F.data.startswith("rc_months_chore:"))
+async def handle_rc_months_chore(call: types.CallbackQuery, db_user: User = None):
+    inst_id = int(call.data.split(":")[1])
+    today = datetime.now().date()
+    markup = create_calendar_keyboard_custom(inst_id, today.year, today.month, today, "chore")
+    header = format_calendar_header(today)
+    await call.message.edit_text(header, reply_markup=markup, parse_mode="Markdown")
+
+
+@dp.callback_query(F.data.startswith("cal_nav_chore:"))
+async def handle_cal_nav_chore(call: types.CallbackQuery, db_user: User = None):
+    parts = call.data.split(":")
+    inst_id = int(parts[1])
+    year = int(parts[2])
+    month = int(parts[3])
+    today = datetime.now().date()
+    markup = create_calendar_keyboard_custom(inst_id, year, month, today, "chore")
+    header = format_calendar_header(today)
+    await call.message.edit_text(header, reply_markup=markup, parse_mode="Markdown")
+
+
+@dp.callback_query(F.data.startswith("shift_chore:"))
+async def handle_shift_chore(call: types.CallbackQuery, db_user: User = None):
+    parts = call.data.split(":")
+    inst_id = int(parts[1])
+    date_str = parts[2]
+    new_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+    
+    async with AsyncSessionLocal() as session:
+        inst = await session.get(TaskInstance, inst_id)
+        if inst:
+            tmpl = await session.get(TaskTemplate, inst.template_id)
+            inst.status = "shifted"
+            
+            exists = await session.scalar(
+                select(TaskInstance).where(
+                    and_(
+                        TaskInstance.template_id == inst.template_id,
+                        TaskInstance.date == new_date,
+                        TaskInstance.status.in_(["free", "shifted"])
+                    )
+                )
+            )
+            if not exists:
+                new_inst = TaskInstance(
+                    template_id=inst.template_id,
+                    date=new_date,
+                    status="free",
+                    priority=0
+                )
+                session.add(new_inst)
+                
+            await session.commit()
+            title = tmpl.title if tmpl else "Домашнее дело"
+            await call.answer(f"✅ Перенесено на {new_date.strftime('%d.%m')}!", show_alert=False)
+            await call.message.answer(f"🔄 Задача '{title}' перенесена на {new_date.strftime('%d.%m.%Y')}!")
+        else:
+            await call.answer("⚠️ Задача не найдена!", show_alert=False)
+            
+    await render_today(call.message, db_user, is_callback=False)
+
+
+# Delete select menu & callbacks
+@dp.callback_query(F.data == "my_delete_select")
+async def handle_my_delete_select(call: types.CallbackQuery, db_user: User = None):
+    today = datetime.now().date()
+    async with AsyncSessionLocal() as session:
+        personal_tasks = (await session.execute(
+            select(PersonalTask).where(
+                and_(
+                    PersonalTask.user_id == db_user.id,
+                    PersonalTask.date_execution <= today,
+                    PersonalTask.is_completed == False,
+                    PersonalTask.is_deleted == False
+                )
+            ).order_by(PersonalTask.id)
+        )).scalars().all()
+        
+        my_chores = (await session.execute(
+            select(TaskInstance, TaskTemplate)
+            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
+            .where(
+                and_(
+                    TaskInstance.done_by_user_id == db_user.id,
+                    TaskInstance.status == "in_progress",
+                    TaskInstance.date <= today
+                )
+            )
+            .order_by(TaskInstance.id)
+        )).all()
+
+    if not personal_tasks and not my_chores:
+        await call.answer("Нет активных задач для удаления!", show_alert=False)
+        return
+
     builder = InlineKeyboardBuilder()
-    builder.row(
-        InlineKeyboardButton(text="📅 Перенести", callback_data=f"mov_t:{task_id}"),
-        InlineKeyboardButton(text="🗑 Удалить", callback_data=f"del_t:{task_id}")
-    )
-    builder.row(
-        InlineKeyboardButton(text="🔙 Назад", callback_data="my_edit_menu")
-    )
-    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+    for t in personal_tasks:
+        clean = clean_task_text(t.text)
+        is_urgent = "🔴" in t.text or "срочно" in t.text.lower()
+        prefix = "🔴 " if is_urgent else "🟡 " if t.date_execution < today else ""
+        builder.row(InlineKeyboardButton(text=f"🗑 {prefix}{clean}", callback_data=f"del_pt:{t.id}"))
+        
+    for inst, tmpl in my_chores:
+        prefix = "🟡 " if inst.date < today else ""
+        builder.row(InlineKeyboardButton(text=f"🗑 {prefix}🏠 {tmpl.title}", callback_data=f"del_chore_inst:{inst.id}"))
+
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="t_cancel"))
+    await call.message.edit_text("🗑 Выберите задачу для удаления:", reply_markup=builder.as_markup())
 
 
-@dp.callback_query(F.data.startswith("edit_chore_opts:"))
-async def handle_edit_chore_opts(call: types.CallbackQuery, db_user: User = None):
+@dp.callback_query(F.data.startswith("del_pt:"))
+async def handle_del_pt(call: types.CallbackQuery, db_user: User = None):
+    t_id = int(call.data.split(":")[1])
+    async with AsyncSessionLocal() as session:
+        task = await session.get(PersonalTask, t_id)
+        if task:
+            clean_text = clean_task_text(task.text)
+            await session.delete(task)
+            await session.commit()
+            await call.answer("🗑 Удалено!", show_alert=False)
+            await call.message.answer(f"🗑 Личная задача '{clean_text}' полностью удалена!")
+        else:
+            await call.answer("⚠️ Задача не найдена!", show_alert=False)
+            
+    await render_today(call.message, db_user, is_callback=False)
+
+
+@dp.callback_query(F.data.startswith("del_chore_inst:"))
+async def handle_del_chore_inst(call: types.CallbackQuery, db_user: User = None):
     inst_id = int(call.data.split(":")[1])
     async with AsyncSessionLocal() as session:
         inst = await session.get(TaskInstance, inst_id)
-        if not inst:
-            await call.answer("⚠️ Домашнее дело не найдено!")
-            await handle_my_edit_menu(call, db_user)
-            return
-        tmpl = await session.get(TaskTemplate, inst.template_id)
-        title = tmpl.title if tmpl else "Без названия"
-
-    text = f"⚙️ *Редактирование домашнего дела:*\n\n*{title}*"
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        InlineKeyboardButton(text="🗑 Удалить копию", callback_data=f"del_inst_from_my:{inst_id}"),
-        InlineKeyboardButton(text="↩ Вернуть в пул", callback_data=f"unclaim_chore_inst:{inst_id}")
-    )
-    builder.row(
-        InlineKeyboardButton(text="🔙 Назад", callback_data="my_edit_menu")
-    )
-    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
-
-
-@dp.callback_query(F.data.startswith("del_inst_from_my:"))
-async def handle_del_inst_from_my(call: types.CallbackQuery, db_user: User = None):
-    inst_id = int(call.data.split(":")[1])
-    async with AsyncSessionLocal() as session:
-        inst = await session.get(TaskInstance, inst_id)
-        if inst and inst.done_by_user_id == db_user.id:
+        if inst:
+            tmpl = await session.get(TaskTemplate, inst.template_id)
             inst.status = "skipped"
             await session.commit()
-            await call.answer("🗑 Копия домашнего дела убрана!", show_alert=True)
+            title = tmpl.title if tmpl else "Домашнее дело"
+            await call.answer("🗑 Копия удалена!", show_alert=False)
+            await call.message.answer(f"🗑 Копия домашнего дела '{title}' удалена на сегодня!")
         else:
-            await call.answer("⚠️ Задача не найдена или не назначена на вас!")
-    await render_today(call.message, db_user, is_callback=True)
+            await call.answer("⚠️ Задача не найдена!", show_alert=False)
+            
+    await render_today(call.message, db_user, is_callback=False)
 
 
 # ── Done task ─────────────────────────────────────────────────────────────────
@@ -1074,9 +1826,9 @@ async def handle_done_chore_inst(call: types.CallbackQuery, db_user: User = None
             )
             session.add(comp)
             await session.commit()
-            await call.answer(f"✅ Выполнено! Начислено +{pts} 🍪")
+            await call.answer(f"✅ Выполнено! Начислено +{pts} 🍪", show_alert=False)
         else:
-            await call.answer("⚠️ Задача не найдена или не назначена на вас!")
+            await call.answer("⚠️ Задача не найдена или не назначена на вас!", show_alert=False)
     await render_today(call.message, db_user, is_callback=True)
 
 
@@ -1089,98 +1841,13 @@ async def handle_unclaim_chore_inst(call: types.CallbackQuery, db_user: User = N
             inst.status = "free"
             inst.done_by_user_id = None
             await session.commit()
-            await call.answer("↪ Задача возвращена в общий пул свободных дел.")
+            await call.answer("↪ Задача возвращена в общий пул свободных дел.", show_alert=False)
         else:
-            await call.answer("⚠️ Задача не найдена или не назначена на вас!")
+            await call.answer("⚠️ Задача не найдена или не назначена на вас!", show_alert=False)
     await render_today(call.message, db_user, is_callback=True)
 
 
-# ── Move / Delete tasks ───────────────────────────────────────────────────────
-@dp.callback_query(F.data == "t_menu_move")
-async def t_move_menu(call: types.CallbackQuery, db_user: User = None):
-    today = datetime.now().date()
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(PersonalTask).where(
-                and_(PersonalTask.user_id == db_user.id, PersonalTask.date_execution == today,
-                     PersonalTask.is_completed == False, PersonalTask.is_deleted == False)
-            )
-        )
-        tasks = result.scalars().all()
-    b = InlineKeyboardBuilder()
-    for t in tasks:
-        b.button(text=t.text, callback_data=f"mov_t:{t.id}")
-    b.button(text="⬅️ Назад", callback_data="t_cancel")
-    b.adjust(1)
-    await call.message.edit_text("Выбери задачу для переноса:", reply_markup=b.as_markup())
-
-
-@dp.callback_query(F.data == "t_menu_del")
-async def t_del_menu(call: types.CallbackQuery, db_user: User = None):
-    today = datetime.now().date()
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(PersonalTask).where(
-                and_(PersonalTask.user_id == db_user.id, PersonalTask.date_execution == today,
-                     PersonalTask.is_completed == False, PersonalTask.is_deleted == False)
-            )
-        )
-        tasks = result.scalars().all()
-    b = InlineKeyboardBuilder()
-    for t in tasks:
-        b.button(text=f"❌ {t.text}", callback_data=f"del_t:{t.id}")
-    b.button(text="⬅️ Назад", callback_data="t_cancel")
-    b.adjust(1)
-    await call.message.edit_text("Выбери задачу для удаления:", reply_markup=b.as_markup())
-
-
-@dp.callback_query(F.data.startswith("mov_t:"))
-async def mov_t_select(call: types.CallbackQuery):
-    t_id = int(call.data.split(":")[1])
-    today = datetime.now().date()
-    d1 = today + timedelta(days=1)
-    d2 = today + timedelta(days=2)
-    days_ru = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
-    b = InlineKeyboardBuilder()
-    b.row(
-        InlineKeyboardButton(text=f"{d1.strftime('%d.%m')} {days_ru[d1.weekday()]}", callback_data=f"set_dt:tm:{t_id}:{d1}"),
-        InlineKeyboardButton(text=f"{d2.strftime('%d.%m')} {days_ru[d2.weekday()]}", callback_data=f"set_dt:tm:{t_id}:{d2}"),
-        InlineKeyboardButton(text="⬅️ Назад", callback_data="t_cancel"),
-    )
-    await call.message.edit_text("Выбери дату для переноса:", reply_markup=b.as_markup())
-
-
-@dp.callback_query(F.data.startswith("set_dt:"))
-async def exe_set_dt(call: types.CallbackQuery, db_user: User = None):
-    parts = call.data.split(":")
-    prefix = parts[1]
-    t_id = int(parts[2])
-    new_date = datetime.strptime(parts[3], "%Y-%m-%d").date()
-    async with AsyncSessionLocal() as session:
-        task = await session.get(PersonalTask, t_id)
-        if task:
-            clean = clean_task_text(task.text)
-            task.text = clean
-            task.date_execution = new_date
-            await session.commit()
-    await call.answer(f"✅ Перенесено на {new_date.strftime('%d.%m')}")
-    if prefix == "tm":
-        await render_today(call.message, db_user, True)
-    else:
-        await render_plans(call.message, db_user, True)
-
-
-@dp.callback_query(F.data.startswith("del_t:"))
-async def exe_del_t(call: types.CallbackQuery, db_user: User = None):
-    t_id = int(call.data.split(":")[1])
-    async with AsyncSessionLocal() as session:
-        task = await session.get(PersonalTask, t_id)
-        if task:
-            clean = clean_task_text(task.text)
-            await session.delete(task)
-            await session.commit()
-    await call.answer("🗑 Удалено")
-    await render_today(call.message, db_user, True)
+# Obsolete Move/Delete handlers removed (fully replaced by my_shift_select / my_delete_select workflows)
 
 
 # ── Plans ──────────────────────────────────────────────────────────────────────
@@ -1263,19 +1930,22 @@ async def p_move_menu(call: types.CallbackQuery, db_user: User = None):
 @dp.callback_query(F.data.startswith("mov_p:"))
 async def mov_p_select(call: types.CallbackQuery):
     t_id = int(call.data.split(":")[1])
-    async with AsyncSessionLocal() as session:
-        task = await session.get(PersonalTask, t_id)
-        t_date = task.date_execution
-    d1 = t_date + timedelta(days=1)
-    d2 = t_date + timedelta(days=2)
-    days_ru = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
-    b = InlineKeyboardBuilder()
-    b.row(
-        InlineKeyboardButton(text=f"{d1.strftime('%d.%m')} {days_ru[d1.weekday()]}", callback_data=f"set_dt:pm:{t_id}:{d1}"),
-        InlineKeyboardButton(text=f"{d2.strftime('%d.%m')} {days_ru[d2.weekday()]}", callback_data=f"set_dt:pm:{t_id}:{d2}"),
-        InlineKeyboardButton(text="⬅️ Назад", callback_data="p_cancel"),
-    )
-    await call.message.edit_text("Выбери новую дату:", reply_markup=b.as_markup())
+    today = datetime.now().date()
+    d1 = today + timedelta(days=1)
+    d2 = today + timedelta(days=2)
+    days_ru = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
+    
+    keyboard = [
+        [
+            InlineKeyboardButton(text=f"{d1.strftime('%d.%m')} ({days_ru[d1.weekday()]})", callback_data=f"set_dt:pm:{t_id}:{d1.strftime('%Y-%m-%d')}"),
+            InlineKeyboardButton(text=f"{d2.strftime('%d.%m')} ({days_ru[d2.weekday()]})", callback_data=f"set_dt:pm:{t_id}:{d2.strftime('%Y-%m-%d')}"),
+            InlineKeyboardButton(text="Другая дата", callback_data=f"rc_months_plan:{t_id}")
+        ],
+        [
+            InlineKeyboardButton(text="🔙 Назад", callback_data="p_menu_move")
+        ]
+    ]
+    await call.message.edit_text("На какой день перенести задачу?", reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
 
 
 @dp.callback_query(F.data == "p_menu_del")
@@ -1304,7 +1974,7 @@ async def exe_del_p(call: types.CallbackQuery, db_user: User = None):
         if task:
             await session.delete(task)
             await session.commit()
-    await call.answer("🗑 Удалено")
+    await call.answer("🗑 Удалено", show_alert=False)
     await render_plans(call.message, db_user, True)
 
 
@@ -1321,7 +1991,7 @@ async def t_archive(call: types.CallbackQuery, db_user: User = None):
         tasks = result.scalars().all()
 
     if not tasks and page == 0:
-        await call.answer("Архив пуст!")
+        await call.answer("Архив пуст!", show_alert=False)
         return
 
     text = "📜 *Архив задач*\n👉 _Тапни, чтобы вернуть на сегодня:_\n\n"
@@ -1359,7 +2029,7 @@ async def restore_task(call: types.CallbackQuery, db_user: User = None):
             )
             session.add(new_task)
             await session.commit()
-    await call.answer("🔄 Задача восстановлена!")
+    await call.answer("🔄 Задача восстановлена!", show_alert=False)
     await render_today(call.message, db_user, True)
 
 
@@ -1462,7 +2132,7 @@ async def del_shop(call: types.CallbackQuery, db_user: User = None):
         if item:
             await session.delete(item)
             await session.commit()
-    await call.answer("🗑 Удалено")
+    await call.answer("🗑 Удалено", show_alert=False)
     await render_shop(call.message, db_user, True)
 
 
@@ -1518,7 +2188,7 @@ async def s_archive(call: types.CallbackQuery):
         items = result.scalars().all()
 
     if not items and page == 0:
-        await call.answer("Архив покупок пуст!")
+        await call.answer("Архив покупок пуст!", show_alert=False)
         return
 
     text = "📜 *Архив покупок*\n👉 _Тапни, чтобы вернуть в список:_\n\n"
@@ -1556,16 +2226,13 @@ async def restore_shop(call: types.CallbackQuery, db_user: User = None):
             )
             session.add(new_item)
             await session.commit()
-    await call.answer("🔄 Возвращено в список!")
+    await call.answer("🔄 Возвращено в список!", show_alert=False)
     await render_shop(call.message, db_user, True)
 
 
 # ── Shop and Purchases (Магазин и Покупки) ────────────────────────────────────
 async def render_shop_and_purchases(message: types.Message, db_user: User, is_callback=False):
     async with AsyncSessionLocal() as session:
-        user = await session.get(User, db_user.id)
-        points = user.points or 0
-
         leaderboard_result = await session.execute(
             select(User)
             .where(User.house_id == ACTIVE_HOUSE_ID)
@@ -1573,51 +2240,32 @@ async def render_shop_and_purchases(message: types.Message, db_user: User, is_ca
         )
         leaderboard = leaderboard_result.scalars().all()
 
-        shopping_result = await session.execute(
-            select(ShoppingItem)
-            .where(
-                and_(
-                    ShoppingItem.house_id == ACTIVE_HOUSE_ID,
-                    ShoppingItem.is_bought == False,
-                    ShoppingItem.is_deleted == False
-                )
-            )
-            .order_by(ShoppingItem.priority.desc(), ShoppingItem.id.asc())
+        week_ago = datetime.utcnow() - timedelta(days=7)
+        weekly_comps_result = await session.execute(
+            select(Completion).where(Completion.created_at >= week_ago)
         )
-        shopping_items = shopping_result.scalars().all()
+        weekly_comps = weekly_comps_result.scalars().all()
+        weekly_map = {}
+        for c in weekly_comps:
+            weekly_map[c.user_id] = weekly_map.get(c.user_id, 0) + (c.points or 0)
 
-    text = "🛍 *Магазин и Покупки*\n\n"
-    text += f"✨ *Твой баланс:* `{points} 🍪`\n\n"
-
-    text += "🏆 *Рейтинг участников:*\n"
-    medals = ["🥇", "🥈", "🥉"]
-    for idx, usr in enumerate(leaderboard):
-        medal = medals[idx] if idx < len(medals) else "👤"
-        text += f"{medal} {usr.display_name} — `{usr.points or 0} 🍪`\n"
-    text += "\n"
-
-    text += "🛒 *Список покупок:*\n"
-    if shopping_items:
-        for item in shopping_items[:5]:
-            prefix = "🔴 " if item.priority == "high" else ""
-            price_str = f" ({item.price}₽)" if item.price > 0 else ""
-            text += f"• {prefix}{item.item_name}{price_str}\n"
-        if len(shopping_items) > 5:
-            text += f"_...и еще {len(shopping_items) - 5} товаров_\n"
-    else:
-        text += "_Список покупок пуст_\n"
+    text = "🏆 Баланс героев:\n"
+    for usr in leaderboard:
+        weekly = weekly_map.get(usr.id, 0)
+        text += f"🦸\u200d♂️ {usr.display_name}: {usr.points or 0} 🍪 (За неделю: +{weekly} 🍪)\n"
 
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text="🛒 Перейти в покупки", callback_data="shop_view_items"),
-        InlineKeyboardButton(text="🎁 Магазин наград", callback_data="rewards_shop_view")
+        InlineKeyboardButton(text="Магазин", callback_data="rewards_shop_view"),
+        InlineKeyboardButton(text="Покупки", callback_data="shop_view_items"),
+        InlineKeyboardButton(text="Архив", callback_data="s_arch:0"),
     )
 
     markup = builder.as_markup()
     if is_callback:
-        await message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+        await message.edit_text(text, reply_markup=markup)
     else:
-        await message.answer(text, reply_markup=markup, parse_mode="Markdown")
+        await message.answer(text, reply_markup=markup)
 
 
 @dp.message(F.text.in_({"📊 Stat", "🛍 Магазин и Покупки"}))
@@ -1672,7 +2320,6 @@ async def handle_rewards_shop_view(call: types.CallbackQuery, db_user: User = No
         rewards = result.scalars().all()
 
     text = "🎁 *Магазин наград*\n\n"
-    text += f"✨ *Твой баланс:* `{points} 🍪`\n"
     text += "Выбери награду для покупки:\n\n"
 
     builder = InlineKeyboardBuilder()
@@ -1704,12 +2351,12 @@ async def handle_buy_reward(call: types.CallbackQuery, db_user: User = None):
     async with AsyncSessionLocal() as session:
         reward = await session.get(Reward, reward_id)
         if not reward:
-            await call.answer("⚠️ Награда не найдена!")
+            await call.answer("⚠️ Награда не найдена!", show_alert=False)
             return
         
         user = await session.get(User, db_user.id)
         if (user.points or 0) < reward.price:
-            await call.answer("⚠️ Недостаточно баллов для покупки!")
+            await call.answer("⚠️ Недостаточно баллов для покупки!", show_alert=False)
             return
         
         user.points -= reward.price
@@ -1721,7 +2368,7 @@ async def handle_buy_reward(call: types.CallbackQuery, db_user: User = None):
         )
         session.add(purchase)
         await session.commit()
-        await call.answer(f"🎉 Куплено: {reward.title}! Списано {reward.price} 🍪")
+        await call.answer(f"🎉 Куплено: {reward.title}! Списано {reward.price} 🍪", show_alert=False)
         
     await handle_rewards_shop_view(call, db_user)
 
@@ -1739,9 +2386,9 @@ async def handle_del_reward(call: types.CallbackQuery, db_user: User = None):
         if reward:
             await session.delete(reward)
             await session.commit()
-            await call.answer("🗑 Награда удалена!")
+            await call.answer("🗑 Награда удалена!", show_alert=False)
         else:
-            await call.answer("⚠️ Награда не найдена!")
+            await call.answer("⚠️ Награда не найдена!", show_alert=False)
     await render_rewards_settings(call.message, db_user, is_callback=True)
 
 
@@ -1795,11 +2442,11 @@ async def handle_add_reward_start(call: types.CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "add_reward_cancel")
 async def handle_add_reward_cancel(call: types.CallbackQuery, state: FSMContext, db_user: User = None):
     await state.clear()
-    await call.answer("Отменено")
+    await call.answer("Отменено", show_alert=False)
     await render_rewards_settings(call.message, db_user, is_callback=True)
 
 
-@dp.message(AddRewardState.waiting_for_title)
+@dp.message(StateFilter(AddRewardState.waiting_for_title))
 async def handle_add_reward_title(message: types.Message, state: FSMContext):
     title = message.text.strip()
     if not title:
@@ -1816,7 +2463,7 @@ async def handle_add_reward_title(message: types.Message, state: FSMContext):
     )
 
 
-@dp.message(AddRewardState.waiting_for_price)
+@dp.message(StateFilter(AddRewardState.waiting_for_price))
 async def handle_add_reward_price(message: types.Message, state: FSMContext, db_user: User = None):
     try:
         price = int(message.text.strip())
@@ -1864,22 +2511,8 @@ async def handle_any_text(message: types.Message, db_user: User = None, text_ove
             await session.commit()
             await message.answer(f"🛒 Записал в покупки: *{clean_text}*", parse_mode="Markdown")
         else:
-            task = PersonalTask(
-                user_id=db_user.id,
-                text=clean_text,
-                date_execution=date_exec,
-                category="inbox",
-                recurrence=recurrence,
-                is_completed=False,
-                is_deleted=False,
-            )
-            session.add(task)
-            await session.commit()
-            today = datetime.now().date()
-            date_str = "Сегодня" if date_exec == today else date_exec.strftime('%d.%m')
-            rec_text = " 🔁 (Повторяющаяся)" if recurrence else ""
             await message.answer(
-                f"✅ Добавил: *{clean_text}*\n🗓 {date_str}{rec_text}",
+                "⚠️ Личные задачи можно добавить только по кнопке в разделе 📋 My.\nЧтобы записать покупку, введи: купить [что-то] [очки]",
                 parse_mode="Markdown"
             )
 
@@ -1920,4 +2553,98 @@ async def handle_voice(message: types.Message, db_user: User = None):
 
 @dp.callback_query(F.data == "ignore")
 async def noop(call: types.CallbackQuery):
-    await call.answer()
+    await call.answer(show_alert=False)
+
+
+@dp.callback_query(F.data == "noop")
+async def handle_noop(call: types.CallbackQuery):
+    await call.answer(show_alert=False)
+
+
+@dp.callback_query(F.data == "settings_del_menu")
+async def handle_settings_del_menu(call: types.CallbackQuery, db_user: User = None):
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(TaskTemplate).where(
+                and_(
+                    TaskTemplate.house_id == ACTIVE_HOUSE_ID,
+                    TaskTemplate.deleted == False
+                )
+            ).order_by(TaskTemplate.id)
+        )
+        templates = result.scalars().all()
+
+    builder = InlineKeyboardBuilder()
+    for t in templates:
+        builder.row(InlineKeyboardButton(text=f"🗑 {t.title}", callback_data=f"te_del:{t.id}:settings"))
+    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="chores_settings"))
+    await call.message.edit_text("Выберите задачу для удаления:", reply_markup=builder.as_markup())
+
+
+# Plan custom calendar navigation & shift execution callbacks
+@dp.callback_query(F.data.startswith("rc_months_plan:"))
+async def handle_rc_months_plan(call: types.CallbackQuery, db_user: User = None):
+    t_id = int(call.data.split(":")[1])
+    today = datetime.now().date()
+    markup = create_calendar_keyboard_custom(t_id, today.year, today.month, today, "plan")
+    header = format_calendar_header(today)
+    await call.message.edit_text(header, reply_markup=markup, parse_mode="Markdown")
+
+
+@dp.callback_query(F.data.startswith("cal_nav_plan:"))
+async def handle_cal_nav_plan(call: types.CallbackQuery, db_user: User = None):
+    parts = call.data.split(":")
+    t_id = int(parts[1])
+    year = int(parts[2])
+    month = int(parts[3])
+    today = datetime.now().date()
+    markup = create_calendar_keyboard_custom(t_id, year, month, today, "plan")
+    header = format_calendar_header(today)
+    await call.message.edit_text(header, reply_markup=markup, parse_mode="Markdown")
+
+
+@dp.callback_query(F.data.startswith("shift_plan:"))
+async def handle_shift_plan(call: types.CallbackQuery, db_user: User = None):
+    parts = call.data.split(":")
+    t_id = int(parts[1])
+    date_str = parts[2]
+    new_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+    
+    async with AsyncSessionLocal() as session:
+        task = await session.get(PersonalTask, t_id)
+        if task:
+            clean_text = clean_task_text(task.text)
+            task.date_execution = new_date
+            await session.commit()
+            await call.answer(f"✅ Перенесено на {new_date.strftime('%d.%m')}!", show_alert=False)
+            await call.message.answer(f"🔄 Задача '{clean_text}' перенесена на {new_date.strftime('%d.%m.%Y')}!")
+            
+    await render_plans(call.message, db_user, is_callback=True)
+
+
+@dp.callback_query(F.data.startswith("shift_plan_menu:"))
+async def handle_shift_plan_menu(call: types.CallbackQuery, db_user: User = None):
+    t_id = int(call.data.split(":")[1])
+    call.data = f"mov_p:{t_id}"
+    await mov_p_select(call)
+
+
+@dp.callback_query(F.data.startswith("set_dt:"))
+async def exe_set_dt(call: types.CallbackQuery, db_user: User = None):
+    parts = call.data.split(":")
+    prefix = parts[1]
+    t_id = int(parts[2])
+    date_str = parts[3]
+    new_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+    async with AsyncSessionLocal() as session:
+        task = await session.get(PersonalTask, t_id)
+        if task:
+            clean = clean_task_text(task.text)
+            task.date_execution = new_date
+            await session.commit()
+            await call.answer(f"✅ Перенесено на {new_date.strftime('%d.%m')}!", show_alert=False)
+            await call.message.answer(f"🔄 Задача '{clean}' перенесена на {new_date.strftime('%d.%m.%Y')}!")
+    if prefix == "tm":
+        await render_today(call.message, db_user, True)
+    else:
+        await render_plans(call.message, db_user, True)
