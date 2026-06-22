@@ -19,7 +19,7 @@ DAYS_OF_WEEK_RU = {
     "воскресенье": 6, "воскресеньям": 6,
 }
 
-STATUS_ICONS = ['🟢', '🟡', '🔴', '❗️', '⚡', '⬜', '💧', '🤸‍♂️', '🚶‍♂️', '🐈', '📚']
+STATUS_ICONS = ['🟢', '🟡', '🔴', '❗️', '⚡', '⬜', '💧', '🤸‍♂️', '🚶‍♂️', '🐈', '📚', '✅']
 
 
 def parse_input(text: str):
@@ -114,7 +114,7 @@ def parse_input(text: str):
         text = re.sub(r'срочно', '', text, flags=re.IGNORECASE).strip().capitalize()
         text = f"🔴 {text}"
     else:
-        text = f"🟢 {text}"
+        text = text
 
     return "task", text, target_date, 0, "normal", recurrence
 

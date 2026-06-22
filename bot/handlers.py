@@ -243,7 +243,7 @@ async def render_household_chores(message: types.Message, db_user: User, is_call
             "🌅 *Доброе утро! Твои задачи на сегодня:*\n\n"
             "🎯 *План на сегодня*\n"
             f"(_Можно залутать {total_cookies} 🍪_)\n\n"
-            "Нажми на название задачи, чтобы закрыть её 👇"
+            "👉 Чтобы взять задачу в работу, нажми на её название 👇"
         )
     else:
         text = (
@@ -257,16 +257,17 @@ async def render_household_chores(message: types.Message, db_user: User, is_call
 
     if chores:
         for inst, tmpl in chores:
+            # We hardcode Points to display 2-8🍪 for 'Готовка' to match the old bot
+            pts_str = "2-8🍪 ℹ️" if tmpl.title == "Готовка" else f"{tmpl.points}🍪 ℹ️"
             builder.row(
                 InlineKeyboardButton(text=tmpl.title, callback_data=f"claim_chore:{inst.id}"),
-                InlineKeyboardButton(text=f"{tmpl.points}🍪 ℹ️", callback_data=f"chore_info:{inst.id}")
+                InlineKeyboardButton(text=pts_str, callback_data=f"tmpl_set:{tmpl.id}:today")
             )
 
     builder.row(
         InlineKeyboardButton(text="➕", callback_data="chores_add_menu"),
         InlineKeyboardButton(text="⚙️", callback_data="chores_settings"),
-        InlineKeyboardButton(text="📁", callback_data="chores_arch:0"),
-        InlineKeyboardButton(text="🏆", callback_data="chores_leaderboard")
+        InlineKeyboardButton(text="📁", callback_data="chores_arch:0")
     )
 
     markup = builder.as_markup()
@@ -351,23 +352,213 @@ async def handle_spawn_chore(call: types.CallbackQuery, db_user: User = None):
     await render_household_chores(call.message, db_user, is_callback=True)
 
 
-@dp.callback_query(F.data.startswith("chore_info:"))
-async def handle_chore_info(call: types.CallbackQuery, db_user: User = None):
+NUDGE_PHRASES = [
+    "Домовой жалуется на беспорядок! Тут плачет без внимания: <b>{task_title}</b> 🥺",
+    "Печеньки 🍪 сами себя не заработают! Тебя ждет отличный контракт: <b>{task_title}</b>",
+    "Кажется, кто-то очень хочет, чтобы эта задача решилась. Герой, твой выход: <b>{task_title}</b> 🦸‍♂️",
+    "Министерство уюта напоминает! Открыта горячая вакансия на дело: <b>{task_title}</b> 🔥",
+    "Освободилось немного времени? Идеальный момент, чтобы закрыть: <b>{task_title}</b> ✨"
+]
+nudge_cache = {}
+
+@dp.callback_query(F.data.startswith("tmpl_set:") & F.data.endswith(":today"))
+async def handle_tmpl_set_today(call: types.CallbackQuery, db_user: User = None):
+    parts = call.data.split(":")
+    tmpl_id = int(parts[1])
+    today = datetime.now().date()
+    
+    async with AsyncSessionLocal() as session:
+        tmpl = await session.get(TaskTemplate, tmpl_id)
+        if not tmpl:
+            await call.answer("Шаблон не найден", show_alert=True)
+            return
+        
+        result = await session.execute(
+            select(TaskInstance).where(
+                and_(
+                    TaskInstance.template_id == tmpl.id,
+                    TaskInstance.date == today,
+                    TaskInstance.status == "free"
+                )
+            )
+        )
+        inst = result.scalars().first()
+        if not inst:
+            result = await session.execute(
+                select(TaskInstance).where(
+                    and_(
+                        TaskInstance.template_id == tmpl.id,
+                        TaskInstance.status.in_(["free", "shifted", "in_progress"])
+                    )
+                ).order_by(TaskInstance.id.desc())
+            )
+            inst = result.scalars().first()
+            
+        if not inst:
+            await call.answer("Копия задачи на сегодня не найдена", show_alert=True)
+            return
+
+        last_comp = await session.execute(
+            select(Completion.created_at)
+            .join(TaskInstance, Completion.task_instance_id == TaskInstance.id)
+            .where(TaskInstance.template_id == tmpl.id)
+            .order_by(Completion.created_at.desc())
+            .limit(1)
+        )
+        last_done_dt = last_comp.scalar()
+        last_done_str = last_done_dt.strftime("%d.%m.%Y") if last_done_dt else "никогда"
+        next_done_str = today.strftime("%d.%m.%Y")
+
+    period_lbl = period_label_ru(tmpl.periodicity)
+    pts_str = "2-8" if tmpl.title == "Готовка" else str(tmpl.points)
+
+    text = (
+        f"ℹ️ *Информация:*\n\n"
+        f"📋 *{tmpl.title}*\n"
+        f"Награда: {pts_str}🍪 | {period_lbl}\n"
+        f"📅 Последнее выполнение: *{last_done_str}*\n"
+        f"🔮 Следующее выполнение: *{next_done_str}*"
+    )
+
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="🔔 Намек", callback_data=f"nudge:{inst.id}"),
+        InlineKeyboardButton(text="📅 Сдвиг", callback_data=f"resched_menu:{inst.id}"),
+        InlineKeyboardButton(text="🗑 Копию", callback_data=f"del_inst:{inst.id}")
+    )
+    builder.row(
+        InlineKeyboardButton(text="⚙️ Настройки", callback_data=f"tmpl_set:{tmpl.id}:today_list"),
+        InlineKeyboardButton(text="🔙 Назад", callback_data="chores_back")
+    )
+    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+
+
+@dp.callback_query(F.data.startswith("nudge:"))
+async def handle_nudge(call: types.CallbackQuery, db_user: User = None):
+    inst_id = int(call.data.split(":")[1])
+    today = datetime.now().date()
+    
+    if nudge_cache.get(inst_id) == today:
+        await call.answer("Тише-тише, намек уже отправлен. Ждем реакции! 🤫", show_alert=True)
+        return
+        
+    async with AsyncSessionLocal() as session:
+        inst = await session.get(TaskInstance, inst_id)
+        if not inst:
+            await call.answer("Задача не найдена")
+            return
+            
+        tmpl = await session.get(TaskTemplate, inst.template_id)
+        import random
+        phrase = random.choice(NUDGE_PHRASES).format(task_title=tmpl.title)
+        nudge_cache[inst_id] = today
+        
+        result = await session.execute(
+            select(User).where(
+                and_(
+                    User.house_id == db_user.house_id,
+                    User.id != db_user.id
+                )
+            )
+        )
+        others = result.scalars().all()
+        
+        for other in others:
+            try:
+                await bot.send_message(
+                    chat_id=other.telegram_id,
+                    text=f"🔔 *Намек от {db_user.display_name}*\n\n{phrase}",
+                    parse_mode="HTML"
+                )
+            except Exception as e:
+                logger.error(f"Failed to send nudge to {other.telegram_id}: {e}")
+                
+    await call.answer("Намек успешно отправлен! 🔔", show_alert=True)
+    await render_household_chores(call.message, db_user, is_callback=True)
+
+
+@dp.callback_query(F.data.startswith("resched_menu:"))
+async def handle_resched_menu(call: types.CallbackQuery, db_user: User = None):
+    inst_id = int(call.data.split(":")[1])
+    today = datetime.now().date()
+    d1 = today + timedelta(days=1)
+    d2 = today + timedelta(days=2)
+    days_ru = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
+    
+    async with AsyncSessionLocal() as session:
+        inst = await session.get(TaskInstance, inst_id)
+        tmpl_id = inst.template_id if inst else 0
+        
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(
+            text=f"{d1.strftime('%d.%m')} ({days_ru[d1.weekday()]})",
+            callback_data=f"shift:once:{inst_id}:{d1.strftime('%Y-%m-%d')}"
+        ),
+        InlineKeyboardButton(
+            text=f"{d2.strftime('%d.%m')} ({days_ru[d2.weekday()]})",
+            callback_data=f"shift:once:{inst_id}:{d2.strftime('%Y-%m-%d')}"
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(text="🔙 Назад", callback_data=f"tmpl_set:{tmpl_id}:today")
+    )
+    await call.message.edit_text("На какой день перенести задачу?", reply_markup=builder.as_markup())
+
+
+@dp.callback_query(F.data.startswith("shift:once:"))
+async def handle_shift_once(call: types.CallbackQuery, db_user: User = None):
+    parts = call.data.split(":")
+    inst_id = int(parts[2])
+    date_str = parts[3]
+    new_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+    
+    async with AsyncSessionLocal() as session:
+        inst = await session.get(TaskInstance, inst_id)
+        if not inst:
+            await call.answer("Ошибка: задача не найдена.", show_alert=True)
+            return
+            
+        tmpl = await session.get(TaskTemplate, inst.template_id)
+        inst.status = "shifted"
+        
+        exists = await session.scalar(
+            select(TaskInstance).where(
+                and_(
+                    TaskInstance.template_id == inst.template_id,
+                    TaskInstance.date == new_date,
+                    TaskInstance.status.in_(["free", "shifted"])
+                )
+            )
+        )
+        if not exists:
+            new_inst = TaskInstance(
+                template_id=inst.template_id,
+                date=new_date,
+                status="free",
+                priority=0
+            )
+            session.add(new_inst)
+            
+        await session.commit()
+        await call.answer(f"✅ Перенесено на {new_date.strftime('%d.%m')}!", show_alert=True)
+        
+    await render_household_chores(call.message, db_user, is_callback=True)
+
+
+@dp.callback_query(F.data.startswith("del_inst:"))
+async def handle_del_inst(call: types.CallbackQuery, db_user: User = None):
     inst_id = int(call.data.split(":")[1])
     async with AsyncSessionLocal() as session:
         inst = await session.get(TaskInstance, inst_id)
         if inst:
-            tmpl = await session.get(TaskTemplate, inst.template_id)
-            if tmpl:
-                period_lbl = period_label_ru(tmpl.periodicity)
-                await call.answer(
-                    f"📋 {tmpl.title}\n"
-                    f"💰 Награда: {tmpl.points} 🍪\n"
-                    f"🔄 Периодичность: {period_lbl}",
-                    show_alert=True
-                )
-                return
-    await call.answer("Информация недоступна")
+            inst.status = "skipped"
+            await session.commit()
+            await call.answer("🗑 Копия задачи убрана на сегодня!", show_alert=True)
+        else:
+            await call.answer("⚠️ Задача не найдена!")
+            
+    await render_household_chores(call.message, db_user, is_callback=True)
 
 
 @dp.callback_query(F.data == "chores_leaderboard")
@@ -598,7 +789,7 @@ async def handle_add_tmpl_periodicity(call: types.CallbackQuery, state: FSMConte
 
 # ── Render Today ───────────────────────────────────────────────────────────────
 async def rollover_overdue_tasks(session: AsyncSession, user_id: int):
-    """Move overdue uncompleted tasks to today with yellow marker."""
+    """Move overdue uncompleted tasks to today."""
     from sqlalchemy import update, text
     today = datetime.now().date()
     result = await session.execute(
@@ -614,51 +805,20 @@ async def rollover_overdue_tasks(session: AsyncSession, user_id: int):
     tasks = result.scalars().all()
     for task in tasks:
         clean = clean_task_text(task.text)
-        task.text = f"🟡 {clean}"
+        task.text = clean
         task.date_execution = today
     if tasks:
         await session.commit()
 
 
 async def ensure_daily_routines(session: AsyncSession, user_id: int):
-    """Add daily routines if not present for today."""
-    today = datetime.now().date()
-    routines = [
-        "💧 Выпить 1 стакан теплой воды натощак",
-        "🤸‍♂️ 5 минут зарядки",
-        "🚶‍♂️ 30 минут прогулки",
-        "🐈 Поиграть с Бусей",
-        "📚 Изучение слов",
-    ]
-    for r in routines:
-        exists = await session.scalar(
-            select(PersonalTask).where(
-                and_(
-                    PersonalTask.user_id == user_id,
-                    PersonalTask.date_execution == today,
-                    PersonalTask.text.like(f"%{r}%"),
-                    PersonalTask.is_deleted == False,
-                )
-            )
-        )
-        if not exists:
-            task = PersonalTask(
-                user_id=user_id,
-                text=f"🟢 {r}",
-                date_execution=today,
-                category="routine",
-                is_completed=False,
-                is_deleted=False,
-            )
-            session.add(task)
-    await session.commit()
+    pass
 
 
 async def render_today(message: types.Message, db_user: User, is_callback=False):
     today = datetime.now().date()
     async with AsyncSessionLocal() as session:
         await rollover_overdue_tasks(session, db_user.id)
-        await ensure_daily_routines(session, db_user.id)
 
         # 1. Fetch personal tasks
         result = await session.execute(
@@ -695,9 +855,10 @@ async def render_today(message: types.Message, db_user: User, is_callback=False)
     text += "*👤 Личные задачи:*\n"
     if personal_tasks:
         for t in personal_tasks:
+            clean = clean_task_text(t.text)
             rec_icon = " 🔁" if t.recurrence else ""
-            text += f"• {t.text}{rec_icon}\n"
-            builder.button(text=f"✅ {t.text}", callback_data=f"done_task:{t.id}")
+            text += f"• {clean}{rec_icon}\n"
+            builder.button(text=clean, callback_data=f"done_task:{t.id}")
     else:
         text += "_Нет личных задач_\n"
     text += "\n"
@@ -706,14 +867,11 @@ async def render_today(message: types.Message, db_user: User, is_callback=False)
     text += "*🏠 В работе из домашних:*\n"
     if my_chores:
         for inst, tmpl in my_chores:
-            text += f"• {tmpl.title} (`+{tmpl.points} 🍪`)\n"
+            pts_str = "2-8" if tmpl.title == "Готовка" else str(tmpl.points)
+            text += f"• {tmpl.title} (`+{pts_str} 🍪`)\n"
             builder.button(
-                text=f"🏠 Выполнить: {tmpl.title} (+{tmpl.points}🍪)",
+                text=f"🏠 {tmpl.title} (+{pts_str}🍪)",
                 callback_data=f"done_chore_inst:{inst.id}"
-            )
-            builder.button(
-                text=f"↪ Отказаться: {tmpl.title}",
-                callback_data=f"unclaim_chore_inst:{inst.id}"
             )
     else:
         text += "_Нет взятых домашних дел_\n"
@@ -721,9 +879,8 @@ async def render_today(message: types.Message, db_user: User, is_callback=False)
     # Adjust buttons layout (1 per row)
     builder.adjust(1)
     builder.row(
-        InlineKeyboardButton(text="➡️ Перенос", callback_data="t_menu_move"),
-        InlineKeyboardButton(text="❌ Удалить", callback_data="t_menu_del"),
-        InlineKeyboardButton(text="📜 Архив", callback_data="t_arch:0"),
+        InlineKeyboardButton(text="✏️ Изменить", callback_data="my_edit_menu"),
+        InlineKeyboardButton(text="🗄️ Архив", callback_data="t_arch:0"),
     )
 
     markup = builder.as_markup()
@@ -743,6 +900,119 @@ async def t_cancel(call: types.CallbackQuery, db_user: User = None):
     await render_today(call.message, db_user, True)
 
 
+@dp.callback_query(F.data == "my_edit_menu")
+async def handle_my_edit_menu(call: types.CallbackQuery, db_user: User = None):
+    today = datetime.now().date()
+    async with AsyncSessionLocal() as session:
+        # Fetch active personal tasks for today
+        result = await session.execute(
+            select(PersonalTask).where(
+                and_(
+                    PersonalTask.user_id == db_user.id,
+                    PersonalTask.date_execution == today,
+                    PersonalTask.is_completed == False,
+                    PersonalTask.is_deleted == False,
+                )
+            ).order_by(PersonalTask.id)
+        )
+        personal_tasks = result.scalars().all()
+
+        # Fetch claimed chores in progress for today
+        chores_result = await session.execute(
+            select(TaskInstance, TaskTemplate)
+            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
+            .where(
+                and_(
+                    TaskInstance.done_by_user_id == db_user.id,
+                    TaskInstance.status == "in_progress",
+                    TaskInstance.date == today
+                )
+            ).order_by(TaskInstance.id)
+        )
+        my_chores = chores_result.all()
+
+    if not personal_tasks and not my_chores:
+        await call.answer("⚠️ Нет активных задач для редактирования!")
+        return
+
+    text = "✏️ *Выберите задачу для редактирования:*"
+    builder = InlineKeyboardBuilder()
+
+    for t in personal_tasks:
+        clean = clean_task_text(t.text)
+        builder.button(text=f"👤 {clean}", callback_data=f"edit_task_opts:{t.id}")
+
+    for inst, tmpl in my_chores:
+        builder.button(text=f"🏠 {tmpl.title}", callback_data=f"edit_chore_opts:{inst.id}")
+
+    builder.adjust(1)
+    builder.row(
+        InlineKeyboardButton(text="🔙 Назад", callback_data="t_cancel")
+    )
+    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+
+
+@dp.callback_query(F.data.startswith("edit_task_opts:"))
+async def handle_edit_task_opts(call: types.CallbackQuery, db_user: User = None):
+    task_id = int(call.data.split(":")[1])
+    async with AsyncSessionLocal() as session:
+        task = await session.get(PersonalTask, task_id)
+        if not task:
+            await call.answer("⚠️ Задача не найдена!")
+            await handle_my_edit_menu(call, db_user)
+            return
+        clean = clean_task_text(task.text)
+
+    text = f"⚙️ *Редактирование задачи:*\n\n*{clean}*"
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="📅 Перенести", callback_data=f"mov_t:{task_id}"),
+        InlineKeyboardButton(text="🗑 Удалить", callback_data=f"del_t:{task_id}")
+    )
+    builder.row(
+        InlineKeyboardButton(text="🔙 Назад", callback_data="my_edit_menu")
+    )
+    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+
+
+@dp.callback_query(F.data.startswith("edit_chore_opts:"))
+async def handle_edit_chore_opts(call: types.CallbackQuery, db_user: User = None):
+    inst_id = int(call.data.split(":")[1])
+    async with AsyncSessionLocal() as session:
+        inst = await session.get(TaskInstance, inst_id)
+        if not inst:
+            await call.answer("⚠️ Домашнее дело не найдено!")
+            await handle_my_edit_menu(call, db_user)
+            return
+        tmpl = await session.get(TaskTemplate, inst.template_id)
+        title = tmpl.title if tmpl else "Без названия"
+
+    text = f"⚙️ *Редактирование домашнего дела:*\n\n*{title}*"
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="🗑 Удалить копию", callback_data=f"del_inst_from_my:{inst_id}"),
+        InlineKeyboardButton(text="↩ Вернуть в пул", callback_data=f"unclaim_chore_inst:{inst_id}")
+    )
+    builder.row(
+        InlineKeyboardButton(text="🔙 Назад", callback_data="my_edit_menu")
+    )
+    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+
+
+@dp.callback_query(F.data.startswith("del_inst_from_my:"))
+async def handle_del_inst_from_my(call: types.CallbackQuery, db_user: User = None):
+    inst_id = int(call.data.split(":")[1])
+    async with AsyncSessionLocal() as session:
+        inst = await session.get(TaskInstance, inst_id)
+        if inst and inst.done_by_user_id == db_user.id:
+            inst.status = "skipped"
+            await session.commit()
+            await call.answer("🗑 Копия домашнего дела убрана!", show_alert=True)
+        else:
+            await call.answer("⚠️ Задача не найдена или не назначена на вас!")
+    await render_today(call.message, db_user, is_callback=True)
+
+
 # ── Done task ─────────────────────────────────────────────────────────────────
 @dp.callback_query(F.data.startswith("done_task:"))
 async def handle_done_task(call: types.CallbackQuery, db_user: User = None):
@@ -756,7 +1026,7 @@ async def handle_done_task(call: types.CallbackQuery, db_user: User = None):
                 clean = clean_task_text(task.text)
                 new_task = PersonalTask(
                     user_id=task.user_id,
-                    text=f"🟢 {clean}",
+                    text=clean,
                     date_execution=datetime.now().date() + delta,
                     category="inbox",
                     recurrence=task.recurrence,
@@ -877,7 +1147,7 @@ async def exe_set_dt(call: types.CallbackQuery, db_user: User = None):
         task = await session.get(PersonalTask, t_id)
         if task:
             clean = clean_task_text(task.text)
-            task.text = f"🟢 {clean}"
+            task.text = clean
             task.date_execution = new_date
             await session.commit()
     await call.answer(f"✅ Перенесено на {new_date.strftime('%d.%m')}")
@@ -1046,7 +1316,7 @@ async def t_archive(call: types.CallbackQuery, db_user: User = None):
     for t in tasks:
         clean = clean_task_text(t.text)
         ds = t.date_execution.strftime('%d.%m')
-        b.button(text=f"✅ [{ds}] {clean}", callback_data=f"restore_t:{t.id}")
+        b.button(text=f"[{ds}] {clean}", callback_data=f"restore_t:{t.id}")
     b.adjust(1)
     nav = []
     if page > 0:
@@ -1068,7 +1338,7 @@ async def restore_task(call: types.CallbackQuery, db_user: User = None):
             clean = clean_task_text(old.text)
             new_task = PersonalTask(
                 user_id=db_user.id,
-                text=f"🟢 {clean}",
+                text=clean,
                 date_execution=datetime.now().date(),
                 category="inbox",
                 is_completed=False,
