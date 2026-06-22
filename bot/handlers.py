@@ -253,7 +253,7 @@ async def render_household_chores(message: types.Message, db_user: User, is_call
 
     text = (
         "🌅 Привет!\n"
-        f"🎯 Сегодня можно залутать {total_cookies} 🍪)\n"
+        f"🎯 Сегодня можно залутать {total_cookies} 🍪\n"
         "👉 Чтобы взять задачу в работу, нажми на её название 👇"
     )
 
@@ -314,28 +314,28 @@ async def handle_add_from_templates_list(call: types.CallbackQuery, db_user: Use
                     TaskTemplate.house_id == ACTIVE_HOUSE_ID,
                     TaskTemplate.deleted == False
                 )
-            ).order_by(TaskTemplate.title)
+            )
         )
         templates = result.scalars().all()
 
-        text = "📋 *Выберите задачу из списка дел для добавления на сегодня:*"
+        # Compute next date for each and sort ascending (nearest first)
+        tmpl_with_dates = []
+        for t in templates:
+            last_done_date, nd = await get_template_next_date_val(session, t, today)
+            tmpl_with_dates.append((t, last_done_date, nd))
+        tmpl_with_dates.sort(key=lambda x: x[2])
+
         builder = InlineKeyboardBuilder()
-        if templates:
-            for t in templates:
-                last_done_date, nd = await get_template_next_date_val(session, t, today)
+        if tmpl_with_dates:
+            text = "📋 *Выберите задачу для добавления на сегодня:*"
+            for t, last_done_date, nd in tmpl_with_dates:
+                pts_str = "2-8" if t.title == "Готовка" else str(t.points)
                 if t.periodicity == "once":
-                    col2_text = f"{t.points}🍪 Одноразовая ✅"
+                    col2_text = f"{pts_str}🍪 Единоразовая"
                 else:
-                    p_val = t.period_days or 1 if t.periodicity == "every_x_days" else 1
-                    if t.periodicity == "daily":
-                        p_val = "1"
-                    elif t.periodicity == "weekly":
-                        p_val = "7"
-                    elif t.periodicity == "monthly":
-                        p_val = "30"
                     nd_str = nd.strftime("%d.%m")
-                    col2_text = f"{t.points}🍪 {p_val}🔄 {nd_str}📅"
-                
+                    period_lbl = get_period_label(t)
+                    col2_text = f"{pts_str}🍪 {period_lbl} → {nd_str}"
                 builder.row(
                     InlineKeyboardButton(text=t.title, callback_data=f"spawn_chore:{t.id}"),
                     InlineKeyboardButton(text=col2_text, callback_data="noop")
@@ -623,14 +623,10 @@ async def redirect_to_template_settings(message: types.Message, tid: int, src: s
 
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text="📝 Имя", callback_data=f"te_f:title:{tmpl.id}:{src}"),
-        InlineKeyboardButton(text="🍪 Баллы", callback_data=f"te_f:points:{tmpl.id}:{src}"),
-        InlineKeyboardButton(text="🔄 Цикл", callback_data=f"te_f:period:{tmpl.id}:{src}")
-    )
-    builder.row(
-        InlineKeyboardButton(text="🗑 Удалить", callback_data=f"te_del:{tmpl.id}:{src}"),
-        InlineKeyboardButton(text="➖", callback_data="noop"),
-        InlineKeyboardButton(text="🔙 Назад", callback_data=back_target)
+        InlineKeyboardButton(text="Имя", callback_data=f"te_f:title:{tmpl.id}:{src}"),
+        InlineKeyboardButton(text="Цикл", callback_data=f"te_f:period:{tmpl.id}:{src}"),
+        InlineKeyboardButton(text="🍪 Печеньки", callback_data=f"te_f:points:{tmpl.id}:{src}"),
+        InlineKeyboardButton(text="🗑 Удалить", callback_data=f"te_del_confirm:{tmpl.id}:{src}")
     )
     if is_callback:
         await message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
@@ -887,6 +883,22 @@ async def handle_te_del(call: types.CallbackQuery, db_user: User = None):
         await render_today(call.message, db_user, is_callback=True)
     else:
         await render_chores_settings(call.message, db_user, is_callback=True)
+
+
+@dp.callback_query(F.data.startswith("te_del_confirm:"))
+async def handle_te_del_confirm(call: types.CallbackQuery, db_user: User = None):
+    parts = call.data.split(":")
+    tid = int(parts[1])
+    src = parts[2]
+    async with AsyncSessionLocal() as session:
+        tmpl = await session.get(TaskTemplate, tid)
+        name = tmpl.title if tmpl else "задача"
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"te_del:{tid}:{src}"),
+        InlineKeyboardButton(text="❌ Отмена", callback_data=f"tmpl_set:{tid}:{src}")
+    )
+    await call.message.edit_text(f"Точно удалить «{name}»?", reply_markup=builder.as_markup())
 
 
 @dp.callback_query(F.data.startswith("nudge:"))
@@ -2258,7 +2270,7 @@ async def render_shop_and_purchases(message: types.Message, db_user: User, is_ca
     builder.row(
         InlineKeyboardButton(text="Магазин", callback_data="rewards_shop_view"),
         InlineKeyboardButton(text="Покупки", callback_data="shop_view_items"),
-        InlineKeyboardButton(text="Архив", callback_data="s_arch:0"),
+        InlineKeyboardButton(text="Архив", callback_data="stat_arch:0"),
     )
 
     markup = builder.as_markup()
@@ -2276,6 +2288,102 @@ async def handle_shop_and_purchases_btn(message: types.Message, db_user: User = 
 @dp.callback_query(F.data == "shop_and_purchases_back")
 async def handle_shop_and_purchases_back(call: types.CallbackQuery, db_user: User = None):
     await render_shop_and_purchases(call.message, db_user, is_callback=True)
+
+
+@dp.callback_query(F.data.startswith("stat_arch:"))
+async def handle_stat_arch(call: types.CallbackQuery, db_user: User = None):
+    page = int(call.data.split(":")[1])
+    page_size = 10
+    from zoneinfo import ZoneInfo
+    from datetime import timezone as dt_timezone
+
+    async with AsyncSessionLocal() as session:
+        chore_result = await session.execute(
+            select(Completion, User, TaskTemplate)
+            .join(User, Completion.user_id == User.id)
+            .join(TaskInstance, Completion.task_instance_id == TaskInstance.id)
+            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
+            .where(TaskTemplate.house_id == ACTIVE_HOUSE_ID)
+            .order_by(Completion.created_at.desc())
+        )
+        chore_comps = chore_result.all()
+
+        house_users_result = await session.execute(
+            select(User).where(User.house_id == ACTIVE_HOUSE_ID)
+        )
+        house_users = house_users_result.scalars().all()
+        house_user_ids = [u.id for u in house_users]
+        user_name_map = {u.id: (u.display_name or u.username or "?") for u in house_users}
+
+        pt_result = await session.execute(
+            select(PersonalTask).where(
+                and_(
+                    PersonalTask.user_id.in_(house_user_ids),
+                    PersonalTask.is_completed == True,
+                    PersonalTask.is_deleted == False
+                )
+            ).order_by(PersonalTask.date_execution.desc())
+        )
+        pt_comps = pt_result.scalars().all()
+
+        house = await session.get(House, ACTIVE_HOUSE_ID)
+        tz_str = house.timezone or "Europe/Moscow" if house else "Europe/Moscow"
+
+    tz = ZoneInfo(tz_str)
+    entries = []
+
+    for comp, usr, tmpl in chore_comps:
+        utc_dt = comp.created_at.replace(tzinfo=dt_timezone.utc)
+        local_dt = utc_dt.astimezone(tz)
+        pts_val = "2-8" if tmpl.title == "Готовка" else str(comp.points)
+        u_name = usr.display_name or usr.username or "?"
+        entries.append({
+            "sort_key": local_dt.replace(tzinfo=None),
+            "name": tmpl.title,
+            "info": f"{local_dt.strftime('%d.%m %H:%M')} {u_name} +{pts_val}🍪",
+            "cb2": f"tmpl_set:{tmpl.id}:chores_arch_0"
+        })
+
+    for pt in pt_comps:
+        u_name = user_name_map.get(pt.user_id, "?")
+        clean = clean_task_text(pt.text)
+        sort_dt = datetime.combine(pt.date_execution, datetime.min.time())
+        entries.append({
+            "sort_key": sort_dt,
+            "name": clean,
+            "info": f"{pt.date_execution.strftime('%d.%m')} {u_name} ✅",
+            "cb2": "noop"
+        })
+
+    entries.sort(key=lambda x: x["sort_key"], reverse=True)
+
+    total = len(entries)
+    start = page * page_size
+    end = start + page_size
+    page_entries = entries[start:end]
+
+    if not page_entries and page == 0:
+        await call.answer("Архив пуст!", show_alert=False)
+        return
+
+    text = "📜 *Архив выполненных задач:*"
+    builder = InlineKeyboardBuilder()
+    for e in page_entries:
+        builder.row(
+            InlineKeyboardButton(text=e["name"], callback_data="noop"),
+            InlineKeyboardButton(text=e["info"], callback_data=e["cb2"])
+        )
+
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"stat_arch:{page-1}"))
+    if end < total:
+        nav.append(InlineKeyboardButton(text="➡️", callback_data=f"stat_arch:{page+1}"))
+    if nav:
+        builder.row(*nav)
+
+    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+
 
 
 # ── Rewards Shop (Магазин наград) ─────────────────────────────────────────────
@@ -2311,33 +2419,23 @@ async def render_rewards_settings(message: types.Message, db_user: User, is_call
 @dp.callback_query(F.data == "rewards_shop_view")
 async def handle_rewards_shop_view(call: types.CallbackQuery, db_user: User = None):
     async with AsyncSessionLocal() as session:
-        user = await session.get(User, db_user.id)
-        points = user.points or 0
-
         result = await session.execute(
             select(Reward).where(Reward.house_id == ACTIVE_HOUSE_ID).order_by(Reward.price)
         )
         rewards = result.scalars().all()
 
-    text = "🎁 *Магазин наград*\n\n"
-    text += "Выбери награду для покупки:\n\n"
+    text = "🎁 Магазин наград\nДля покупки нажми на выбранную награду:"
 
     builder = InlineKeyboardBuilder()
     if rewards:
         for r in rewards:
-            text += f"• *{r.title}* — `{r.price} 🍪`\n"
-            builder.button(text=f"Купить: {r.title} ({r.price}🍪)", callback_data=f"buy_reward:{r.id}")
+            builder.row(InlineKeyboardButton(text=f"{r.title} ({r.price}🍪)", callback_data=f"buy_reward:{r.id}"))
     else:
-        text += "_Награды пока не добавлены._"
+        text += "\nНаград пока нет."
 
-    builder.adjust(1)
-    builder.row(
-        InlineKeyboardButton(text="⚙️ Управление наградами", callback_data="rewards_settings"),
-        InlineKeyboardButton(text="📜 Мои покупки", callback_data="rewards_purchases:0")
-    )
-    builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="shop_and_purchases_back"))
+    builder.row(InlineKeyboardButton(text="⚙️ Управление наградами", callback_data="rewards_settings"))
 
-    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+    await call.message.edit_text(text, reply_markup=builder.as_markup())
 
 
 @dp.callback_query(F.data == "rewards_back")
