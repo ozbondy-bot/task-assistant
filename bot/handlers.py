@@ -361,6 +361,29 @@ NUDGE_PHRASES = [
 ]
 nudge_cache = {}
 
+def get_period_label(tmpl: TaskTemplate) -> str:
+    p = tmpl.periodicity
+    if p in ("every_x_days", "everyxdays"):
+        days = tmpl.period_days or 1
+        if days % 10 == 1 and days % 100 != 11:
+            return f"каждый {days} день"
+        elif days % 10 in (2, 3, 4) and days % 100 not in (12, 13, 14):
+            return f"каждые {days} дня"
+        else:
+            return f"каждые {days} дней"
+    
+    mapping = {
+        "daily": "каждый день",
+        "weekly": "раз в неделю",
+        "twice_weekly": "2 раза в неделю",
+        "monthly": "раз в месяц",
+        "twice_monthly": "2 раза в месяц",
+        "quarterly": "раз в квартал",
+        "once": "один раз"
+    }
+    return mapping.get(p, p)
+
+
 @dp.callback_query(F.data.startswith("tmpl_set:") & F.data.endswith(":today"))
 async def handle_tmpl_set_today(call: types.CallbackQuery, db_user: User = None):
     parts = call.data.split(":")
@@ -407,17 +430,14 @@ async def handle_tmpl_set_today(call: types.CallbackQuery, db_user: User = None)
         )
         last_done_dt = last_comp.scalar()
         last_done_str = last_done_dt.strftime("%d.%m.%Y") if last_done_dt else "никогда"
-        next_done_str = today.strftime("%d.%m.%Y")
+        next_done_str = inst.date.strftime("%d.%m.%Y") if inst else today.strftime("%d.%m.%Y")
 
-    period_lbl = period_label_ru(tmpl.periodicity)
+    period_lbl = get_period_label(tmpl)
     pts_str = "2-8" if tmpl.title == "Готовка" else str(tmpl.points)
 
     text = (
-        f"ℹ️ *Информация:*\n\n"
-        f"📋 *{tmpl.title}*\n"
-        f"Награда: {pts_str}🍪 | {period_lbl}\n"
-        f"📅 Последнее выполнение: *{last_done_str}*\n"
-        f"🔮 Следующее выполнение: *{next_done_str}*"
+        f"📋 *{tmpl.title}* | Награда: {pts_str}🍪 | {period_lbl.capitalize()}\n"
+        f"📅 last: *{last_done_str}* | 🔮next : *{next_done_str}*"
     )
 
     builder = InlineKeyboardBuilder()
@@ -425,10 +445,6 @@ async def handle_tmpl_set_today(call: types.CallbackQuery, db_user: User = None)
         InlineKeyboardButton(text="🔔 Намек", callback_data=f"nudge:{inst.id}"),
         InlineKeyboardButton(text="📅 Сдвиг", callback_data=f"resched_menu:{inst.id}"),
         InlineKeyboardButton(text="🗑 Копию", callback_data=f"del_inst:{inst.id}")
-    )
-    builder.row(
-        InlineKeyboardButton(text="⚙️ Настройки", callback_data=f"tmpl_set:{tmpl.id}:today_list"),
-        InlineKeyboardButton(text="🔙 Назад", callback_data="chores_back")
     )
     await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
 
@@ -810,9 +826,6 @@ async def rollover_overdue_tasks(session: AsyncSession, user_id: int):
     if tasks:
         await session.commit()
 
-
-async def ensure_daily_routines(session: AsyncSession, user_id: int):
-    pass
 
 
 async def render_today(message: types.Message, db_user: User, is_callback=False):
