@@ -24,6 +24,19 @@ if not DATABASE_URL:
 async def run_bot():
     from bot.handlers import bot, dp
     logger.info("Starting bot polling...")
+    try:
+        await bot.set_my_description(
+            "Привет! Я семейный помощник по дому и личным делам. 🏠✨\n\n"
+            "Помогаю распределять домашние обязанности, начисляю печеньки за выполненные задачи, "
+            "веду списки покупок и личные дела.\n\n"
+            "Выполняйте дела, зарабатывайте печеньки 🍪 и обменивайте их на награды!"
+        )
+        await bot.set_my_short_description(
+            "Помощник по домашним делам и личным задачам. Зарабатывайте печеньки и обменивайте их на награды! 🍪🏠"
+        )
+        logger.info("Bot descriptions set successfully.")
+    except Exception as e:
+        logger.error(f"Failed to set bot descriptions: {e}")
     await dp.start_polling(bot, allowed_updates=["message", "callback_query"])
 
 
@@ -37,10 +50,12 @@ async def run_api():
 
 
 async def main():
-    # Run bot polling and FastAPI concurrently
+    from bot.handlers import scheduler_loop
+    # Run bot polling, FastAPI, and scheduler loop concurrently
     await asyncio.gather(
         run_bot(),
         run_api(),
+        scheduler_loop(),
     )
 
 

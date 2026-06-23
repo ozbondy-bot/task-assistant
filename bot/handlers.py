@@ -15,7 +15,7 @@ from sqlalchemy import select, and_, Date
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from db.models import AsyncSessionLocal, User, House, PersonalTask, ShoppingItem, TaskTemplate, TaskInstance, Completion, Reward, RewardPurchase
+from db.models import AsyncSessionLocal, User, House, PersonalTask, ShoppingItem, TaskTemplate, TaskInstance, Completion, Reward, RewardPurchase, PendingAction
 from bot.parser import parse_input, get_recurrence_delta, clean_task_text
 
 logger = logging.getLogger(__name__)
@@ -32,6 +32,350 @@ ALLOWED_TELEGRAM_IDS = {
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
+
+
+async def get_partner_user(session, current_user_id: int) -> User:
+    result = await session.execute(
+        select(User).where(and_(User.house_id == ACTIVE_HOUSE_ID, User.id != current_user_id))
+    )
+    return result.scalar_one_or_none()
+
+
+@dp.callback_query(F.data.startswith("approve_act:"))
+async def handle_approve_action(call: types.CallbackQuery, db_user: User = None):
+    action_id = int(call.data.split(":")[1])
+    async with AsyncSessionLocal() as session:
+        pending = await session.get(PendingAction, action_id)
+        if not pending:
+            await call.answer("⚠️ Запрос не найден или уже обработан!", show_alert=False)
+            try:
+                await call.message.delete()
+            except Exception:
+                pass
+            return
+            
+        import json
+        payload = json.loads(pending.data_payload)
+        initiator = await session.get(User, pending.initiator_id)
+        
+        if pending.action_type == "create_template":
+            tmpl = TaskTemplate(
+                house_id=ACTIVE_HOUSE_ID,
+                title=payload["title"],
+                points=payload["points"],
+                periodicity=payload["periodicity"],
+                period_days=payload.get("period_days"),
+                deleted=False
+            )
+            session.add(tmpl)
+            await session.flush()
+            
+            # Spawn instance for today as well
+            inst = TaskInstance(
+                template_id=tmpl.id,
+                date=datetime.now().date(),
+                status="free",
+                priority=0
+            )
+            session.add(inst)
+            await session.commit()
+            
+            await call.answer("✅ Задача успешно добавлена!", show_alert=False)
+            await call.message.edit_text(f"✅ Вы одобрили добавление задачи «{tmpl.title}» ({tmpl.points}🍪)!")
+            if initiator:
+                try:
+                    await bot.send_message(
+                        chat_id=initiator.telegram_id,
+                        text=f"🔔 Партнёр одобрил добавление задачи «{tmpl.title}»! Она добавлена в список."
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to notify initiator: {e}")
+                    
+        elif pending.action_type == "edit_template":
+            tmpl = await session.get(TaskTemplate, payload["template_id"])
+            if not tmpl:
+                await call.answer("⚠️ Шаблон не найден!", show_alert=False)
+                await session.delete(pending)
+                await session.commit()
+                try:
+                    await call.message.delete()
+                except Exception:
+                    pass
+                return
+                
+            field = payload["field"]
+            old_title = tmpl.title
+            if field == "title":
+                tmpl.title = payload["new_value"]
+            elif field == "points":
+                tmpl.points = payload["new_value"]
+            elif field == "periodicity":
+                tmpl.periodicity = payload["periodicity"]
+                tmpl.period_days = payload["period_days"]
+                
+            await session.commit()
+            
+            await call.answer("✅ Изменения одобрены!", show_alert=False)
+            await call.message.edit_text(f"✅ Вы одобрили изменение задачи «{old_title}»!")
+            if initiator:
+                try:
+                    await bot.send_message(
+                        chat_id=initiator.telegram_id,
+                        text=f"🔔 Партнёр одобрил изменение задачи «{tmpl.title}»!"
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to notify initiator: {e}")
+                    
+        await session.delete(pending)
+        await session.commit()
+
+
+@dp.callback_query(F.data.startswith("reject_act:"))
+async def handle_reject_action(call: types.CallbackQuery, db_user: User = None):
+    action_id = int(call.data.split(":")[1])
+    async with AsyncSessionLocal() as session:
+        pending = await session.get(PendingAction, action_id)
+        if not pending:
+            await call.answer("⚠️ Запрос не найден или уже обработан!", show_alert=False)
+            try:
+                await call.message.delete()
+            except Exception:
+                pass
+            return
+            
+        import json
+        payload = json.loads(pending.data_payload)
+        initiator = await session.get(User, pending.initiator_id)
+        title = payload.get("title")
+        if not title and "template_id" in payload:
+            tmpl = await session.get(TaskTemplate, payload["template_id"])
+            title = tmpl.title if tmpl else "задачи"
+            
+        await call.answer("❌ Запрос отклонен", show_alert=False)
+        await call.message.edit_text(f"❌ Вы отклонили запрос по задаче «{title}».")
+        if initiator:
+            try:
+                await bot.send_message(
+                    chat_id=initiator.telegram_id,
+                    text=f"🔔 Партнёр отклонил добавление/изменение задачи «{title}»!"
+                )
+            except Exception as e:
+                logger.error(f"Failed to notify initiator: {e}")
+                
+        await session.delete(pending)
+        await session.commit()
+
+
+async def send_morning_message():
+    async with AsyncSessionLocal() as session:
+        await generate_daily_chores_if_needed(session, ACTIVE_HOUSE_ID)
+        result = await session.execute(
+            select(TaskInstance, TaskTemplate)
+            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
+            .where(and_(
+                TaskTemplate.house_id == ACTIVE_HOUSE_ID,
+                TaskInstance.date == datetime.now().date(),
+                TaskInstance.status == "free",
+                TaskTemplate.deleted == False
+            ))
+            .order_by(TaskTemplate.points.desc())
+        )
+        chores = result.all()
+        users = (await session.execute(select(User).where(User.house_id == ACTIVE_HOUSE_ID))).scalars().all()
+        
+    if not users:
+        return
+        
+    if chores:
+        total_cookies = sum(tmpl.points for inst, tmpl in chores)
+        text = (
+            "🌅 *Доброе утро!*\n\n"
+            f"🎯 Сегодня можно залутать *{total_cookies}* 🍪\n\n"
+            "Список свободных задач на сегодня:\n"
+        )
+        for inst, tmpl in chores:
+            pts_str = "2-8" if tmpl.title == "Готовка" else str(tmpl.points)
+            text += f"• *{tmpl.title}* (`+{pts_str} 🍪`)\n"
+        text += "\n👉 Зайдите в 🏠 *Home*, чтобы взять задачу в работу!"
+    else:
+        text = "🌅 *Доброе утро!*\n\nНа сегодня свободных домашних дел нет. Отдыхаем! ☕️"
+        
+    for u in users:
+        try:
+            await bot.send_message(chat_id=u.telegram_id, text=text, parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Failed to send morning message to {u.telegram_id}: {e}")
+
+
+async def send_14_reminder():
+    today = datetime.now().date()
+    async with AsyncSessionLocal() as session:
+        users = (await session.execute(select(User).where(User.house_id == ACTIVE_HOUSE_ID))).scalars().all()
+        for u in users:
+            res = await session.execute(
+                select(TaskInstance).where(and_(
+                    TaskInstance.done_by_user_id == u.id,
+                    TaskInstance.date == today,
+                    TaskInstance.status.in_(["in_progress", "done"])
+                ))
+            )
+            taken = res.scalars().all()
+            if not taken:
+                text = (
+                    "🔔 *Напоминание!*\n\n"
+                    "Ты ещё не взял ни одной домашней задачи на сегодня.\n"
+                    "Загляни в вкладку 🏠 *Home* и выбери что-нибудь полезное! 🍪"
+                )
+                try:
+                    await bot.send_message(chat_id=u.telegram_id, text=text, parse_mode="Markdown")
+                except Exception as e:
+                    logger.error(f"Failed to send 14:00 reminder to {u.telegram_id}: {e}")
+
+
+async def send_17_reminder():
+    today = datetime.now().date()
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(TaskInstance, TaskTemplate)
+            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
+            .where(and_(
+                TaskTemplate.house_id == ACTIVE_HOUSE_ID,
+                TaskInstance.date == today,
+                TaskInstance.status == "free",
+                TaskTemplate.deleted == False
+            ))
+        )
+        free_chores = result.all()
+        users = (await session.execute(select(User).where(User.house_id == ACTIVE_HOUSE_ID))).scalars().all()
+        
+    if free_chores and users:
+        text = (
+            "⚠️ *Внимание!*\n\n"
+            "На сегодня ещё остались невыполненные домашние дела!\n"
+            "Успейте залутать печеньки 🍪 во вкладке 🏠 *Home*!"
+        )
+        for u in users:
+            try:
+                await bot.send_message(chat_id=u.telegram_id, text=text, parse_mode="Markdown")
+            except Exception as e:
+                logger.error(f"Failed to send 17:00 reminder to {u.telegram_id}: {e}")
+
+
+async def send_midnight_summary():
+    from zoneinfo import ZoneInfo
+    from datetime import timezone as dt_timezone
+    async with AsyncSessionLocal() as session:
+        house = await session.get(House, ACTIVE_HOUSE_ID)
+        tz_str = house.timezone if house else "Europe/Moscow"
+        
+    tz = ZoneInfo(tz_str)
+    now = datetime.now(tz)
+    summary_date = (now - timedelta(days=1)).date()
+    
+    async with AsyncSessionLocal() as session:
+        users = (await session.execute(select(User).where(User.house_id == ACTIVE_HOUSE_ID))).scalars().all()
+        user_name_map = {u.id: (u.display_name or u.username or "?") for u in users}
+        
+        result = await session.execute(
+            select(Completion, User, TaskTemplate)
+            .join(User, Completion.user_id == User.id)
+            .join(TaskInstance, Completion.task_instance_id == TaskInstance.id)
+            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
+            .where(TaskTemplate.house_id == ACTIVE_HOUSE_ID)
+        )
+        all_comps = result.all()
+        
+        comps_today = []
+        for comp, usr, tmpl in all_comps:
+            utc_dt = comp.created_at.replace(tzinfo=dt_timezone.utc)
+            local_dt = utc_dt.astimezone(tz)
+            if local_dt.date() == summary_date:
+                comps_today.append((comp, usr, tmpl))
+                
+        pt_result = await session.execute(
+            select(PersonalTask).where(and_(
+                PersonalTask.user_id.in_([u.id for u in users]),
+                PersonalTask.is_completed == True,
+                PersonalTask.is_deleted == False,
+                PersonalTask.date_execution == summary_date
+            ))
+        )
+        pt_comps = pt_result.scalars().all()
+        
+    user_chores = {u.id: [] for u in users}
+    user_pts = {u.id: 0 for u in users}
+    for comp, usr, tmpl in comps_today:
+        user_chores[usr.id].append(tmpl.title)
+        user_pts[usr.id] += comp.points
+        
+    user_pts_list = sorted(user_pts.items(), key=lambda x: x[1], reverse=True)
+    
+    text = (
+        f"🌙 *Итоги дня ({summary_date.strftime('%d.%m.%Y')}):*\n\n"
+    )
+    
+    for uid, total_earned in user_pts_list:
+        u_name = user_name_map.get(uid, "?")
+        text += f"🦸 *{u_name}* заработал *{total_earned}* 🍪\n"
+        chores_list = user_chores[uid]
+        pts_for_user = [pt for pt in pt_comps if pt.user_id == uid]
+        
+        if chores_list or pts_for_user:
+            text += "Выполненные задачи:\n"
+            for ch in chores_list:
+                text += f"• {ch} 🏠\n"
+            for pt in pts_for_user:
+                clean = clean_task_text(pt.text)
+                text += f"• {clean} 👤\n"
+        else:
+            text += "Задач не выполнял.\n"
+        text += "\n"
+        
+    for u in users:
+        try:
+            await bot.send_message(chat_id=u.telegram_id, text=text, parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Failed to send midnight summary to {u.telegram_id}: {e}")
+
+
+async def scheduler_loop():
+    from zoneinfo import ZoneInfo
+    sent_events = set()
+    
+    while True:
+        try:
+            async with AsyncSessionLocal() as session:
+                house = await session.get(House, ACTIVE_HOUSE_ID)
+                tz_str = house.timezone if house else "Europe/Moscow"
+                
+            tz = ZoneInfo(tz_str)
+            now = datetime.now(tz)
+            today = now.date()
+            hour = now.hour
+            minute = now.minute
+            
+            if hour == 9 and minute == 0 and (today, "morning") not in sent_events:
+                await send_morning_message()
+                sent_events.add((today, "morning"))
+                
+            if hour == 14 and minute == 0 and (today, "reminder_14") not in sent_events:
+                await send_14_reminder()
+                sent_events.add((today, "reminder_14"))
+                
+            if hour == 17 and minute == 0 and (today, "reminder_17") not in sent_events:
+                await send_17_reminder()
+                sent_events.add((today, "reminder_17"))
+                
+            if hour == 0 and minute == 0 and (today, "midnight_summary") not in sent_events:
+                await send_midnight_summary()
+                sent_events.add((today, "midnight_summary"))
+                
+            sent_events = { (d, e) for (d, e) in sent_events if d >= today - timedelta(days=1) }
+            
+        except Exception as e:
+            logger.error(f"Error in scheduler loop: {e}", exc_info=True)
+            
+        await asyncio.sleep(30)
 
 
 async def generate_daily_chores_if_needed(session, house_id: int):
@@ -202,14 +546,42 @@ async def cmd_start(message: types.Message, db_user: User = None):
     name = db_user.display_name if db_user else message.from_user.first_name
     text = (
         f"👋 Привет, *{name}*!\n\n"
-        "Это твой личный помощник по домашним и личным делам.\n\n"
-        "🏠 *Home* — свободные обязанности по дому\n"
-        "📋 *My* — твои личные задачи + взятые домашние дела\n"
-        "📊 *Stat* — покупки, награды, лидерборд и статистика печенек\n\n"
-        "Просто напиши мне, что нужно сделать, и я всё запомню!\n"
-        "_Например: «купить молоко 150» или «позвонить врачу завтра»_"
+        "Я — твой семейный помощник для управления делами и покупками. 🍪🏠\n\n"
+        "Вот как устроен наш функционал:\n\n"
+        "🏠 *Home (Домашние дела)*\n"
+        "• Здесь собраны все общие дела по дому на сегодня.\n"
+        "• Любой жилец может нажать на задачу, чтобы взять её в работу.\n"
+        "• За выполнение задач начисляются печеньки 🍪!\n"
+        "• Внизу есть кнопки:\n"
+        "  - `➕ Добавить` — чтобы внести новую задачу или добавить из базы.\n"
+        "  - `⚙️ Настройки` — управление шаблонами и баллами задач.\n\n"
+        "📋 *My (Мои дела)*\n"
+        "• Твоя рабочая зона. Здесь находятся:\n"
+        "  - Взятые тобой домашние дела (со смайликом 🏠).\n"
+        "  - Твои личные задачи 👤.\n"
+        "  - Список покупок 🛒.\n"
+        "• 🟡 Желтый кружок означает просроченные дела с прошлых дней.\n"
+        "• 🔴 Красный кружок — срочные задачи.\n"
+        "• Кнопки управления:\n"
+        "  - `[ Добавить ]` — создать новую личную задачу.\n"
+        "  - `[ Сдвиг ]` — перенести задачу на другую дату.\n"
+        "  - `[ Удалить ]` — удалить личную задачу.\n\n"
+        "📊 *Stat (Магазин и Покупки)*\n"
+        "• Показывает баланс печенек участников дома.\n"
+        "• Кнопки:\n"
+        "  - `Магазин` — трать заработанные печеньки 🍪 на награды!\n"
+        "  - `Покупки` — твой список покупок (продукты, вещи).\n"
+        "  - `Архив` — история выполненных дел по дням.\n\n"
+        "💡 *Быстрый ввод*:\n"
+        "Просто напиши мне сообщение в чат:\n"
+        "• Чтобы добавить в список покупок: «купить молоко 150» или «хлеб».\n\n"
+        "Зарабатывайте печеньки и радуйте друг друга наградами! 🎉"
     )
-    await message.answer(text, reply_markup=get_main_keyboard(), parse_mode="Markdown")
+    sent_msg = await message.answer(text, reply_markup=get_main_keyboard(), parse_mode="Markdown")
+    try:
+        await message.bot.pin_chat_message(chat_id=message.chat.id, message_id=sent_msg.message_id)
+    except Exception as e:
+        logger.error(f"Failed to pin message: {e}")
 
 
 @dp.message(Command("id"))
@@ -330,15 +702,13 @@ async def handle_add_from_templates_list(call: types.CallbackQuery, db_user: Use
             text = "📋 *Выберите задачу для добавления на сегодня:*"
             for t, last_done_date, nd in tmpl_with_dates:
                 pts_str = "2-8" if t.title == "Готовка" else str(t.points)
-                if t.periodicity == "once":
-                    col2_text = f"{pts_str}🍪 Единоразовая"
+                if nd and nd.year < 2099:
+                    date_suffix = f" {nd.strftime('%d.%m.')}"
                 else:
-                    nd_str = nd.strftime("%d.%m")
-                    period_lbl = get_period_label(t)
-                    col2_text = f"{pts_str}🍪 {period_lbl} → {nd_str}"
+                    date_suffix = ""
+                btn_text = f"{t.title} ---- {pts_str}🍪{date_suffix}"
                 builder.row(
-                    InlineKeyboardButton(text=t.title, callback_data=f"spawn_chore:{t.id}"),
-                    InlineKeyboardButton(text=col2_text, callback_data="noop")
+                    InlineKeyboardButton(text=btn_text, callback_data=f"spawn_chore:{t.id}")
                 )
         else:
             text = "⚠️ Шаблонов дел пока нет!"
@@ -617,15 +987,15 @@ async def redirect_to_template_settings(message: types.Message, tid: int, src: s
     text = (
         f"⚙️ <b>Настройки:</b> {tmpl.title}\n"
         f"Награда: {pts_str}🍪 | {period_lbl}\n"
-        f"📅 Последнее выполнение: {last_done_str}\n"
-        f"🔮 Следующее выполнение: {next_done_str}"
+        f"📅 last: {last_done_str}\n"
+        f"🔮 next: {next_done_str}"
     )
 
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="Имя", callback_data=f"te_f:title:{tmpl.id}:{src}"),
         InlineKeyboardButton(text="Цикл", callback_data=f"te_f:period:{tmpl.id}:{src}"),
-        InlineKeyboardButton(text="🍪 Печеньки", callback_data=f"te_f:points:{tmpl.id}:{src}"),
+        InlineKeyboardButton(text="🍪", callback_data=f"te_f:points:{tmpl.id}:{src}"),
         InlineKeyboardButton(text="🗑 Удалить", callback_data=f"te_del_confirm:{tmpl.id}:{src}")
     )
     if is_callback:
@@ -725,8 +1095,8 @@ async def handle_te_cancel(call: types.CallbackQuery, state: FSMContext, db_user
 @dp.callback_query(F.data.startswith("te_f:title:"))
 async def handle_te_title_start(call: types.CallbackQuery, state: FSMContext):
     parts = call.data.split(":")
-    tid = int(parts[3])
-    src = parts[4]
+    tid = int(parts[2])
+    src = parts[3]
     await state.update_data(edit_tid=tid, edit_src=src)
     await state.set_state(EditTemplateState.waiting_for_title)
     
@@ -746,22 +1116,60 @@ async def handle_te_title_input(message: types.Message, state: FSMContext, db_us
     tid = data["edit_tid"]
     src = data["edit_src"]
     
+    import json
     async with AsyncSessionLocal() as session:
         tmpl = await session.get(TaskTemplate, tid)
-        if tmpl:
+        if not tmpl:
+            await message.answer("Шаблон не найден")
+            await state.clear()
+            return
+            
+        partner = await get_partner_user(session, db_user.id)
+        if partner:
+            pending = PendingAction(
+                house_id=ACTIVE_HOUSE_ID,
+                initiator_id=db_user.id,
+                action_type="edit_template",
+                data_payload=json.dumps({
+                    "template_id": tid,
+                    "field": "title",
+                    "new_value": title
+                })
+            )
+            session.add(pending)
+            await session.commit()
+            
+            partner_text = (
+                f"🔔 *Согласование изменения задачи!*\n\n"
+                f"Жилец *{db_user.display_name or db_user.username or 'Партнёр'}* хочет изменить название домашней задачи:\n"
+                f"❌ *Было:* {tmpl.title}\n"
+                f"✅ *Станет:* {title}\n\n"
+                f"Одобряете изменение?"
+            )
+            builder = InlineKeyboardBuilder()
+            builder.row(
+                InlineKeyboardButton(text="✅ Одобрить", callback_data=f"approve_act:{pending.id}"),
+                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_act:{pending.id}")
+            )
+            try:
+                await bot.send_message(chat_id=partner.telegram_id, text=partner_text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+            except Exception as e:
+                logger.error(f"Failed to send approval message to partner: {e}")
+            await state.clear()
+            await message.answer(f"⏳ Запрос на переименование задачи в «{title}» отправлен партнёру.")
+        else:
             tmpl.title = title
             await session.commit()
             await message.answer(f"✅ Название успешно обновлено на: *{title}*", parse_mode="Markdown")
-            
-    await state.clear()
-    await redirect_to_template_settings(message, tid, src, db_user, is_callback=False)
+            await state.clear()
+            await redirect_to_template_settings(message, tid, src, db_user, is_callback=False)
 
 
 @dp.callback_query(F.data.startswith("te_f:points:"))
 async def handle_te_points_start(call: types.CallbackQuery, state: FSMContext):
     parts = call.data.split(":")
-    tid = int(parts[3])
-    src = parts[4]
+    tid = int(parts[2])
+    src = parts[3]
     await state.update_data(edit_tid=tid, edit_src=src)
     await state.set_state(EditTemplateState.waiting_for_points)
     
@@ -784,22 +1192,60 @@ async def handle_te_points_input(message: types.Message, state: FSMContext, db_u
     tid = data["edit_tid"]
     src = data["edit_src"]
     
+    import json
     async with AsyncSessionLocal() as session:
         tmpl = await session.get(TaskTemplate, tid)
-        if tmpl:
+        if not tmpl:
+            await message.answer("Шаблон не найден")
+            await state.clear()
+            return
+            
+        partner = await get_partner_user(session, db_user.id)
+        if partner:
+            pending = PendingAction(
+                house_id=ACTIVE_HOUSE_ID,
+                initiator_id=db_user.id,
+                action_type="edit_template",
+                data_payload=json.dumps({
+                    "template_id": tid,
+                    "field": "points",
+                    "new_value": pts
+                })
+            )
+            session.add(pending)
+            await session.commit()
+            
+            partner_text = (
+                f"🔔 *Согласование изменения задачи!*\n\n"
+                f"Жилец *{db_user.display_name or db_user.username or 'Партнёр'}* хочет изменить награду для задачи «{tmpl.title}»:\n"
+                f"❌ *Было:* {tmpl.points}🍪\n"
+                f"✅ *Станет:* {pts}🍪\n\n"
+                f"Одобряете изменение?"
+            )
+            builder = InlineKeyboardBuilder()
+            builder.row(
+                InlineKeyboardButton(text="✅ Одобрить", callback_data=f"approve_act:{pending.id}"),
+                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_act:{pending.id}")
+            )
+            try:
+                await bot.send_message(chat_id=partner.telegram_id, text=partner_text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+            except Exception as e:
+                logger.error(f"Failed to send approval message to partner: {e}")
+            await state.clear()
+            await message.answer(f"⏳ Запрос на изменение баллов задачи «{tmpl.title}» отправлен партнёру.")
+        else:
             tmpl.points = pts
             await session.commit()
             await message.answer(f"✅ Баллы успешно обновлены на: *{pts}*", parse_mode="Markdown")
-            
-    await state.clear()
-    await redirect_to_template_settings(message, tid, src, db_user, is_callback=False)
+            await state.clear()
+            await redirect_to_template_settings(message, tid, src, db_user, is_callback=False)
 
 
 @dp.callback_query(F.data.startswith("te_f:period:"))
 async def handle_te_period_start(call: types.CallbackQuery, state: FSMContext):
     parts = call.data.split(":")
-    tid = int(parts[3])
-    src = parts[4]
+    tid = int(parts[2])
+    src = parts[3]
     await state.update_data(edit_tid=tid, edit_src=src)
     await state.set_state(EditTemplateState.waiting_for_periodicity)
     
@@ -822,16 +1268,55 @@ async def handle_te_period_selected(call: types.CallbackQuery, state: FSMContext
     tid = data["edit_tid"]
     src = data["edit_src"]
     
+    import json
     if p in ["once", "daily"]:
         async with AsyncSessionLocal() as session:
             tmpl = await session.get(TaskTemplate, tid)
-            if tmpl:
+            if not tmpl:
+                await call.answer("Шаблон не найден")
+                await state.clear()
+                return
+            partner = await get_partner_user(session, db_user.id)
+            if partner:
+                pending = PendingAction(
+                    house_id=ACTIVE_HOUSE_ID,
+                    initiator_id=db_user.id,
+                    action_type="edit_template",
+                    data_payload=json.dumps({
+                        "template_id": tid,
+                        "field": "periodicity",
+                        "periodicity": p,
+                        "period_days": 0 if p == "once" else 1
+                    })
+                )
+                session.add(pending)
+                await session.commit()
+                
+                p_desc = "daily (каждый день)" if p == "daily" else "once (1 раз)"
+                partner_text = (
+                    f"🔔 *Согласование изменения цикла!*\n\n"
+                    f"Жилец *{db_user.display_name or db_user.username or 'Партнёр'}* хочет изменить цикл задачи «{tmpl.title}»:\n"
+                    f"✅ *Новый цикл:* {p_desc}\n\n"
+                    f"Одобряете изменение?"
+                )
+                builder = InlineKeyboardBuilder()
+                builder.row(
+                    InlineKeyboardButton(text="✅ Одобрить", callback_data=f"approve_act:{pending.id}"),
+                    InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_act:{pending.id}")
+                )
+                try:
+                    await bot.send_message(chat_id=partner.telegram_id, text=partner_text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+                except Exception as e:
+                    logger.error(f"Failed to send approval message to partner: {e}")
+                await state.clear()
+                await call.message.edit_text(f"⏳ Запрос на изменение цикла задачи отправлен партнёру.")
+            else:
                 tmpl.periodicity = p
                 tmpl.period_days = 0 if p == "once" else 1
                 await session.commit()
                 await call.answer("✅ Периодичность обновлена!", show_alert=False)
-        await state.clear()
-        await redirect_to_template_settings(call.message, tid, src, db_user, is_callback=True)
+                await state.clear()
+                await redirect_to_template_settings(call.message, tid, src, db_user, is_callback=True)
     else:
         await state.set_state(EditTemplateState.waiting_for_period_days)
         builder = InlineKeyboardBuilder()
@@ -853,16 +1338,54 @@ async def handle_te_period_days_input(message: types.Message, state: FSMContext,
     tid = data["edit_tid"]
     src = data["edit_src"]
     
+    import json
     async with AsyncSessionLocal() as session:
         tmpl = await session.get(TaskTemplate, tid)
-        if tmpl:
+        if not tmpl:
+            await message.answer("Шаблон не найден")
+            await state.clear()
+            return
+            
+        partner = await get_partner_user(session, db_user.id)
+        if partner:
+            pending = PendingAction(
+                house_id=ACTIVE_HOUSE_ID,
+                initiator_id=db_user.id,
+                action_type="edit_template",
+                data_payload=json.dumps({
+                    "template_id": tid,
+                    "field": "periodicity",
+                    "periodicity": "every_x_days",
+                    "period_days": days
+                })
+            )
+            session.add(pending)
+            await session.commit()
+            
+            partner_text = (
+                f"🔔 *Согласование изменения цикла!*\n\n"
+                f"Жилец *{db_user.display_name or db_user.username or 'Партнёр'}* хочет изменить цикл задачи «{tmpl.title}»:\n"
+                f"✅ *Новый цикл:* каждые {days} дней\n\n"
+                f"Одобряете изменение?"
+            )
+            builder = InlineKeyboardBuilder()
+            builder.row(
+                InlineKeyboardButton(text="✅ Одобрить", callback_data=f"approve_act:{pending.id}"),
+                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_act:{pending.id}")
+            )
+            try:
+                await bot.send_message(chat_id=partner.telegram_id, text=partner_text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+            except Exception as e:
+                logger.error(f"Failed to send approval message to partner: {e}")
+            await state.clear()
+            await message.answer(f"⏳ Запрос на изменение цикла задачи отправлен партнёру.")
+        else:
             tmpl.periodicity = "every_x_days"
             tmpl.period_days = days
             await session.commit()
             await message.answer(f"✅ Периодичность обновлена: каждые {days} дней!")
-            
-    await state.clear()
-    await redirect_to_template_settings(message, tid, src, db_user, is_callback=False)
+            await state.clear()
+            await redirect_to_template_settings(message, tid, src, db_user, is_callback=False)
 
 
 @dp.callback_query(F.data.startswith("te_del:"))
@@ -1108,13 +1631,13 @@ async def render_chores_settings(message: types.Message, db_user: User = None, i
             for t in templates:
                 last_done_date, nd = await get_template_next_date_val(session, t, today)
                 pts_str = "2-8" if t.title == "Готовка" else str(t.points)
-                period_lbl = get_period_label(t)
-                last_str = last_done_date.strftime("%d.%m") if last_done_date else "никогда"
-                next_str = nd.strftime("%d.%m") if nd.year < 2099 else "нет"
-                gear_text = f"⚙️ {pts_str}🍪 {period_lbl} /{next_str}"
+                if nd and nd.year < 2099:
+                    date_suffix = f" {nd.strftime('%d.%m.')}"
+                else:
+                    date_suffix = ""
+                btn_text = f"{t.title} ---- ⚙️{pts_str}🍪{date_suffix}"
                 builder.row(
-                    InlineKeyboardButton(text=t.title, callback_data="noop"),
-                    InlineKeyboardButton(text=gear_text, callback_data=f"tmpl_set:{t.id}:settings")
+                    InlineKeyboardButton(text=btn_text, callback_data=f"tmpl_set:{t.id}:settings")
                 )
 
     text = "🛠 <b>Список задач дома:</b>" if templates else "Задач пока нет."
@@ -1290,31 +1813,69 @@ async def handle_add_tmpl_periodicity(call: types.CallbackQuery, state: FSMConte
         )
         return
         
+    import json
     async with AsyncSessionLocal() as session:
-        tmpl = TaskTemplate(
-            house_id=ACTIVE_HOUSE_ID,
-            title=title,
-            points=pts,
-            periodicity=periodicity,
-            period_days=1 if periodicity == "daily" else None,
-            deleted=False
-        )
-        session.add(tmpl)
-        await session.flush()
-        
-        # Spawn instance for today as well
-        inst = TaskInstance(
-            template_id=tmpl.id,
-            date=datetime.now().date(),
-            status="free",
-            priority=0
-        )
-        session.add(inst)
-        await session.commit()
-    
-    await state.clear()
-    await call.answer("✅ Шаблон успешно добавлен!", show_alert=False)
-    await render_chores_settings(call.message, db_user, is_callback=True)
+        partner = await get_partner_user(session, db_user.id)
+        if partner:
+            pending = PendingAction(
+                house_id=ACTIVE_HOUSE_ID,
+                initiator_id=db_user.id,
+                action_type="create_template",
+                data_payload=json.dumps({
+                    "title": title,
+                    "points": pts,
+                    "periodicity": periodicity,
+                    "period_days": 1 if periodicity == "daily" else None
+                })
+            )
+            session.add(pending)
+            await session.commit()
+            
+            p_desc = "каждый день" if periodicity == "daily" else "1 раз"
+            partner_text = (
+                f"🔔 *Согласование новой задачи!*\n\n"
+                f"Жилец *{db_user.display_name or db_user.username or 'Партнёр'}* хочет добавить домашнюю задачу:\n"
+                f"📋 *Название:* {title}\n"
+                f"🍪 *Награда:* {pts} печенек\n"
+                f"📅 *Цикл:* {p_desc}\n\n"
+                f"Одобряете добавление?"
+            )
+            builder = InlineKeyboardBuilder()
+            builder.row(
+                InlineKeyboardButton(text="✅ Одобрить", callback_data=f"approve_act:{pending.id}"),
+                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_act:{pending.id}")
+            )
+            try:
+                await bot.send_message(chat_id=partner.telegram_id, text=partner_text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+            except Exception as e:
+                logger.error(f"Failed to send approval message to partner: {e}")
+            await state.clear()
+            await call.answer("⏳ Отправлено на согласование партнёру", show_alert=False)
+            await call.message.edit_text(f"⏳ Задача «{title}» отправлена на согласование партнёру.")
+        else:
+            tmpl = TaskTemplate(
+                house_id=ACTIVE_HOUSE_ID,
+                title=title,
+                points=pts,
+                periodicity=periodicity,
+                period_days=1 if periodicity == "daily" else None,
+                deleted=False
+            )
+            session.add(tmpl)
+            await session.flush()
+            
+            inst = TaskInstance(
+                template_id=tmpl.id,
+                date=datetime.now().date(),
+                status="free",
+                priority=0
+            )
+            session.add(inst)
+            await session.commit()
+            
+            await state.clear()
+            await call.answer("✅ Шаблон успешно добавлен!", show_alert=False)
+            await render_chores_settings(call.message, db_user, is_callback=True)
 
 
 @dp.message(StateFilter(AddTemplateState.waiting_for_period_days))
@@ -1331,31 +1892,67 @@ async def handle_add_tmpl_period_days(message: types.Message, state: FSMContext,
     title = data["title"]
     pts = data["points"]
     
+    import json
     async with AsyncSessionLocal() as session:
-        tmpl = TaskTemplate(
-            house_id=ACTIVE_HOUSE_ID,
-            title=title,
-            points=pts,
-            periodicity="every_x_days",
-            period_days=p_days,
-            deleted=False
-        )
-        session.add(tmpl)
-        await session.flush()
-        
-        # Spawn instance for today as well
-        inst = TaskInstance(
-            template_id=tmpl.id,
-            date=datetime.now().date(),
-            status="free",
-            priority=0
-        )
-        session.add(inst)
-        await session.commit()
-        
-    await state.clear()
-    await message.answer(f"✅ Шаблон успешно добавлен: *{title}*!")
-    await render_chores_settings(message, db_user, is_callback=False)
+        partner = await get_partner_user(session, db_user.id)
+        if partner:
+            pending = PendingAction(
+                house_id=ACTIVE_HOUSE_ID,
+                initiator_id=db_user.id,
+                action_type="create_template",
+                data_payload=json.dumps({
+                    "title": title,
+                    "points": pts,
+                    "periodicity": "every_x_days",
+                    "period_days": p_days
+                })
+            )
+            session.add(pending)
+            await session.commit()
+            
+            partner_text = (
+                f"🔔 *Согласование новой задачи!*\n\n"
+                f"Жилец *{db_user.display_name or db_user.username or 'Партнёр'}* хочет добавить домашнюю задачу:\n"
+                f"📋 *Название:* {title}\n"
+                f"🍪 *Награда:* {pts} печенек\n"
+                f"📅 *Цикл:* каждые {p_days} дней\n\n"
+                f"Одобряете добавление?"
+            )
+            builder = InlineKeyboardBuilder()
+            builder.row(
+                InlineKeyboardButton(text="✅ Одобрить", callback_data=f"approve_act:{pending.id}"),
+                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_act:{pending.id}")
+            )
+            try:
+                await bot.send_message(chat_id=partner.telegram_id, text=partner_text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+            except Exception as e:
+                logger.error(f"Failed to send approval message to partner: {e}")
+            await state.clear()
+            await message.answer(f"⏳ Задача «{title}» отправлена на согласование партнёру.")
+        else:
+            tmpl = TaskTemplate(
+                house_id=ACTIVE_HOUSE_ID,
+                title=title,
+                points=pts,
+                periodicity="every_x_days",
+                period_days=p_days,
+                deleted=False
+            )
+            session.add(tmpl)
+            await session.flush()
+            
+            inst = TaskInstance(
+                template_id=tmpl.id,
+                date=datetime.now().date(),
+                status="free",
+                priority=0
+            )
+            session.add(inst)
+            await session.commit()
+            
+            await state.clear()
+            await message.answer(f"✅ Шаблон успешно добавлен: *{title}*!")
+            await render_chores_settings(message, db_user, is_callback=False)
 
 
 # ── Render Today ───────────────────────────────────────────────────────────────
@@ -2264,7 +2861,7 @@ async def render_shop_and_purchases(message: types.Message, db_user: User, is_ca
     text = "🏆 Баланс героев:\n"
     for usr in leaderboard:
         weekly = weekly_map.get(usr.id, 0)
-        text += f"🦸\u200d♂️ {usr.display_name}: {usr.points or 0} 🍪 (За неделю: +{weekly} 🍪)\n"
+        text += f"🦸\u200d♂️ {usr.display_name}: {usr.points or 0} 🍪 (+{weekly} 🍪)\n"
 
     builder = InlineKeyboardBuilder()
     builder.row(
@@ -2293,9 +2890,9 @@ async def handle_shop_and_purchases_back(call: types.CallbackQuery, db_user: Use
 @dp.callback_query(F.data.startswith("stat_arch:"))
 async def handle_stat_arch(call: types.CallbackQuery, db_user: User = None):
     page = int(call.data.split(":")[1])
-    page_size = 10
     from zoneinfo import ZoneInfo
     from datetime import timezone as dt_timezone
+    from collections import defaultdict
 
     async with AsyncSessionLocal() as session:
         chore_result = await session.execute(
@@ -2330,57 +2927,73 @@ async def handle_stat_arch(call: types.CallbackQuery, db_user: User = None):
         tz_str = house.timezone or "Europe/Moscow" if house else "Europe/Moscow"
 
     tz = ZoneInfo(tz_str)
-    entries = []
+    grouped = defaultdict(list)
 
     for comp, usr, tmpl in chore_comps:
         utc_dt = comp.created_at.replace(tzinfo=dt_timezone.utc)
         local_dt = utc_dt.astimezone(tz)
+        local_date = local_dt.date()
         pts_val = "2-8" if tmpl.title == "Готовка" else str(comp.points)
         u_name = usr.display_name or usr.username or "?"
-        entries.append({
-            "sort_key": local_dt.replace(tzinfo=None),
+        grouped[local_date].append({
             "name": tmpl.title,
-            "info": f"{local_dt.strftime('%d.%m %H:%M')} {u_name} +{pts_val}🍪",
-            "cb2": f"tmpl_set:{tmpl.id}:chores_arch_0"
+            "points": pts_val,
+            "user": u_name,
+            "time": local_dt.strftime("%H:%M"),
+            "sort_dt": local_dt.replace(tzinfo=None)
         })
 
     for pt in pt_comps:
         u_name = user_name_map.get(pt.user_id, "?")
         clean = clean_task_text(pt.text)
-        sort_dt = datetime.combine(pt.date_execution, datetime.min.time())
-        entries.append({
-            "sort_key": sort_dt,
+        local_date = pt.date_execution
+        grouped[local_date].append({
             "name": clean,
-            "info": f"{pt.date_execution.strftime('%d.%m')} {u_name} ✅",
-            "cb2": "noop"
+            "points": "0",
+            "user": u_name,
+            "time": "",
+            "sort_dt": datetime.combine(pt.date_execution, datetime.min.time())
         })
 
-    entries.sort(key=lambda x: x["sort_key"], reverse=True)
+    unique_dates = sorted(list(grouped.keys()), reverse=True)
+    total_days = len(unique_dates)
 
-    total = len(entries)
-    start = page * page_size
-    end = start + page_size
-    page_entries = entries[start:end]
-
-    if not page_entries and page == 0:
+    if total_days == 0:
         await call.answer("Архив пуст!", show_alert=False)
         return
 
-    text = "📜 *Архив выполненных задач:*"
+    if page < 0:
+        page = 0
+    if page >= total_days:
+        page = total_days - 1
+
+    current_date = unique_dates[page]
+    day_entries = grouped[current_date]
+    day_entries.sort(key=lambda x: x["sort_dt"], reverse=True)
+
+    text = f"📅 *Дата:* {current_date.strftime('%d.%m.%Y')}"
     builder = InlineKeyboardBuilder()
-    for e in page_entries:
+
+    for e in day_entries:
+        left_text = f"{e['points']}🍪 {e['name']}"
+        if e['time']:
+            right_text = f"{e['user']} {e['time']}"
+        else:
+            right_text = f"{e['user']}"
         builder.row(
-            InlineKeyboardButton(text=e["name"], callback_data="noop"),
-            InlineKeyboardButton(text=e["info"], callback_data=e["cb2"])
+            InlineKeyboardButton(text=left_text, callback_data="noop"),
+            InlineKeyboardButton(text=right_text, callback_data="noop")
         )
 
     nav = []
     if page > 0:
-        nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"stat_arch:{page-1}"))
-    if end < total:
-        nav.append(InlineKeyboardButton(text="➡️", callback_data=f"stat_arch:{page+1}"))
+        nav.append(InlineKeyboardButton(text="⬅️ Новее", callback_data=f"stat_arch:{page-1}"))
+    if page < total_days - 1:
+        nav.append(InlineKeyboardButton(text="Старее ➡️", callback_data=f"stat_arch:{page+1}"))
     if nav:
         builder.row(*nav)
+
+    builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="shop_and_purchases_back"))
 
     await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
 
@@ -2433,7 +3046,10 @@ async def handle_rewards_shop_view(call: types.CallbackQuery, db_user: User = No
     else:
         text += "\nНаград пока нет."
 
-    builder.row(InlineKeyboardButton(text="⚙️ Управление наградами", callback_data="rewards_settings"))
+    builder.row(
+        InlineKeyboardButton(text="⚙️ Управление наградами", callback_data="rewards_settings"),
+        InlineKeyboardButton(text="🛍 Купленные награды", callback_data="rewards_purchases:0")
+    )
 
     await call.message.edit_text(text, reply_markup=builder.as_markup())
 
