@@ -1,6 +1,8 @@
 import logging
 from datetime import datetime, timedelta, date
 from aiogram import types, F
+from aiogram.filters import StateFilter
+from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,7 +12,7 @@ from db.models import AsyncSessionLocal, User, House, TaskTemplate, TaskInstance
 from bot.handlers.base import (
     bot, dp, ACTIVE_HOUSE_ID, ALLOWED_TELEGRAM_IDS, logger,
     get_partner_user, get_house_today_date, generate_daily_chores_if_needed,
-    render_today, get_main_keyboard
+    render_today, get_main_keyboard, EditTemplateState, AddTemplateState
 )
 
 
