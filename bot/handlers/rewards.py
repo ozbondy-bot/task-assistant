@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from aiogram import types, F
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
@@ -7,7 +7,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardButton
 from sqlalchemy import select, and_
 
-from db.models import AsyncSessionLocal, User, Reward, RewardPurchase, TaskTemplate
+from db.models import AsyncSessionLocal, User, Reward, RewardPurchase, TaskTemplate, Completion, TaskInstance
+
 from bot.handlers.base import bot, dp, ACTIVE_HOUSE_ID, logger, AddRewardState, get_house_today_date
 
 

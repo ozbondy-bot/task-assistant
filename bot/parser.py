@@ -121,6 +121,14 @@ def parse_input(text: str):
 
 
 def get_recurrence_delta(recurrence: str) -> timedelta:
+    if not recurrence:
+        return timedelta(days=1)
+    if recurrence.startswith("every_x_days:") or recurrence.startswith("everyxdays:"):
+        try:
+            days = int(recurrence.split(":")[1])
+            return timedelta(days=days)
+        except Exception:
+            return timedelta(days=1)
     if recurrence == 'daily':
         return timedelta(days=1)
     elif recurrence == 'weekly':
@@ -130,6 +138,7 @@ def get_recurrence_delta(recurrence: str) -> timedelta:
     elif recurrence == 'monthly':
         return timedelta(days=30)
     return timedelta(days=1)
+
 
 
 def clean_task_text(text: str) -> str:

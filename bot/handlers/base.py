@@ -495,6 +495,10 @@ class AddRewardState(StatesGroup):
 
 class AddPersonalTaskState(StatesGroup):
     waiting_for_text = State()
+    waiting_for_date = State()
+    waiting_for_recurrence = State()
+    waiting_for_recurrence_days = State()
+
 
 
 class EditTemplateState(StatesGroup):
@@ -813,13 +817,16 @@ def get_template_next_date(t: TaskTemplate, last_done_date: date, active_inst_da
     """Compute the next scheduled execution date for a task template."""
     p = t.periodicity
     if p == "once":
-        return t.start_date if t.start_date else today_date
+        if last_done_date:
+            return date(2099, 12, 31)
+        else:
+            return t.start_date if t.start_date else today_date
         
     # Standard recurring schedules
     anchor = last_done_date or t.start_date or (today_date - timedelta(days=30))
     
-    if active_inst_date and active_inst_date >= today_date:
-        return active_inst_date
+    if active_inst_date:
+        return max(active_inst_date, today_date)
         
     search_start = max(anchor + timedelta(days=1), today_date)
     
@@ -841,6 +848,7 @@ def get_template_next_date(t: TaskTemplate, last_done_date: date, active_inst_da
             return today_date
             
     return find_scheduled_date_on_or_after(t, search_start)
+
 
 
 async def get_template_next_date_val(session: AsyncSession, t: TaskTemplate, today_date: date):
@@ -888,5 +896,38 @@ def get_period_label(tmpl: TaskTemplate) -> str:
         "once": "один раз"
     }
     return mapping.get(p, p)
+
+
+def create_calendar_keyboard_custom(target_id: int, year: int, month: int, today_date: date, callback_prefix: str) -> InlineKeyboardMarkup:
+    kb = []
+    month_names_ru = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"]
+    kb.append([InlineKeyboardButton(text=f"🗓 {month_names_ru[month-1]} {year}", callback_data="noop")])
+    
+    prev_y, prev_m = (year, month - 1) if month > 1 else (year - 1, 12)
+    next_y, next_m = (year, month + 1) if month < 12 else (year + 1, 1)
+    
+    kb.append([
+        InlineKeyboardButton(text="⬅️ Пред.", callback_data=f"cal_nav_{callback_prefix}:{target_id}:{prev_y}:{prev_m}"),
+        InlineKeyboardButton(text="След. ➡️", callback_data=f"cal_nav_{callback_prefix}:{target_id}:{next_y}:{next_m}")
+    ])
+    
+    weeks_ru = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+    kb.append([InlineKeyboardButton(text=w, callback_data="noop") for w in weeks_ru])
+    
+    cal = calendar.Calendar(firstweekday=0)
+    month_days = cal.monthdayscalendar(year, month)
+    
+    for week in month_days:
+        row = []
+        for day in week:
+            if day == 0: 
+                row.append(InlineKeyboardButton(text=" ", callback_data="noop"))
+            else:
+                btn_text = f"[{day}]" if year == today_date.year and month == today_date.month and day == today_date.day else str(day)
+                row.append(InlineKeyboardButton(text=btn_text, callback_data=f"shift_{callback_prefix}:{target_id}:{year}-{month:02d}-{day:02d}"))
+        kb.append(row)
+        
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
 
 

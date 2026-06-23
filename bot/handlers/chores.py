@@ -13,9 +13,11 @@ from bot.handlers.base import (
     bot, dp, ACTIVE_HOUSE_ID, ALLOWED_TELEGRAM_IDS, logger,
     get_partner_user, get_house_today_date, generate_daily_chores_if_needed,
     render_today, get_main_keyboard, EditTemplateState, AddTemplateState,
-    format_calendar_header, find_scheduled_date_on_or_after,
-    get_template_next_date, get_template_next_date_val, get_period_label
+        format_calendar_header, find_scheduled_date_on_or_after,
+    get_template_next_date, get_template_next_date_val, get_period_label,
+    create_calendar_keyboard_custom
 )
+
 
 
 # ── Household Chores (Домашние дела) ──────────────────────────────────────────
@@ -132,8 +134,15 @@ async def handle_add_from_templates_list(call: types.CallbackQuery, db_user: Use
             last_done_date, nd = await get_template_next_date_val(session, t, today)
             tmpl_with_dates.append((t, last_done_date, nd))
         
+        # Exclude once templates that are already completed (nd.year >= 2099)
+        tmpl_with_dates = [
+            (t, ldd, nd) for (t, ldd, nd) in tmpl_with_dates
+            if not (t.periodicity == "once" and nd and nd.year >= 2099)
+        ]
+        
         from datetime import date
         tmpl_with_dates.sort(key=lambda x: x[2] if x[2] is not None else date(2100, 12, 31))
+
 
         builder = InlineKeyboardBuilder()
         if tmpl_with_dates:
@@ -217,36 +226,6 @@ def create_calendar_keyboard(tid: int, year: int, month: int, today_date: date) 
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
-def create_calendar_keyboard_custom(target_id: int, year: int, month: int, today_date: date, callback_prefix: str) -> InlineKeyboardMarkup:
-    kb = []
-    month_names_ru = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"]
-    kb.append([InlineKeyboardButton(text=f"🗓 {month_names_ru[month-1]} {year}", callback_data="noop")])
-    
-    prev_y, prev_m = (year, month - 1) if month > 1 else (year - 1, 12)
-    next_y, next_m = (year, month + 1) if month < 12 else (year + 1, 1)
-    
-    kb.append([
-        InlineKeyboardButton(text="⬅️ Пред.", callback_data=f"cal_nav_{callback_prefix}:{target_id}:{prev_y}:{prev_m}"),
-        InlineKeyboardButton(text="След. ➡️", callback_data=f"cal_nav_{callback_prefix}:{target_id}:{next_y}:{next_m}")
-    ])
-    
-    weeks_ru = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
-    kb.append([InlineKeyboardButton(text=w, callback_data="noop") for w in weeks_ru])
-    
-    cal = calendar.Calendar(firstweekday=0)
-    month_days = cal.monthdayscalendar(year, month)
-    
-    for week in month_days:
-        row = []
-        for day in week:
-            if day == 0: 
-                row.append(InlineKeyboardButton(text=" ", callback_data="noop"))
-            else:
-                btn_text = f"[{day}]" if year == today_date.year and month == today_date.month and day == today_date.day else str(day)
-                row.append(InlineKeyboardButton(text=btn_text, callback_data=f"shift_{callback_prefix}:{target_id}:{year}-{month:02d}-{day:02d}"))
-        kb.append(row)
-        
-    return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
 async def redirect_to_template_settings(message: types.Message, tid: int, src: str, db_user: User, is_callback=True):
