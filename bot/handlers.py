@@ -713,7 +713,6 @@ async def handle_add_from_templates_list(call: types.CallbackQuery, db_user: Use
         else:
             text = "⚠️ Шаблонов дел пока нет!"
 
-    builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="chores_add_menu"))
     await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
 
 
@@ -777,7 +776,6 @@ def create_calendar_keyboard(tid: int, year: int, month: int, today_date: date) 
                 row.append(InlineKeyboardButton(text=btn_text, callback_data=f"shift:once:{tid}:{year}-{month:02d}-{day:02d}"))
         kb.append(row)
         
-    kb.append([InlineKeyboardButton(text="🔙 Назад", callback_data=f"resched_menu:{tid}")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
@@ -810,8 +808,6 @@ def create_calendar_keyboard_custom(target_id: int, year: int, month: int, today
                 row.append(InlineKeyboardButton(text=btn_text, callback_data=f"shift_{callback_prefix}:{target_id}:{year}-{month:02d}-{day:02d}"))
         kb.append(row)
         
-    back_cb = f"shift_{callback_prefix}_menu:{target_id}"
-    kb.append([InlineKeyboardButton(text="🔙 Назад", callback_data=back_cb)])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
@@ -1061,15 +1057,10 @@ async def handle_tmpl_set(call: types.CallbackQuery, db_user: User = None):
                 InlineKeyboardButton(text="🗑 Копию", callback_data=f"del_inst:{inst_id}")
             )
             builder.row(
-                InlineKeyboardButton(text="⚙️ Настройки", callback_data=f"tmpl_set:{tmpl.id}:today_list"),
-                InlineKeyboardButton(text="🔙 Назад", callback_data="chores_back")
+                InlineKeyboardButton(text="⚙️ Настройки", callback_data=f"tmpl_set:{tmpl.id}:today_list")
             )
         else:
-            page_val = src.replace("chores_arch_", "")
             builder = InlineKeyboardBuilder()
-            builder.row(
-                InlineKeyboardButton(text="🔙 Назад", callback_data=f"chores_arch:{page_val}")
-            )
 
         text = (
             f"📋{tmpl.title} {pts_str}🍪\n"
@@ -1485,9 +1476,6 @@ async def handle_resched_menu(call: types.CallbackQuery, db_user: User = None):
             InlineKeyboardButton(text=f"{d1.strftime('%d.%m')} ({days_ru[d1.weekday()]})", callback_data=f"shift:once:{inst_id}:{d1.strftime('%Y-%m-%d')}"),
             InlineKeyboardButton(text=f"{d2.strftime('%d.%m')} ({days_ru[d2.weekday()]})", callback_data=f"shift:once:{inst_id}:{d2.strftime('%Y-%m-%d')}"),
             InlineKeyboardButton(text="Другая дата", callback_data=f"rc_months:{inst_id}")
-        ],
-        [
-            InlineKeyboardButton(text="🔙 Назад", callback_data=f"tmpl_set:{tmpl_id}:today")
         ]
     ]
     await call.message.edit_text("На какой день перенести задачу?", reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
@@ -1590,9 +1578,7 @@ async def handle_chores_leaderboard(call: types.CallbackQuery, db_user: User = N
         medal = medals[idx] if idx < len(medals) else "👤"
         text += f"{medal} {usr.display_name} — `{usr.points or 0} 🍪`\n"
 
-    builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="chores_back"))
-    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+    await call.message.edit_text(text, reply_markup=None, parse_mode="Markdown")
 
 
 @dp.callback_query(F.data.startswith("claim_chore:"))
@@ -1628,16 +1614,24 @@ async def render_chores_settings(message: types.Message, db_user: User = None, i
 
         builder = InlineKeyboardBuilder()
         if templates:
+            temp_data = []
             for t in templates:
                 last_done_date, nd = await get_template_next_date_val(session, t, today)
+                temp_data.append((t, last_done_date, nd))
+            
+            from datetime import date
+            temp_data.sort(key=lambda x: x[2] if x[2] is not None else date(2100, 12, 31))
+
+            for t, last_done_date, nd in temp_data:
                 pts_str = "2-8" if t.title == "Готовка" else str(t.points)
                 if nd and nd.year < 2099:
                     date_suffix = f" {nd.strftime('%d.%m.')}"
                 else:
                     date_suffix = ""
-                btn_text = f"{t.title} ---- ⚙️{pts_str}🍪{date_suffix}"
+                
                 builder.row(
-                    InlineKeyboardButton(text=btn_text, callback_data=f"tmpl_set:{t.id}:settings")
+                    InlineKeyboardButton(text=t.title, callback_data=f"tmpl_set:{t.id}:settings"),
+                    InlineKeyboardButton(text=f"⚙️{pts_str}🍪{date_suffix}", callback_data=f"tmpl_set:{t.id}:settings")
                 )
 
     text = "🛠 <b>Список задач дома:</b>" if templates else "Задач пока нет."
@@ -1692,9 +1686,7 @@ async def handle_chores_archive(call: types.CallbackQuery, db_user: User = None)
         
         if not sorted_dates:
             text = "📜 *История выполненных домашних дел:*\n\nИстория пуста!"
-            builder = InlineKeyboardBuilder()
-            builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="chores_back"))
-            await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+            await call.message.edit_text(text, reply_markup=None, parse_mode="Markdown")
             return
             
         if page < 0:
@@ -1728,8 +1720,6 @@ async def handle_chores_archive(call: types.CallbackQuery, db_user: User = None)
             nav.append(InlineKeyboardButton(text="➡️", callback_data=f"chores_arch:{page+1}"))
         if nav:
             builder.row(*nav)
-        
-        builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="chores_back"))
             
     await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
 
@@ -2152,7 +2142,6 @@ async def handle_my_shift_select(call: types.CallbackQuery, db_user: User = None
         prefix = "🟡 " if inst.date < today else ""
         builder.row(InlineKeyboardButton(text=f"{prefix}🏠 {tmpl.title}", callback_data=f"shift_chore_menu:{inst.id}"))
 
-    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="t_cancel"))
     await call.message.edit_text("🔄 Выберите задачу для переноса:", reply_markup=builder.as_markup())
 
 
@@ -2170,9 +2159,6 @@ async def handle_shift_pt_menu(call: types.CallbackQuery, db_user: User = None):
             InlineKeyboardButton(text=f"{d1.strftime('%d.%m')} ({days_ru[d1.weekday()]})", callback_data=f"shift_pt:{t_id}:{d1.strftime('%Y-%m-%d')}"),
             InlineKeyboardButton(text=f"{d2.strftime('%d.%m')} ({days_ru[d2.weekday()]})", callback_data=f"shift_pt:{t_id}:{d2.strftime('%Y-%m-%d')}"),
             InlineKeyboardButton(text="Другая дата", callback_data=f"rc_months_pt:{t_id}")
-        ],
-        [
-            InlineKeyboardButton(text="🔙 Назад", callback_data="my_shift_select")
         ]
     ]
     await call.message.edit_text("На какой день перенести задачу?", reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
@@ -2191,9 +2177,6 @@ async def handle_shift_chore_menu(call: types.CallbackQuery, db_user: User = Non
             InlineKeyboardButton(text=f"{d1.strftime('%d.%m')} ({days_ru[d1.weekday()]})", callback_data=f"shift_chore:{inst_id}:{d1.strftime('%Y-%m-%d')}"),
             InlineKeyboardButton(text=f"{d2.strftime('%d.%m')} ({days_ru[d2.weekday()]})", callback_data=f"shift_chore:{inst_id}:{d2.strftime('%Y-%m-%d')}"),
             InlineKeyboardButton(text="Другая дата", callback_data=f"rc_months_chore:{inst_id}")
-        ],
-        [
-            InlineKeyboardButton(text="🔙 Назад", callback_data="my_shift_select")
         ]
     ]
     await call.message.edit_text("На какой день перенести задачу?", reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
@@ -2348,7 +2331,6 @@ async def handle_my_delete_select(call: types.CallbackQuery, db_user: User = Non
         prefix = "🟡 " if inst.date < today else ""
         builder.row(InlineKeyboardButton(text=f"🗑 {prefix}🏠 {tmpl.title}", callback_data=f"del_chore_inst:{inst.id}"))
 
-    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="t_cancel"))
     await call.message.edit_text("🗑 Выберите задачу для удаления:", reply_markup=builder.as_markup())
 
 
@@ -2532,7 +2514,6 @@ async def p_move_menu(call: types.CallbackQuery, db_user: User = None):
             b.row(InlineKeyboardButton(text=f"📅 {ds}", callback_data="ignore"))
             cur = ds
         b.row(InlineKeyboardButton(text=t.text, callback_data=f"mov_p:{t.id}"))
-    b.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="p_cancel"))
     await call.message.edit_text("Выбери задачу для переноса:", reply_markup=b.as_markup())
 
 
@@ -2549,9 +2530,6 @@ async def mov_p_select(call: types.CallbackQuery):
             InlineKeyboardButton(text=f"{d1.strftime('%d.%m')} ({days_ru[d1.weekday()]})", callback_data=f"set_dt:pm:{t_id}:{d1.strftime('%Y-%m-%d')}"),
             InlineKeyboardButton(text=f"{d2.strftime('%d.%m')} ({days_ru[d2.weekday()]})", callback_data=f"set_dt:pm:{t_id}:{d2.strftime('%Y-%m-%d')}"),
             InlineKeyboardButton(text="Другая дата", callback_data=f"rc_months_plan:{t_id}")
-        ],
-        [
-            InlineKeyboardButton(text="🔙 Назад", callback_data="p_menu_move")
         ]
     ]
     await call.message.edit_text("На какой день перенести задачу?", reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
@@ -2571,7 +2549,6 @@ async def p_del_menu(call: types.CallbackQuery, db_user: User = None):
     b = InlineKeyboardBuilder()
     for t in tasks:
         b.row(InlineKeyboardButton(text=f"❌ {t.text}", callback_data=f"del_p:{t.id}"))
-    b.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="p_cancel"))
     await call.message.edit_text("Выбери задачу для удаления:", reply_markup=b.as_markup())
 
 
@@ -2617,7 +2594,6 @@ async def t_archive(call: types.CallbackQuery, db_user: User = None):
         nav.append(InlineKeyboardButton(text="➡️", callback_data=f"t_arch:{page+1}"))
     if nav:
         b.row(*nav)
-    b.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="t_cancel"))
     await call.message.edit_text(text, reply_markup=b.as_markup(), parse_mode="Markdown")
 
 
@@ -2645,7 +2621,8 @@ async def restore_task(call: types.CallbackQuery, db_user: User = None):
 # ── Shopping ──────────────────────────────────────────────────────────────────
 async def render_shop(message: types.Message, db_user: User, is_callback=False):
     async with AsyncSessionLocal() as session:
-        result = await session.execute(
+        # Fetch active shopping items
+        result_items = await session.execute(
             select(ShoppingItem).where(
                 and_(
                     ShoppingItem.house_id == ACTIVE_HOUSE_ID,
@@ -2654,7 +2631,25 @@ async def render_shop(message: types.Message, db_user: User, is_callback=False):
                 )
             ).order_by(ShoppingItem.priority.desc(), ShoppingItem.id.asc())
         )
-        items = result.scalars().all()
+        items = result_items.scalars().all()
+        
+        # Fetch active reward purchases for this house
+        house_users_result = await session.execute(
+            select(User).where(User.house_id == ACTIVE_HOUSE_ID)
+        )
+        house_users = house_users_result.scalars().all()
+        house_user_ids = [u.id for u in house_users]
+        user_name_map = {u.id: (u.display_name or u.username or "?") for u in house_users}
+        
+        result_purchases = await session.execute(
+            select(RewardPurchase).where(
+                and_(
+                    RewardPurchase.user_id.in_(house_user_ids),
+                    RewardPurchase.status.in_(["purchased", "pending_use"])
+                )
+            ).order_by(RewardPurchase.created_at.asc())
+        )
+        purchases = result_purchases.scalars().all()
 
     import random
     def get_emoji(item_id):
@@ -2665,16 +2660,29 @@ async def render_shop(message: types.Message, db_user: User, is_callback=False):
         random.setstate(state)
         return e
 
-    if items:
+    builder = InlineKeyboardBuilder()
+    
+    # 1. Render grocery items
+    for item in items:
+        prefix = "🔴 " if item.priority == "high" else ""
+        price_str = f"{item.price}₽ " if item.price > 0 else ""
+        emoji = get_emoji(item.id)
+        builder.button(text=f"{price_str}{emoji} {prefix}{item.item_name}", callback_data=f"done_shop:{item.id}")
+        
+    # 2. Render reward purchases
+    for purchase in purchases:
+        buyer_name = user_name_map.get(purchase.user_id, "?")
+        if purchase.status == "pending_use":
+            builder.button(text=f"⏳ 🎁 {purchase.reward_title} ({buyer_name})", callback_data="noop")
+        else:
+            builder.button(text=f"🎁 {purchase.reward_title} ({buyer_name})", callback_data=f"fulfill_rew:{purchase.id}")
+            
+    builder.adjust(2)
+    
+    # Bottom actions row (WITHOUT Back button)
+    if items or purchases:
         total = sum(i.price for i in items)
-        text = f"🛒 *Покупки — {total} ₽*\n👉 _Тапни на товар для вычеркивания:_"
-        builder = InlineKeyboardBuilder()
-        for item in items:
-            prefix = "🔴 " if item.priority == "high" else ""
-            price_str = f"{item.price}₽ " if item.price > 0 else ""
-            emoji = get_emoji(item.id)
-            builder.button(text=f"{price_str}{emoji} {prefix}{item.item_name}", callback_data=f"done_shop:{item.id}")
-        builder.adjust(2)
+        text = f"🛒 *Покупки — {total} ₽*\n👉 _Тапни на товар для вычеркивания, или на награду для погашения:_"
         builder.row(
             InlineKeyboardButton(text="✏️ Изм.", callback_data="s_edit"),
             InlineKeyboardButton(text="❌ Удал.", callback_data="s_del"),
@@ -2682,16 +2690,129 @@ async def render_shop(message: types.Message, db_user: User, is_callback=False):
         )
     else:
         text = "🍏 *Список покупок пуст!*"
-        builder = InlineKeyboardBuilder()
         builder.row(InlineKeyboardButton(text="📜 Архив покупок", callback_data="s_arch:0"))
-
-    builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="shop_and_purchases_back"))
 
     markup = builder.as_markup()
     if is_callback:
         await message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
     else:
         await message.answer(text, reply_markup=markup, parse_mode="Markdown")
+
+
+@dp.callback_query(F.data.startswith("fulfill_rew:"))
+async def handle_fulfill_reward(call: types.CallbackQuery, db_user: User = None):
+    purchase_id = int(call.data.split(":")[1])
+    async with AsyncSessionLocal() as session:
+        purchase = await session.get(RewardPurchase, purchase_id)
+        if not purchase:
+            await call.answer("⚠️ Покупка не найдена!", show_alert=False)
+            return
+            
+        if purchase.user_id == db_user.id:
+            await call.answer("Эту награду должен выполнить твой партнёр! 😉", show_alert=True)
+            return
+            
+        buyer = await session.get(User, purchase.user_id)
+        if not buyer:
+            await call.answer("⚠️ Покупатель не найден!", show_alert=False)
+            return
+            
+        purchase.status = "pending_use"
+        await session.commit()
+        
+        # Send confirmation request to the buyer
+        partner_name = db_user.display_name or db_user.username or "?"
+        confirm_text = (
+            f"🔔 *{partner_name}* хочет погасить твою награду: *{purchase.reward_title}*.\n"
+            "Подтверждаешь, что она была исполнена?"
+        )
+        confirm_kb = InlineKeyboardBuilder()
+        confirm_kb.row(
+            InlineKeyboardButton(text="✅ Да, исполнено", callback_data=f"conf_rew:{purchase.id}"),
+            InlineKeyboardButton(text="❌ Нет, не сделано", callback_data=f"rej_rew:{purchase.id}")
+        )
+        
+        try:
+            await call.bot.send_message(
+                chat_id=buyer.telegram_id,
+                text=confirm_text,
+                reply_markup=confirm_kb.as_markup(),
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            logger.error(f"Failed to send confirmation message to buyer: {e}")
+            
+    await call.answer("Запрос на подтверждение отправлен партнёру! ⏳", show_alert=True)
+    await render_shop(call.message, db_user, True)
+
+
+@dp.callback_query(F.data.startswith("conf_rew:"))
+async def handle_confirm_reward(call: types.CallbackQuery, db_user: User = None):
+    purchase_id = int(call.data.split(":")[1])
+    async with AsyncSessionLocal() as session:
+        purchase = await session.get(RewardPurchase, purchase_id)
+        if not purchase:
+            await call.answer("⚠️ Покупка не найдена!", show_alert=False)
+            return
+            
+        if purchase.user_id != db_user.id:
+            await call.answer("Только покупатель может подтвердить выполнение!", show_alert=True)
+            return
+            
+        purchase.status = "used"
+        purchase.used_at = datetime.utcnow()
+        
+        partner = await get_partner_user(session, db_user.id)
+        await session.commit()
+        
+        buyer_name = db_user.display_name or db_user.username or "?"
+        await call.message.edit_text(f"✅ Награда *{purchase.reward_title}* успешно погашена!", parse_mode="Markdown")
+        
+        if partner:
+            try:
+                await call.bot.send_message(
+                    chat_id=partner.telegram_id,
+                    text=f"✅ *{buyer_name}* подтвердил(а) выполнение награды *'{purchase.reward_title}'*!",
+                    parse_mode="Markdown"
+                )
+            except Exception as e:
+                logger.error(f"Failed to notify partner: {e}")
+                
+    await render_shop(call.message, db_user, True)
+
+
+@dp.callback_query(F.data.startswith("rej_rew:"))
+async def handle_reject_reward(call: types.CallbackQuery, db_user: User = None):
+    purchase_id = int(call.data.split(":")[1])
+    async with AsyncSessionLocal() as session:
+        purchase = await session.get(RewardPurchase, purchase_id)
+        if not purchase:
+            await call.answer("⚠️ Покупка не найдена!", show_alert=False)
+            return
+            
+        if purchase.user_id != db_user.id:
+            await call.answer("Только покупатель может отклонить выполнение!", show_alert=True)
+            return
+            
+        purchase.status = "purchased"
+        
+        partner = await get_partner_user(session, db_user.id)
+        await session.commit()
+        
+        buyer_name = db_user.display_name or db_user.username or "?"
+        await call.message.edit_text(f"❌ Выполнение награды *{purchase.reward_title}* отклонено.", parse_mode="Markdown")
+        
+        if partner:
+            try:
+                await call.bot.send_message(
+                    chat_id=partner.telegram_id,
+                    text=f"❌ *{buyer_name}* отклонил(а) выполнение награды *'{purchase.reward_title}'*. Она возвращена в список покупок.",
+                    parse_mode="Markdown"
+                )
+            except Exception as e:
+                logger.error(f"Failed to notify partner: {e}")
+                
+    await render_shop(call.message, db_user, True)
 
 
 @dp.callback_query(F.data == "shop_view_items")
@@ -2728,7 +2849,6 @@ async def s_del_menu(call: types.CallbackQuery):
     b = InlineKeyboardBuilder()
     for i in items:
         b.button(text=f"❌ {i.item_name}", callback_data=f"del_shop:{i.id}")
-    b.button(text="⬅️ Назад", callback_data="s_cancel")
     b.adjust(2)
     await call.message.edit_text("Выбери товар для удаления:", reply_markup=b.as_markup())
 
@@ -2757,7 +2877,6 @@ async def s_edit_menu(call: types.CallbackQuery):
     b = InlineKeyboardBuilder()
     for i in items:
         b.button(text=f"✏️ {i.item_name}", callback_data=f"ed_shop:{i.id}")
-    b.button(text="⬅️ Назад", callback_data="s_cancel")
     b.adjust(2)
     await call.message.edit_text("Выбери товар для редактирования:", reply_markup=b.as_markup())
 
@@ -2813,7 +2932,6 @@ async def s_archive(call: types.CallbackQuery):
         nav.append(InlineKeyboardButton(text="➡️", callback_data=f"s_arch:{page+1}"))
     if nav:
         b.row(*nav)
-    b.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="s_cancel"))
     await call.message.edit_text(text, reply_markup=b.as_markup(), parse_mode="Markdown")
 
 
@@ -2940,6 +3058,7 @@ async def handle_stat_arch(call: types.CallbackQuery, db_user: User = None):
             "points": pts_val,
             "user": u_name,
             "time": local_dt.strftime("%H:%M"),
+            "is_personal": False,
             "sort_dt": local_dt.replace(tzinfo=None)
         })
 
@@ -2952,6 +3071,7 @@ async def handle_stat_arch(call: types.CallbackQuery, db_user: User = None):
             "points": "0",
             "user": u_name,
             "time": "",
+            "is_personal": True,
             "sort_dt": datetime.combine(pt.date_execution, datetime.min.time())
         })
 
@@ -2975,11 +3095,16 @@ async def handle_stat_arch(call: types.CallbackQuery, db_user: User = None):
     builder = InlineKeyboardBuilder()
 
     for e in day_entries:
-        left_text = f"{e['points']}🍪 {e['name']}"
+        if e.get("is_personal"):
+            left_text = e['name']
+        else:
+            left_text = f"{e['points']}🍪 {e['name']}"
+            
         if e['time']:
             right_text = f"{e['user']} {e['time']}"
         else:
             right_text = f"{e['user']}"
+            
         builder.row(
             InlineKeyboardButton(text=left_text, callback_data="noop"),
             InlineKeyboardButton(text=right_text, callback_data="noop")
@@ -2992,8 +3117,6 @@ async def handle_stat_arch(call: types.CallbackQuery, db_user: User = None):
         nav.append(InlineKeyboardButton(text="Старее ➡️", callback_data=f"stat_arch:{page+1}"))
     if nav:
         builder.row(*nav)
-
-    builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="shop_and_purchases_back"))
 
     await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
 
@@ -3019,8 +3142,7 @@ async def render_rewards_settings(message: types.Message, db_user: User, is_call
 
     builder.adjust(1)
     builder.row(
-        InlineKeyboardButton(text="➕ Добавить награду", callback_data="add_reward_start"),
-        InlineKeyboardButton(text="⬅️ Назад", callback_data="rewards_back")
+        InlineKeyboardButton(text="➕ Добавить награду", callback_data="add_reward_start")
     )
     markup = builder.as_markup()
     if is_callback:
@@ -3047,8 +3169,7 @@ async def handle_rewards_shop_view(call: types.CallbackQuery, db_user: User = No
         text += "\nНаград пока нет."
 
     builder.row(
-        InlineKeyboardButton(text="⚙️ Управление наградами", callback_data="rewards_settings"),
-        InlineKeyboardButton(text="🛍 Купленные награды", callback_data="rewards_purchases:0")
+        InlineKeyboardButton(text="⚙️ Управление наградами", callback_data="rewards_settings")
     )
 
     await call.message.edit_text(text, reply_markup=builder.as_markup())
@@ -3136,7 +3257,6 @@ async def handle_rewards_purchases(call: types.CallbackQuery, db_user: User = No
         nav.append(InlineKeyboardButton(text="➡️", callback_data=f"rewards_purchases:{page+1}"))
     if nav:
         builder.row(*nav)
-    builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="rewards_back"))
     await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
 
 
@@ -3291,7 +3411,6 @@ async def handle_settings_del_menu(call: types.CallbackQuery, db_user: User = No
     builder = InlineKeyboardBuilder()
     for t in templates:
         builder.row(InlineKeyboardButton(text=f"🗑 {t.title}", callback_data=f"te_del:{t.id}:settings"))
-    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="chores_settings"))
     await call.message.edit_text("Выберите задачу для удаления:", reply_markup=builder.as_markup())
 
 
