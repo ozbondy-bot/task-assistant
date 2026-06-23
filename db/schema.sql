@@ -39,7 +39,8 @@ CREATE TABLE personal_tasks (
     is_completed BOOLEAN DEFAULT FALSE NOT NULL,
     category VARCHAR(50) DEFAULT 'inbox' NOT NULL,
     recurrence VARCHAR(50),
-    is_deleted BOOLEAN DEFAULT FALSE NOT NULL
+    is_deleted BOOLEAN DEFAULT FALSE NOT NULL,
+    completed_at TIMESTAMP
 );
 
 CREATE TABLE shopping_items (

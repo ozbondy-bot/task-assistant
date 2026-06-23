@@ -424,6 +424,14 @@ async def generate_daily_chores_if_needed(session, house_id: int):
                 pos = ((month - 1) % 3) + 1
                 if pos == (tmpl.weekday if tmpl.weekday is not None else 1):
                     should_create = True
+        elif p == "every_x_days":
+            _, nd = await get_template_next_date_val(session, tmpl, today)
+            if nd <= today:
+                should_create = True
+        elif p == "once":
+            _, nd = await get_template_next_date_val(session, tmpl, today)
+            if nd <= today:
+                should_create = True
 
         if should_create:
             exists = await session.scalar(
@@ -641,8 +649,8 @@ async def render_household_chores(message: types.Message, db_user: User, is_call
             )
 
     builder.row(
-        InlineKeyboardButton(text="Добавить", callback_data="chores_add_menu"),
-        InlineKeyboardButton(text="Настройки", callback_data="chores_settings"),
+        InlineKeyboardButton(text="➕ Добавить", callback_data="chores_add_menu"),
+        InlineKeyboardButton(text="⚙️ Настройки", callback_data="chores_settings"),
     )
 
     markup = builder.as_markup()
@@ -680,11 +688,14 @@ async def handle_chores_add_menu(call: types.CallbackQuery, db_user: User = None
 async def handle_add_from_templates_list(call: types.CallbackQuery, db_user: User = None):
     today = datetime.now().date()
     async with AsyncSessionLocal() as session:
+        # Exclude templates that already have instances for today
+        subq = select(TaskInstance.template_id).where(TaskInstance.date == today)
         result = await session.execute(
             select(TaskTemplate).where(
                 and_(
                     TaskTemplate.house_id == ACTIVE_HOUSE_ID,
-                    TaskTemplate.deleted == False
+                    TaskTemplate.deleted == False,
+                    TaskTemplate.id.not_in(subq)
                 )
             )
         )
@@ -695,7 +706,9 @@ async def handle_add_from_templates_list(call: types.CallbackQuery, db_user: Use
         for t in templates:
             last_done_date, nd = await get_template_next_date_val(session, t, today)
             tmpl_with_dates.append((t, last_done_date, nd))
-        tmpl_with_dates.sort(key=lambda x: x[2])
+        
+        from datetime import date
+        tmpl_with_dates.sort(key=lambda x: x[2] if x[2] is not None else date(2100, 12, 31))
 
         builder = InlineKeyboardBuilder()
         if tmpl_with_dates:
@@ -706,9 +719,9 @@ async def handle_add_from_templates_list(call: types.CallbackQuery, db_user: Use
                     date_suffix = f" {nd.strftime('%d.%m.')}"
                 else:
                     date_suffix = ""
-                btn_text = f"{t.title} ---- {pts_str}🍪{date_suffix}"
                 builder.row(
-                    InlineKeyboardButton(text=btn_text, callback_data=f"spawn_chore:{t.id}")
+                    InlineKeyboardButton(text=t.title, callback_data=f"spawn_chore:{t.id}"),
+                    InlineKeyboardButton(text=f"{pts_str}🍪{date_suffix}", callback_data=f"spawn_chore:{t.id}")
                 )
         else:
             text = "⚠️ Шаблонов дел пока нет!"
@@ -907,6 +920,13 @@ def get_template_next_date(t: TaskTemplate, last_done_date: date, active_inst_da
 
 
 async def get_template_next_date_val(session: AsyncSession, t: TaskTemplate, today_date: date):
+    from zoneinfo import ZoneInfo
+    from datetime import timezone as dt_timezone
+    
+    house = await session.get(House, t.house_id)
+    tz_str = house.timezone if house else "Europe/Moscow"
+    tz = ZoneInfo(tz_str)
+
     # 1. last done date
     last_comp = await session.execute(
         select(Completion.created_at)
@@ -916,7 +936,12 @@ async def get_template_next_date_val(session: AsyncSession, t: TaskTemplate, tod
         .limit(1)
     )
     last_done_dt = last_comp.scalar()
-    last_done_date = last_done_dt.date() if last_done_dt else None
+    if last_done_dt:
+        utc_dt = last_done_dt.replace(tzinfo=dt_timezone.utc)
+        local_dt = utc_dt.astimezone(tz)
+        last_done_date = local_dt.date()
+    else:
+        last_done_date = None
 
     # 2. active inst date
     active_inst_date = await session.scalar(
@@ -1056,9 +1081,7 @@ async def handle_tmpl_set(call: types.CallbackQuery, db_user: User = None):
                 InlineKeyboardButton(text="📅 Сдвиг", callback_data=f"resched_menu:{inst_id}"),
                 InlineKeyboardButton(text="🗑 Копию", callback_data=f"del_inst:{inst_id}")
             )
-            builder.row(
-                InlineKeyboardButton(text="⚙️ Настройки", callback_data=f"tmpl_set:{tmpl.id}:today_list")
-            )
+
         else:
             builder = InlineKeyboardBuilder()
 
@@ -1635,10 +1658,6 @@ async def render_chores_settings(message: types.Message, db_user: User = None, i
                 )
 
     text = "🛠 <b>Список задач дома:</b>" if templates else "Задач пока нет."
-    builder.row(
-        InlineKeyboardButton(text="➕ Добавить", callback_data="add_tmpl_start"),
-        InlineKeyboardButton(text="🗑 Удалить", callback_data="settings_del_menu"),
-    )
 
     if is_callback:
         await message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
@@ -1714,10 +1733,10 @@ async def handle_chores_archive(call: types.CallbackQuery, db_user: User = None)
             )
             
         nav = []
-        if page > 0:
-            nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"chores_arch:{page-1}"))
         if page < len(sorted_dates) - 1:
-            nav.append(InlineKeyboardButton(text="➡️", callback_data=f"chores_arch:{page+1}"))
+            nav.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"chores_arch:{page+1}"))
+        if page > 0:
+            nav.append(InlineKeyboardButton(text="Вперед ▶️", callback_data=f"chores_arch:{page-1}"))
         if nav:
             builder.row(*nav)
             
@@ -2377,6 +2396,7 @@ async def handle_done_task(call: types.CallbackQuery, db_user: User = None):
         task = await session.get(PersonalTask, t_id)
         if task:
             task.is_completed = True
+            task.completed_at = datetime.utcnow()
             if task.recurrence:
                 delta = get_recurrence_delta(task.recurrence)
                 clean = clean_task_text(task.text)
@@ -2589,9 +2609,9 @@ async def t_archive(call: types.CallbackQuery, db_user: User = None):
     b.adjust(1)
     nav = []
     if page > 0:
-        nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"t_arch:{page-1}"))
+        nav.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"t_arch:{page-1}"))
     if len(tasks) == 10:
-        nav.append(InlineKeyboardButton(text="➡️", callback_data=f"t_arch:{page+1}"))
+        nav.append(InlineKeyboardButton(text="Вперед ▶️", callback_data=f"t_arch:{page+1}"))
     if nav:
         b.row(*nav)
     await call.message.edit_text(text, reply_markup=b.as_markup(), parse_mode="Markdown")
@@ -2677,7 +2697,7 @@ async def render_shop(message: types.Message, db_user: User, is_callback=False):
         else:
             builder.button(text=f"🎁 {purchase.reward_title} ({buyer_name})", callback_data=f"fulfill_rew:{purchase.id}")
             
-    builder.adjust(2)
+    builder.adjust(1)
     
     # Bottom actions row (WITHOUT Back button)
     if items or purchases:
@@ -2927,9 +2947,9 @@ async def s_archive(call: types.CallbackQuery):
     b.adjust(1)
     nav = []
     if page > 0:
-        nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"s_arch:{page-1}"))
+        nav.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"s_arch:{page-1}"))
     if len(items) == 10:
-        nav.append(InlineKeyboardButton(text="➡️", callback_data=f"s_arch:{page+1}"))
+        nav.append(InlineKeyboardButton(text="Вперед ▶️", callback_data=f"s_arch:{page+1}"))
     if nav:
         b.row(*nav)
     await call.message.edit_text(text, reply_markup=b.as_markup(), parse_mode="Markdown")
@@ -3066,13 +3086,22 @@ async def handle_stat_arch(call: types.CallbackQuery, db_user: User = None):
         u_name = user_name_map.get(pt.user_id, "?")
         clean = clean_task_text(pt.text)
         local_date = pt.date_execution
+        
+        time_str = ""
+        sort_dt = datetime.combine(pt.date_execution, datetime.min.time())
+        if pt.completed_at:
+            utc_dt = pt.completed_at.replace(tzinfo=dt_timezone.utc)
+            local_dt = utc_dt.astimezone(tz)
+            time_str = local_dt.strftime("%H:%M")
+            sort_dt = local_dt.replace(tzinfo=None)
+            
         grouped[local_date].append({
             "name": clean,
             "points": "0",
             "user": u_name,
-            "time": "",
+            "time": time_str,
             "is_personal": True,
-            "sort_dt": datetime.combine(pt.date_execution, datetime.min.time())
+            "sort_dt": sort_dt
         })
 
     unique_dates = sorted(list(grouped.keys()), reverse=True)
@@ -3111,10 +3140,10 @@ async def handle_stat_arch(call: types.CallbackQuery, db_user: User = None):
         )
 
     nav = []
-    if page > 0:
-        nav.append(InlineKeyboardButton(text="⬅️ Новее", callback_data=f"stat_arch:{page-1}"))
     if page < total_days - 1:
-        nav.append(InlineKeyboardButton(text="Старее ➡️", callback_data=f"stat_arch:{page+1}"))
+        nav.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"stat_arch:{page+1}"))
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="Вперед ▶️", callback_data=f"stat_arch:{page-1}"))
     if nav:
         builder.row(*nav)
 
@@ -3252,9 +3281,9 @@ async def handle_rewards_purchases(call: types.CallbackQuery, db_user: User = No
     builder = InlineKeyboardBuilder()
     nav = []
     if page > 0:
-        nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"rewards_purchases:{page-1}"))
+        nav.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"rewards_purchases:{page-1}"))
     if len(rows) == 5:
-        nav.append(InlineKeyboardButton(text="➡️", callback_data=f"rewards_purchases:{page+1}"))
+        nav.append(InlineKeyboardButton(text="Вперед ▶️", callback_data=f"rewards_purchases:{page+1}"))
     if nav:
         builder.row(*nav)
     await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")

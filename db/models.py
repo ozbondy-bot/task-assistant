@@ -77,6 +77,8 @@ class PersonalTask(Base):
     category = Column(String, default="inbox", nullable=False)
     recurrence = Column(String, nullable=True)
     is_deleted = Column(Boolean, default=False, nullable=False)
+    completed_at = Column(DateTime, nullable=True)
+
 
     user = relationship("User", back_populates="personal_tasks")
 
