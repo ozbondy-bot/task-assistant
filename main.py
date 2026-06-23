@@ -22,7 +22,8 @@ if not DATABASE_URL:
 
 
 async def run_bot():
-    from bot.handlers import bot, dp
+    from bot.handlers.base import bot
+    from bot.handlers import dp
     logger.info("Starting bot polling...")
     try:
         await bot.set_my_description(
@@ -50,7 +51,7 @@ async def run_api():
 
 
 async def main():
-    from bot.handlers import scheduler_loop
+    from bot.handlers.base import scheduler_loop
     # Run bot polling, FastAPI, and scheduler loop concurrently
     await asyncio.gather(
         run_bot(),
