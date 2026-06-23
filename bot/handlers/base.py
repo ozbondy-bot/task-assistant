@@ -458,13 +458,13 @@ async def generate_daily_chores_if_needed(session, house_id: int):
                 )
                 session.add(inst)
 
-    # Rollover old uncompleted tasks
+    # Rollover old uncompleted tasks (excluding completed or skipped)
     await session.execute(
         update(TaskInstance)
         .where(
             and_(
                 TaskInstance.date < today,
-                TaskInstance.status != "done"
+                TaskInstance.status.notin_(["done", "skipped"])
             )
         )
         .values(date=today)
@@ -852,12 +852,19 @@ def get_template_next_date(t: TaskTemplate, last_done_date: date, active_inst_da
 
 
 async def get_template_next_date_val(session: AsyncSession, t: TaskTemplate, today_date: date):
-    # Find last done date
+    # Find last done date (for display)
     last_done_result = await session.execute(
         select(sa.func.max(TaskInstance.date))
         .where(and_(TaskInstance.template_id == t.id, TaskInstance.status == "done"))
     )
     last_done = last_done_result.scalar()
+
+    # Find last handled date (treating skipped as done for next date calculation)
+    last_handled_result = await session.execute(
+        select(sa.func.max(TaskInstance.date))
+        .where(and_(TaskInstance.template_id == t.id, TaskInstance.status.in_(["done", "skipped"])))
+    )
+    last_handled = last_handled_result.scalar()
     
     # Find active today/future instance
     active_inst_result = await session.execute(
@@ -871,7 +878,7 @@ async def get_template_next_date_val(session: AsyncSession, t: TaskTemplate, tod
     )
     active_inst_date = active_inst_result.scalar()
     
-    nd = get_template_next_date(t, last_done, active_inst_date, today_date)
+    nd = get_template_next_date(t, last_handled, active_inst_date, today_date)
     return last_done, nd
 
 

@@ -7,9 +7,9 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardButton
 from sqlalchemy import select, and_
 
-from db.models import AsyncSessionLocal, User, ShoppingItem, PersonalTask
-from bot.parser import clean_task_text
-from bot.handlers.base import bot, dp, ACTIVE_HOUSE_ID, logger, EditShop, get_house_today_date, render_today
+from db.models import AsyncSessionLocal, User, ShoppingItem, PersonalTask, RewardPurchase, TaskTemplate
+from bot.parser import clean_task_text, parse_input
+from bot.handlers.base import bot, dp, ACTIVE_HOUSE_ID, logger, EditShop, get_house_today_date, render_today, get_partner_user, create_calendar_keyboard_custom, format_calendar_header
 
 
 # ── Shopping ──────────────────────────────────────────────────────────────────
@@ -425,6 +425,7 @@ async def handle_cal_nav_plan(call: types.CallbackQuery, db_user: User = None):
 
 @dp.callback_query(F.data.startswith("shift_plan:"))
 async def handle_shift_plan(call: types.CallbackQuery, db_user: User = None):
+    from bot.handlers.tasks import render_plans
     parts = call.data.split(":")
     t_id = int(parts[1])
     date_str = parts[2]
@@ -444,6 +445,7 @@ async def handle_shift_plan(call: types.CallbackQuery, db_user: User = None):
 
 @dp.callback_query(F.data.startswith("shift_plan_menu:"))
 async def handle_shift_plan_menu(call: types.CallbackQuery, db_user: User = None):
+    from bot.handlers.tasks import mov_p_select
     t_id = int(call.data.split(":")[1])
     call.data = f"mov_p:{t_id}"
     await mov_p_select(call)
@@ -451,6 +453,7 @@ async def handle_shift_plan_menu(call: types.CallbackQuery, db_user: User = None
 
 @dp.callback_query(F.data.startswith("set_dt:"))
 async def exe_set_dt(call: types.CallbackQuery, db_user: User = None):
+    from bot.handlers.tasks import render_plans
     parts = call.data.split(":")
     prefix = parts[1]
     t_id = int(parts[2])
