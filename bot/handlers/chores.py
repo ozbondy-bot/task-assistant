@@ -266,10 +266,10 @@ async def redirect_to_template_settings(message: types.Message, tid: int, src: s
         InlineKeyboardButton(text="Имя", callback_data=f"te_f:title:{tmpl.id}:{src}"),
         InlineKeyboardButton(text="Цикл", callback_data=f"te_f:period:{tmpl.id}:{src}"),
         InlineKeyboardButton(text="🍪", callback_data=f"te_f:points:{tmpl.id}:{src}"),
-        InlineKeyboardButton(text="🗑 Удалить", callback_data=f"te_del_confirm:{tmpl.id}:{src}")
     )
     builder.row(
-        InlineKeyboardButton(text="📅 Перенести на другой день", callback_data=f"te_shift_start:{tmpl.id}:{src}")
+        InlineKeyboardButton(text="📅 Сдвиг", callback_data=f"te_shift_start:{tmpl.id}:{src}"),
+        InlineKeyboardButton(text="🗑 Удалить", callback_data=f"te_del_confirm:{tmpl.id}:{src}")
     )
     if is_callback:
         await message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
@@ -1355,10 +1355,22 @@ async def handle_shift_tmpl_start(call: types.CallbackQuery, db_user: User = Non
     date_str = parts[2]
     new_date = datetime.strptime(date_str, "%Y-%m-%d").date()
     
+    from sqlalchemy import update
     async with AsyncSessionLocal() as session:
         tmpl = await session.get(TaskTemplate, tmpl_id)
         if tmpl:
             tmpl.start_date = new_date
+            # Move any active instances of this task template to the new date
+            await session.execute(
+                update(TaskInstance)
+                .where(
+                    and_(
+                        TaskInstance.template_id == tmpl.id,
+                        TaskInstance.status.in_(["free", "in_progress", "shifted"])
+                    )
+                )
+                .values(date=new_date)
+            )
             await session.commit()
             await call.answer(f"✅ Дата отсчета перенесена на {new_date.strftime('%d.%m')}!", show_alert=True)
             

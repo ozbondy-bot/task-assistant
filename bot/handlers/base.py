@@ -818,36 +818,43 @@ def get_template_next_date(t: TaskTemplate, last_done_date: date, active_inst_da
     p = t.periodicity
     if p == "once":
         if last_done_date:
+            if t.start_date and t.start_date > last_done_date:
+                return t.start_date
             return date(2099, 12, 31)
         else:
             return t.start_date if t.start_date else today_date
         
-    # Standard recurring schedules
-    anchor = last_done_date or t.start_date or (today_date - timedelta(days=30))
-    
     if active_inst_date:
         return max(active_inst_date, today_date)
         
-    search_start = max(anchor + timedelta(days=1), today_date)
+    if t.start_date and (last_done_date is None or t.start_date > last_done_date):
+        anchor = t.start_date
+        search_start = max(anchor, today_date)
+    else:
+        anchor = last_done_date or t.start_date or (today_date - timedelta(days=30))
+        search_start = max(anchor + timedelta(days=1), today_date)
     
     if p == "every_x_days":
         days = t.period_days or 1
-        if last_done_date:
-            next_d = last_done_date + timedelta(days=days)
-            while next_d < today_date:
-                next_d += timedelta(days=days)
-            return next_d
-        elif t.start_date:
+        if t.start_date and (last_done_date is None or t.start_date > last_done_date):
             if t.start_date >= today_date:
                 return t.start_date
             next_d = t.start_date
             while next_d < today_date:
                 next_d += timedelta(days=days)
             return next_d
+        elif last_done_date:
+            next_d = last_done_date + timedelta(days=days)
+            while next_d < today_date:
+                next_d += timedelta(days=days)
+            return next_d
         else:
             return today_date
             
-    return find_scheduled_date_on_or_after(t, search_start)
+    nd = find_scheduled_date_on_or_after(t, search_start)
+    if t.start_date and nd < t.start_date:
+        return t.start_date
+    return nd
 
 
 

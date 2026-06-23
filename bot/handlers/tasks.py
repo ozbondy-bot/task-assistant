@@ -83,10 +83,14 @@ async def handle_my_add_text(message: types.Message, state: FSMContext, db_user:
     async with AsyncSessionLocal() as session:
         today = await get_house_today_date(session)
         
+    days_ru = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
+    d_today = today
+    d_tomorrow = today + timedelta(days=1)
+
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text="Сегодня", callback_data="addpt_date:today"),
-        InlineKeyboardButton(text="Завтра", callback_data="addpt_date:tomorrow"),
+        InlineKeyboardButton(text=f"{d_today.strftime('%d.%m')} ({days_ru[d_today.weekday()]})", callback_data="addpt_date:today"),
+        InlineKeyboardButton(text=f"{d_tomorrow.strftime('%d.%m')} ({days_ru[d_tomorrow.weekday()]})", callback_data="addpt_date:tomorrow"),
         InlineKeyboardButton(text="Другая дата", callback_data="addpt_date:calendar")
     )
     builder.row(
