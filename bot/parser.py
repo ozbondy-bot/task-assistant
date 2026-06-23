@@ -36,20 +36,21 @@ def parse_input(text: str):
     price = 0
     priority = "normal"
 
-    # Check if it's a purchase ("купить ...")
+    # Check if it's a purchase (defaults to True now)
+    is_purchase = True
     if text_lower.startswith("купить "):
-        is_purchase = True
         text = text[7:].strip()
         text_lower = text.lower()
-        words = text.split()
-        if words and words[-1].isdigit():
-            price = int(words[-1])
-            text = " ".join(words[:-1])
-            text_lower = text.lower()
-        if "срочно" in text_lower:
-            priority = "high"
-            text = re.sub(r'срочно', '', text, flags=re.IGNORECASE).strip()
-            text_lower = text.lower()
+        
+    words = text.split()
+    if words and words[-1].isdigit():
+        price = int(words[-1])
+        text = " ".join(words[:-1])
+        text_lower = text.lower()
+    if "срочно" in text_lower:
+        priority = "high"
+        text = re.sub(r'срочно', '', text, flags=re.IGNORECASE).strip()
+        text_lower = text.lower()
 
     # Parse recurrence keywords
     if "каждый день" in text_lower or "ежедневно" in text_lower:

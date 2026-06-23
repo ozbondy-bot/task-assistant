@@ -73,7 +73,7 @@ async def handle_approve_action(call: types.CallbackQuery, db_user: User = None)
             # Spawn instance for today as well
             inst = TaskInstance(
                 template_id=tmpl.id,
-                date=datetime.now().date(),
+                date=await get_house_today_date(session),
                 status="free",
                 priority=0
             )
@@ -168,13 +168,14 @@ async def handle_reject_action(call: types.CallbackQuery, db_user: User = None):
 
 async def send_morning_message():
     async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
         await generate_daily_chores_if_needed(session, ACTIVE_HOUSE_ID)
         result = await session.execute(
             select(TaskInstance, TaskTemplate)
             .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
             .where(and_(
                 TaskTemplate.house_id == ACTIVE_HOUSE_ID,
-                TaskInstance.date == datetime.now().date(),
+                TaskInstance.date == today,
                 TaskInstance.status == "free",
                 TaskTemplate.deleted == False
             ))
@@ -205,11 +206,11 @@ async def send_morning_message():
             await bot.send_message(chat_id=u.telegram_id, text=text, parse_mode="Markdown")
         except Exception as e:
             logger.error(f"Failed to send morning message to {u.telegram_id}: {e}")
-
-
+ 
+ 
 async def send_14_reminder():
-    today = datetime.now().date()
     async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
         users = (await session.execute(select(User).where(User.house_id == ACTIVE_HOUSE_ID))).scalars().all()
         for u in users:
             res = await session.execute(
@@ -230,11 +231,11 @@ async def send_14_reminder():
                     await bot.send_message(chat_id=u.telegram_id, text=text, parse_mode="Markdown")
                 except Exception as e:
                     logger.error(f"Failed to send 14:00 reminder to {u.telegram_id}: {e}")
-
-
+ 
+ 
 async def send_17_reminder():
-    today = datetime.now().date()
     async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
         result = await session.execute(
             select(TaskInstance, TaskTemplate)
             .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
@@ -378,10 +379,17 @@ async def scheduler_loop():
         await asyncio.sleep(30)
 
 
+async def get_house_today_date(session: AsyncSession) -> date:
+    from zoneinfo import ZoneInfo
+    house = await session.get(House, ACTIVE_HOUSE_ID)
+    tz_str = house.timezone if (house and house.timezone) else "Europe/Moscow"
+    return datetime.now(ZoneInfo(tz_str)).date()
+
+
 async def generate_daily_chores_if_needed(session, house_id: int):
     """Generate today's task instances from templates and rollover uncompleted ones."""
     from sqlalchemy import update
-    today = datetime.now().date()
+    today = await get_house_today_date(session)
     weekday = today.weekday()
     day = today.day
     month = today.month
@@ -608,8 +616,8 @@ def period_label_ru(p: str) -> str:
 
 
 async def render_household_chores(message: types.Message, db_user: User, is_callback=False):
-    today = datetime.now().date()
     async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
         await generate_daily_chores_if_needed(session, ACTIVE_HOUSE_ID)
         result = await session.execute(
             select(TaskInstance, TaskTemplate)
@@ -683,8 +691,8 @@ async def handle_chores_add_menu(call: types.CallbackQuery, db_user: User = None
 
 @dp.callback_query(F.data == "add_from_templates_list")
 async def handle_add_from_templates_list(call: types.CallbackQuery, db_user: User = None):
-    today = datetime.now().date()
     async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
         subq = select(TaskInstance.template_id).where(
             and_(
                 TaskInstance.date == today,
@@ -733,8 +741,8 @@ async def handle_add_from_templates_list(call: types.CallbackQuery, db_user: Use
 @dp.callback_query(F.data.startswith("spawn_chore:"))
 async def handle_spawn_chore(call: types.CallbackQuery, db_user: User = None):
     tmpl_id = int(call.data.split(":")[1])
-    today = datetime.now().date()
     async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
         tmpl = await session.get(TaskTemplate, tmpl_id)
         if tmpl:
             inst = TaskInstance(
@@ -982,8 +990,8 @@ def get_period_label(tmpl: TaskTemplate) -> str:
 
 
 async def redirect_to_template_settings(message: types.Message, tid: int, src: str, db_user: User, is_callback=True):
-    today = datetime.now().date()
     async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
         tmpl = await session.get(TaskTemplate, tid)
         if not tmpl:
             if src == "today_list":
@@ -1031,9 +1039,9 @@ async def handle_tmpl_set(call: types.CallbackQuery, db_user: User = None):
     parts = call.data.split(":")
     tmpl_id = int(parts[1])
     src = parts[2]
-    today = datetime.now().date()
     
     async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
         tmpl = await session.get(TaskTemplate, tmpl_id)
         if not tmpl:
             await call.answer("Шаблон не найден", show_alert=False)
@@ -1442,13 +1450,13 @@ async def handle_te_del_confirm(call: types.CallbackQuery, db_user: User = None)
 @dp.callback_query(F.data.startswith("nudge:"))
 async def handle_nudge(call: types.CallbackQuery, db_user: User = None):
     inst_id = int(call.data.split(":")[1])
-    today = datetime.now().date()
     
-    if nudge_cache.get(inst_id) == today:
-        await call.answer("Тише-тише, намек уже отправлен. Ждем реакции! 🤫", show_alert=False)
-        return
-        
     async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
+        if nudge_cache.get(inst_id) == today:
+            await call.answer("Тише-тише, намек уже отправлен. Ждем реакции! 🤫", show_alert=False)
+            return
+            
         inst = await session.get(TaskInstance, inst_id)
         if not inst:
             await call.answer("Задача не найдена", show_alert=False)
@@ -1486,15 +1494,15 @@ async def handle_nudge(call: types.CallbackQuery, db_user: User = None):
 @dp.callback_query(F.data.startswith("resched_menu:"))
 async def handle_resched_menu(call: types.CallbackQuery, db_user: User = None):
     inst_id = int(call.data.split(":")[1])
-    today = datetime.now().date()
-    d1 = today + timedelta(days=1)
-    d2 = today + timedelta(days=2)
     days_ru = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
     
     async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
         inst = await session.get(TaskInstance, inst_id)
         tmpl_id = inst.template_id if inst else 0
         
+    d1 = today + timedelta(days=1)
+    d2 = today + timedelta(days=2)
     keyboard = [
         [
             InlineKeyboardButton(text=f"{d1.strftime('%d.%m')} ({days_ru[d1.weekday()]})", callback_data=f"shift:once:{inst_id}:{d1.strftime('%Y-%m-%d')}"),
@@ -1568,7 +1576,8 @@ async def handle_del_inst(call: types.CallbackQuery, db_user: User = None):
 @dp.callback_query(F.data.startswith("rc_months:"))
 async def handle_rc_months(call: types.CallbackQuery, db_user: User = None):
     inst_id = int(call.data.split(":")[1])
-    today = datetime.now().date()
+    async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
     markup = create_calendar_keyboard(inst_id, today.year, today.month, today)
     header = format_calendar_header(today)
     await call.message.edit_text(header, reply_markup=markup, parse_mode="Markdown")
@@ -1580,7 +1589,8 @@ async def handle_cal_nav(call: types.CallbackQuery, db_user: User = None):
     inst_id = int(parts[1])
     year = int(parts[2])
     month = int(parts[3])
-    today = datetime.now().date()
+    async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
     markup = create_calendar_keyboard(inst_id, year, month, today)
     header = format_calendar_header(today)
     await call.message.edit_text(header, reply_markup=markup, parse_mode="Markdown")
@@ -1624,8 +1634,8 @@ async def handle_claim_chore(call: types.CallbackQuery, db_user: User = None):
 
 
 async def render_chores_settings(message: types.Message, db_user: User = None, is_callback=False):
-    today = datetime.now().date()
     async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
         result = await session.execute(
             select(TaskTemplate).where(
                 and_(
@@ -1876,7 +1886,7 @@ async def handle_add_tmpl_periodicity(call: types.CallbackQuery, state: FSMConte
             
             inst = TaskInstance(
                 template_id=tmpl.id,
-                date=datetime.now().date(),
+                date=await get_house_today_date(session),
                 status="free",
                 priority=0
             )
@@ -1953,7 +1963,7 @@ async def handle_add_tmpl_period_days(message: types.Message, state: FSMContext,
             
             inst = TaskInstance(
                 template_id=tmpl.id,
-                date=datetime.now().date(),
+                date=await get_house_today_date(session),
                 status="free",
                 priority=0
             )
@@ -1973,8 +1983,8 @@ async def rollover_overdue_tasks(session: AsyncSession, user_id: int):
 
 
 async def render_today(message: types.Message, db_user: User, is_callback=False, page: int = 0):
-    today = datetime.now().date()
     async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
         await rollover_overdue_tasks(session, db_user.id)
 
         # 1. Fetch ALL active personal tasks
@@ -2113,9 +2123,9 @@ async def handle_my_add(call: types.CallbackQuery, state: FSMContext, db_user: U
     page = int(parts[1]) if len(parts) > 1 else 0
     await state.set_state(AddPersonalTaskState.waiting_for_text)
     
-    target_date = datetime.now().date()
-    if page > 0:
-        async with AsyncSessionLocal() as session:
+    async with AsyncSessionLocal() as session:
+        target_date = await get_house_today_date(session)
+        if page > 0:
             result = await session.execute(
                 select(PersonalTask).where(
                     and_(
@@ -2177,12 +2187,6 @@ async def handle_my_add_text(message: types.Message, state: FSMContext, db_user:
         
     state_data = await state.get_data()
     page = state_data.get("page", 0)
-    target_date_str = state_data.get("target_date")
-    if target_date_str:
-        exec_date = datetime.strptime(target_date_str, "%Y-%m-%d").date()
-    else:
-        exec_date = datetime.now().date()
-        
     import re
     is_urgent = "срочно" in text.lower()
     clean_text = re.sub(r'срочно', '', text, flags=re.IGNORECASE).strip().capitalize()
@@ -2193,6 +2197,11 @@ async def handle_my_add_text(message: types.Message, state: FSMContext, db_user:
         db_text = clean_text
         
     async with AsyncSessionLocal() as session:
+        if target_date_str:
+            exec_date = datetime.strptime(target_date_str, "%Y-%m-%d").date()
+        else:
+            exec_date = await get_house_today_date(session)
+            
         task = PersonalTask(
             user_id=db_user.id,
             text=db_text,
@@ -2214,9 +2223,9 @@ async def handle_my_add_text(message: types.Message, state: FSMContext, db_user:
 async def handle_my_shift_select(call: types.CallbackQuery, db_user: User = None):
     parts = call.data.split(":")
     page = int(parts[1]) if len(parts) > 1 else 0
-    today = datetime.now().date()
     
     async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
         result = await session.execute(
             select(PersonalTask).where(
                 and_(
@@ -2288,10 +2297,13 @@ async def handle_shift_pt_menu(call: types.CallbackQuery, db_user: User = None):
     parts = call.data.split(":")
     t_id = int(parts[1])
     page = int(parts[2]) if len(parts) > 2 else 0
-    today = datetime.now().date()
+    days_ru = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
+    
+    async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
+        
     d1 = today + timedelta(days=1)
     d2 = today + timedelta(days=2)
-    days_ru = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
     
     keyboard = [
         [
@@ -2311,10 +2323,13 @@ async def handle_shift_chore_menu(call: types.CallbackQuery, db_user: User = Non
     parts = call.data.split(":")
     inst_id = int(parts[1])
     page = int(parts[2]) if len(parts) > 2 else 0
-    today = datetime.now().date()
+    days_ru = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
+    
+    async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
+        
     d1 = today + timedelta(days=1)
     d2 = today + timedelta(days=2)
-    days_ru = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
     
     keyboard = [
         [
@@ -2335,7 +2350,8 @@ async def handle_rc_months_pt(call: types.CallbackQuery, db_user: User = None):
     parts = call.data.split(":")
     t_id = int(parts[1])
     page = int(parts[2]) if len(parts) > 2 else 0
-    today = datetime.now().date()
+    async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
     markup = create_calendar_keyboard_custom(t_id, today.year, today.month, today, f"pt:{page}")
     header = format_calendar_header(today)
     await call.message.edit_text(header, reply_markup=markup, parse_mode="Markdown")
@@ -2354,7 +2370,8 @@ async def handle_cal_nav_pt(call: types.CallbackQuery, db_user: User = None):
         t_id = int(parts[1])
         year = int(parts[2])
         month = int(parts[3])
-    today = datetime.now().date()
+    async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
     markup = create_calendar_keyboard_custom(t_id, year, month, today, f"pt:{page}")
     header = format_calendar_header(today)
     await call.message.edit_text(header, reply_markup=markup, parse_mode="Markdown")
@@ -2392,7 +2409,8 @@ async def handle_rc_months_chore(call: types.CallbackQuery, db_user: User = None
     parts = call.data.split(":")
     inst_id = int(parts[1])
     page = int(parts[2]) if len(parts) > 2 else 0
-    today = datetime.now().date()
+    async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
     markup = create_calendar_keyboard_custom(inst_id, today.year, today.month, today, f"chore:{page}")
     header = format_calendar_header(today)
     await call.message.edit_text(header, reply_markup=markup, parse_mode="Markdown")
@@ -2411,7 +2429,8 @@ async def handle_cal_nav_chore(call: types.CallbackQuery, db_user: User = None):
         inst_id = int(parts[1])
         year = int(parts[2])
         month = int(parts[3])
-    today = datetime.now().date()
+    async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
     markup = create_calendar_keyboard_custom(inst_id, year, month, today, f"chore:{page}")
     header = format_calendar_header(today)
     await call.message.edit_text(header, reply_markup=markup, parse_mode="Markdown")
@@ -2469,9 +2488,9 @@ async def handle_shift_chore(call: types.CallbackQuery, db_user: User = None):
 async def handle_my_delete_select(call: types.CallbackQuery, db_user: User = None):
     parts = call.data.split(":")
     page = int(parts[1]) if len(parts) > 1 else 0
-    today = datetime.now().date()
     
     async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
         result = await session.execute(
             select(PersonalTask).where(
                 and_(
@@ -2593,7 +2612,7 @@ async def handle_done_task(call: types.CallbackQuery, db_user: User = None):
                 new_task = PersonalTask(
                     user_id=task.user_id,
                     text=clean,
-                    date_execution=datetime.now().date() + delta,
+                    date_execution=await get_house_today_date(session) + delta,
                     category="inbox",
                     recurrence=task.recurrence,
                     is_completed=False,
@@ -2655,8 +2674,8 @@ async def handle_unclaim_chore_inst(call: types.CallbackQuery, db_user: User = N
 
 # ── Plans ──────────────────────────────────────────────────────────────────────
 async def render_plans(message: types.Message, db_user: User, is_callback=False):
-    today = datetime.now().date()
     async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
         result = await session.execute(
             select(PersonalTask).where(
                 and_(
@@ -2709,8 +2728,8 @@ async def p_cancel(call: types.CallbackQuery, db_user: User = None):
 
 @dp.callback_query(F.data == "p_menu_move")
 async def p_move_menu(call: types.CallbackQuery, db_user: User = None):
-    today = datetime.now().date()
     async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
         result = await session.execute(
             select(PersonalTask).where(
                 and_(PersonalTask.user_id == db_user.id, PersonalTask.date_execution > today,
@@ -2732,10 +2751,11 @@ async def p_move_menu(call: types.CallbackQuery, db_user: User = None):
 @dp.callback_query(F.data.startswith("mov_p:"))
 async def mov_p_select(call: types.CallbackQuery):
     t_id = int(call.data.split(":")[1])
-    today = datetime.now().date()
+    days_ru = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
+    async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
     d1 = today + timedelta(days=1)
     d2 = today + timedelta(days=2)
-    days_ru = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
     
     keyboard = [
         [
@@ -2749,8 +2769,8 @@ async def mov_p_select(call: types.CallbackQuery):
 
 @dp.callback_query(F.data == "p_menu_del")
 async def p_del_menu(call: types.CallbackQuery, db_user: User = None):
-    today = datetime.now().date()
     async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
         result = await session.execute(
             select(PersonalTask).where(
                 and_(PersonalTask.user_id == db_user.id, PersonalTask.date_execution > today,
@@ -2813,13 +2833,14 @@ async def t_archive(call: types.CallbackQuery, db_user: User = None):
 async def restore_task(call: types.CallbackQuery, db_user: User = None):
     t_id = int(call.data.split(":")[1])
     async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
         old = await session.get(PersonalTask, t_id)
         if old:
             clean = clean_task_text(old.text)
             new_task = PersonalTask(
                 user_id=db_user.id,
                 text=clean,
-                date_execution=datetime.now().date(),
+                date_execution=today,
                 category="inbox",
                 is_completed=False,
                 is_deleted=False,
@@ -3639,7 +3660,8 @@ async def handle_settings_del_menu(call: types.CallbackQuery, db_user: User = No
 @dp.callback_query(F.data.startswith("rc_months_plan:"))
 async def handle_rc_months_plan(call: types.CallbackQuery, db_user: User = None):
     t_id = int(call.data.split(":")[1])
-    today = datetime.now().date()
+    async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
     markup = create_calendar_keyboard_custom(t_id, today.year, today.month, today, "plan")
     header = format_calendar_header(today)
     await call.message.edit_text(header, reply_markup=markup, parse_mode="Markdown")
@@ -3651,7 +3673,8 @@ async def handle_cal_nav_plan(call: types.CallbackQuery, db_user: User = None):
     t_id = int(parts[1])
     year = int(parts[2])
     month = int(parts[3])
-    today = datetime.now().date()
+    async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
     markup = create_calendar_keyboard_custom(t_id, year, month, today, "plan")
     header = format_calendar_header(today)
     await call.message.edit_text(header, reply_markup=markup, parse_mode="Markdown")
