@@ -267,6 +267,9 @@ async def redirect_to_template_settings(message: types.Message, tid: int, src: s
         InlineKeyboardButton(text="🍪", callback_data=f"te_f:points:{tmpl.id}:{src}"),
         InlineKeyboardButton(text="🗑 Удалить", callback_data=f"te_del_confirm:{tmpl.id}:{src}")
     )
+    builder.row(
+        InlineKeyboardButton(text="📅 Перенести на другой день", callback_data=f"te_shift_start:{tmpl.id}:{src}")
+    )
     if is_callback:
         await message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
     else:
@@ -1307,6 +1310,59 @@ async def handle_unclaim_chore_inst(call: types.CallbackQuery, db_user: User = N
         else:
             await call.answer("⚠️ Задача не найдена или не назначена на вас!", show_alert=False)
     await render_today(call.message, db_user, is_callback=True)
+
+
+@dp.callback_query(F.data.startswith("te_shift_start:"))
+async def handle_te_shift_start(call: types.CallbackQuery, db_user: User = None):
+    parts = call.data.split(":")
+    tmpl_id = int(parts[1])
+    src = parts[2]
+    
+    async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
+        
+    markup = create_calendar_keyboard_custom(tmpl_id, today.year, today.month, today, "tmpl_start")
+    header = format_calendar_header(today) + "\n*(выберите дату начала/отсчета для задачи)*"
+    keyboard = markup.inline_keyboard + [[
+        InlineKeyboardButton(text="❌ Отмена", callback_data=f"tmpl_set:{tmpl_id}:{src}")
+    ]]
+    await call.message.edit_text(header, reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard), parse_mode="Markdown")
+
+
+@dp.callback_query(F.data.startswith("cal_nav_tmpl_start:"))
+async def handle_cal_nav_tmpl_start(call: types.CallbackQuery, db_user: User = None):
+    parts = call.data.split(":")
+    tmpl_id = int(parts[1])
+    year = int(parts[2])
+    month = int(parts[3])
+    
+    async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
+        
+    markup = create_calendar_keyboard_custom(tmpl_id, year, month, today, "tmpl_start")
+    header = format_calendar_header(today) + "\n*(выберите дату начала/отсчета для задачи)*"
+    keyboard = markup.inline_keyboard + [[
+        InlineKeyboardButton(text="❌ Отмена", callback_data=f"tmpl_set:{tmpl_id}:settings")
+    ]]
+    await call.message.edit_text(header, reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard), parse_mode="Markdown")
+
+
+@dp.callback_query(F.data.startswith("shift_tmpl_start:"))
+async def handle_shift_tmpl_start(call: types.CallbackQuery, db_user: User = None):
+    parts = call.data.split(":")
+    tmpl_id = int(parts[1])
+    date_str = parts[2]
+    new_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+    
+    async with AsyncSessionLocal() as session:
+        tmpl = await session.get(TaskTemplate, tmpl_id)
+        if tmpl:
+            tmpl.start_date = new_date
+            await session.commit()
+            await call.answer(f"✅ Дата отсчета перенесена на {new_date.strftime('%d.%m')}!", show_alert=True)
+            
+    await redirect_to_template_settings(call.message, tmpl_id, "settings", db_user, is_callback=True)
+
 
 
 # Obsolete Move/Delete handlers removed (fully replaced by my_shift_select / my_delete_select workflows)

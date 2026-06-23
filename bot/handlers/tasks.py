@@ -86,10 +86,8 @@ async def handle_my_add_text(message: types.Message, state: FSMContext, db_user:
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="Сегодня", callback_data="addpt_date:today"),
-        InlineKeyboardButton(text="Завтра", callback_data="addpt_date:tomorrow")
-    )
-    builder.row(
-        InlineKeyboardButton(text="📅 Выбрать на календаре", callback_data="addpt_date:calendar")
+        InlineKeyboardButton(text="Завтра", callback_data="addpt_date:tomorrow"),
+        InlineKeyboardButton(text="Другая дата", callback_data="addpt_date:calendar")
     )
     builder.row(
         InlineKeyboardButton(text="❌ Отмена", callback_data=f"my_add_cancel:{page}")
