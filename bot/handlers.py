@@ -390,9 +390,6 @@ async def generate_daily_chores_if_needed(session, house_id: int):
     if not house:
         return
 
-    if house.last_summary_date == today:
-        return
-
     result = await session.execute(
         select(TaskTemplate).where(
             and_(
@@ -688,8 +685,12 @@ async def handle_chores_add_menu(call: types.CallbackQuery, db_user: User = None
 async def handle_add_from_templates_list(call: types.CallbackQuery, db_user: User = None):
     today = datetime.now().date()
     async with AsyncSessionLocal() as session:
-        # Exclude templates that already have instances for today
-        subq = select(TaskInstance.template_id).where(TaskInstance.date == today)
+        subq = select(TaskInstance.template_id).where(
+            and_(
+                TaskInstance.date == today,
+                TaskInstance.status.in_(["free", "in_progress", "shifted"])
+            )
+        )
         result = await session.execute(
             select(TaskTemplate).where(
                 and_(
@@ -1971,114 +1972,200 @@ async def rollover_overdue_tasks(session: AsyncSession, user_id: int):
 
 
 
-async def render_today(message: types.Message, db_user: User, is_callback=False):
+async def render_today(message: types.Message, db_user: User, is_callback=False, page: int = 0):
     today = datetime.now().date()
     async with AsyncSessionLocal() as session:
         await rollover_overdue_tasks(session, db_user.id)
 
-        # 1. Fetch personal tasks (execution date <= today)
+        # 1. Fetch ALL active personal tasks
         result = await session.execute(
             select(PersonalTask).where(
                 and_(
                     PersonalTask.user_id == db_user.id,
-                    PersonalTask.date_execution <= today,
                     PersonalTask.is_completed == False,
                     PersonalTask.is_deleted == False,
                 )
-            ).order_by(PersonalTask.id)
+            ).order_by(PersonalTask.date_execution, PersonalTask.id)
         )
-        personal_tasks = result.scalars().all()
+        personal_tasks_all = result.scalars().all()
 
-        # 2. Fetch user's claimed chores (chores date <= today)
+        # 2. Fetch ALL user's claimed chores in progress
         chores_result = await session.execute(
             select(TaskInstance, TaskTemplate)
             .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
             .where(
                 and_(
                     TaskInstance.done_by_user_id == db_user.id,
-                    TaskInstance.status == "in_progress",
-                    TaskInstance.date <= today
+                    TaskInstance.status == "in_progress"
                 )
             )
-            .order_by(TaskInstance.id)
+            .order_by(TaskInstance.date, TaskInstance.id)
         )
-        my_chores = chores_result.all()
+        my_chores_all = chores_result.all()
 
-    text = "👤 *Твои дела на сегодня:*\n\n"
-    keyboard = []
+    # 3. Find unique dates
+    all_dates = set()
+    for pt in personal_tasks_all:
+        all_dates.add(pt.date_execution)
+    for inst, tmpl in my_chores_all:
+        all_dates.add(inst.date)
+
+    # Future dates (strictly > today) sorted ascending
+    future_dates = sorted([d for d in all_dates if d > today])
+    total_pages = 1 + len(future_dates)
+
+    if page < 0:
+        page = 0
+    if page >= total_pages:
+        page = total_pages - 1
+
+    # Filter tasks for the selected page
+    personal_tasks = []
+    my_chores = []
+
+    if page == 0:
+        personal_tasks = [pt for pt in personal_tasks_all if pt.date_execution <= today]
+        my_chores = [(inst, tmpl) for inst, tmpl in my_chores_all if inst.date <= today]
+        text = "📋 <b>Мои дела на сегодня</b> (и просроченные):\n👉 <i>Нажми на дело для выполнения:</i>"
+    else:
+        target_date = future_dates[page - 1]
+        personal_tasks = [pt for pt in personal_tasks_all if pt.date_execution == target_date]
+        my_chores = [(inst, tmpl) for inst, tmpl in my_chores_all if inst.date == target_date]
+        text = f"📋 <b>Мои дела на {target_date.strftime('%d.%m.%Y')}</b>:\n👉 <i>Нажми на дело для выполнения:</i>"
+
+    builder = InlineKeyboardBuilder()
 
     # Personal tasks rendering
-    text += "*👤 Личные задачи:*\n"
-    if personal_tasks:
-        for t in personal_tasks:
-            clean = clean_task_text(t.text)
-            is_urgent = "🔴" in t.text
-            prefix = "🔴 " if is_urgent else "🟡 " if t.date_execution < today else ""
-            display_text = f"{prefix}{clean}"
-            rec_icon = " 🔁" if t.recurrence else ""
-            text += f"• {display_text}{rec_icon}\n"
-            keyboard.append([InlineKeyboardButton(text=display_text, callback_data=f"done_task:{t.id}")])
-    else:
-        text += "_Нет личных задач_\n"
-    text += "\n"
+    for t in personal_tasks:
+        clean = clean_task_text(t.text)
+        is_urgent = "🔴" in t.text
+        
+        if is_urgent:
+            right_text = "🔴"
+        elif t.date_execution < today:
+            right_text = f"🟡 {t.date_execution.strftime('%d.%m.')}"
+        elif t.recurrence:
+            right_text = "🔁"
+        else:
+            right_text = "👤"
+            
+        builder.row(
+            InlineKeyboardButton(text=clean, callback_data=f"done_task:{t.id}:{page}"),
+            InlineKeyboardButton(text=right_text, callback_data=f"done_task:{t.id}:{page}")
+        )
 
-    # Household chores rendering
-    text += "*🏠 В работе из домашних:*\n"
-    if my_chores:
-        for inst, tmpl in my_chores:
-            pts_str = "2-8" if tmpl.title == "Готовка" else str(tmpl.points)
-            prefix = "🟡 " if inst.date < today else ""
-            text += f"• {prefix}{tmpl.title} (`+{pts_str} 🍪`)\n"
-            keyboard.append([
-                InlineKeyboardButton(
-                    text=f"🏠 {prefix}{tmpl.title} (+{pts_str}🍪)",
-                    callback_data=f"done_chore_inst:{inst.id}"
-                )
-            ])
-    else:
-        text += "_Нет взятых домашних дел_\n"
+    # Chores rendering
+    for inst, tmpl in my_chores:
+        pts_str = "2-8" if tmpl.title == "Готовка" else str(tmpl.points)
+        
+        if inst.date < today:
+            right_text = f"🟡 {pts_str}🍪 {inst.date.strftime('%d.%m.')}"
+        else:
+            right_text = f"{pts_str}🍪"
+            
+        builder.row(
+            InlineKeyboardButton(text=f"🏠 {tmpl.title}", callback_data=f"done_chore_inst:{inst.id}:{page}"),
+            InlineKeyboardButton(text=right_text, callback_data=f"done_chore_inst:{inst.id}:{page}")
+        )
 
-    # Add bottom toolbar as a single horizontal row
-    keyboard.append([
-        InlineKeyboardButton(text="Добавить", callback_data="my_add"),
-        InlineKeyboardButton(text="Сдвиг", callback_data="my_shift_select"),
-        InlineKeyboardButton(text="Удалить", callback_data="my_delete_select"),
-    ])
+    # Pagination row
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"my_page:{page-1}"))
+    if page < total_pages - 1:
+        nav.append(InlineKeyboardButton(text="Вперед ▶️", callback_data=f"my_page:{page+1}"))
+    if nav:
+        builder.row(*nav)
 
-    markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
+    # Toolbar row
+    builder.row(
+        InlineKeyboardButton(text="Добавить", callback_data=f"my_add:{page}"),
+        InlineKeyboardButton(text="Сдвиг", callback_data=f"my_shift_select:{page}"),
+        InlineKeyboardButton(text="Удалить", callback_data=f"my_delete_select:{page}"),
+    )
+
+    markup = builder.as_markup()
     if is_callback:
-        await message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+        await message.edit_text(text, reply_markup=markup, parse_mode="HTML")
     else:
-        await message.answer(text, reply_markup=markup, parse_mode="Markdown")
+        await message.answer(text, reply_markup=markup, parse_mode="HTML")
 
 
 @dp.message(F.text.in_({"📋 My", "👤 My", "👤 Мои дела"}))
 async def today_handler(m: types.Message, db_user: User = None):
-    await render_today(m, db_user)
+    await render_today(m, db_user, page=0)
+
+
+@dp.callback_query(F.data.startswith("my_page:"))
+async def handle_my_page(call: types.CallbackQuery, db_user: User = None):
+    page = int(call.data.split(":")[1])
+    await render_today(call.message, db_user, is_callback=True, page=page)
 
 
 @dp.callback_query(F.data == "t_cancel")
 async def t_cancel(call: types.CallbackQuery, db_user: User = None):
-    await render_today(call.message, db_user, True)
+    await render_today(call.message, db_user, True, page=0)
 
 
-# Personal task addition FSM callbacks
-@dp.callback_query(F.data == "my_add")
-async def handle_my_add(call: types.CallbackQuery, state: FSMContext):
+@dp.callback_query(F.data.startswith("my_add"))
+async def handle_my_add(call: types.CallbackQuery, state: FSMContext, db_user: User = None):
+    parts = call.data.split(":")
+    page = int(parts[1]) if len(parts) > 1 else 0
     await state.set_state(AddPersonalTaskState.waiting_for_text)
+    
+    target_date = datetime.now().date()
+    if page > 0:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(PersonalTask).where(
+                    and_(
+                        PersonalTask.user_id == db_user.id,
+                        PersonalTask.is_completed == False,
+                        PersonalTask.is_deleted == False,
+                    )
+                ).order_by(PersonalTask.date_execution)
+            )
+            personal_tasks_all = result.scalars().all()
+
+            chores_result = await session.execute(
+                select(TaskInstance.date)
+                .where(
+                    and_(
+                        TaskInstance.done_by_user_id == db_user.id,
+                        TaskInstance.status == "in_progress"
+                    )
+                )
+            )
+            chores_dates = chores_result.scalars().all()
+            
+            all_dates = set()
+            for pt in personal_tasks_all:
+                all_dates.add(pt.date_execution)
+            for d in chores_dates:
+                all_dates.add(d)
+                
+            future_dates = sorted([d for d in all_dates if d > target_date])
+            if page - 1 < len(future_dates):
+                target_date = future_dates[page - 1]
+
+    await state.update_data(page=page, target_date=target_date.isoformat())
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data="my_add_cancel"))
+    builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data=f"my_add_cancel:{page}"))
     await call.message.edit_text(
-        "Пиши название личной задачи 📝:",
-        reply_markup=builder.as_markup()
+        f"✏️ <b>Новая личная задача</b> на {target_date.strftime('%d.%m.%Y')}:\n\n"
+        "Введите текст задачи (например: Купить хлеб).\n"
+        "Если задача срочная, напишите слово <b>«срочно»</b>.",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML"
     )
 
 
-@dp.callback_query(F.data == "my_add_cancel")
+@dp.callback_query(F.data.startswith("my_add_cancel"))
 async def handle_my_add_cancel(call: types.CallbackQuery, state: FSMContext, db_user: User = None):
+    parts = call.data.split(":")
+    page = int(parts[1]) if len(parts) > 1 else 0
     await state.clear()
-    await call.answer("Отменено", show_alert=False)
-    await render_today(call.message, db_user, is_callback=True)
+    await render_today(call.message, db_user, is_callback=True, page=page)
 
 
 @dp.message(StateFilter(AddPersonalTaskState.waiting_for_text))
@@ -2087,6 +2174,14 @@ async def handle_my_add_text(message: types.Message, state: FSMContext, db_user:
     if not text:
         await message.answer("Название не может быть пустым. Попробуйте еще раз:")
         return
+        
+    state_data = await state.get_data()
+    page = state_data.get("page", 0)
+    target_date_str = state_data.get("target_date")
+    if target_date_str:
+        exec_date = datetime.strptime(target_date_str, "%Y-%m-%d").date()
+    else:
+        exec_date = datetime.now().date()
         
     import re
     is_urgent = "срочно" in text.lower()
@@ -2097,12 +2192,11 @@ async def handle_my_add_text(message: types.Message, state: FSMContext, db_user:
     else:
         db_text = clean_text
         
-    today = datetime.now().date()
     async with AsyncSessionLocal() as session:
         task = PersonalTask(
             user_id=db_user.id,
             text=db_text,
-            date_execution=today,
+            date_execution=exec_date,
             category="inbox",
             is_completed=False,
             is_deleted=False
@@ -2112,25 +2206,27 @@ async def handle_my_add_text(message: types.Message, state: FSMContext, db_user:
         
     await state.clear()
     await message.answer(f"✅ Добавил личную задачу: *{clean_text}*", parse_mode="Markdown")
-    await render_today(message, db_user, is_callback=False)
+    await render_today(message, db_user, is_callback=False, page=page)
 
 
 # Reschedule select menu
-@dp.callback_query(F.data == "my_shift_select")
+@dp.callback_query(F.data.startswith("my_shift_select"))
 async def handle_my_shift_select(call: types.CallbackQuery, db_user: User = None):
+    parts = call.data.split(":")
+    page = int(parts[1]) if len(parts) > 1 else 0
     today = datetime.now().date()
+    
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(PersonalTask).where(
                 and_(
                     PersonalTask.user_id == db_user.id,
-                    PersonalTask.date_execution <= today,
                     PersonalTask.is_completed == False,
                     PersonalTask.is_deleted == False,
                 )
-            ).order_by(PersonalTask.id)
+            ).order_by(PersonalTask.date_execution, PersonalTask.id)
         )
-        personal_tasks = result.scalars().all()
+        personal_tasks_all = result.scalars().all()
 
         chores_result = await session.execute(
             select(TaskInstance, TaskTemplate)
@@ -2138,13 +2234,33 @@ async def handle_my_shift_select(call: types.CallbackQuery, db_user: User = None
             .where(
                 and_(
                     TaskInstance.done_by_user_id == db_user.id,
-                    TaskInstance.status == "in_progress",
-                    TaskInstance.date <= today
+                    TaskInstance.status == "in_progress"
                 )
             )
-            .order_by(TaskInstance.id)
+            .order_by(TaskInstance.date, TaskInstance.id)
         )
-        my_chores = chores_result.all()
+        my_chores_all = chores_result.all()
+
+    all_dates = set()
+    for pt in personal_tasks_all:
+        all_dates.add(pt.date_execution)
+    for inst, tmpl in my_chores_all:
+        all_dates.add(inst.date)
+
+    future_dates = sorted([d for d in all_dates if d > today])
+    total_pages = 1 + len(future_dates)
+    if page < 0:
+        page = 0
+    if page >= total_pages:
+        page = total_pages - 1
+
+    if page == 0:
+        personal_tasks = [pt for pt in personal_tasks_all if pt.date_execution <= today]
+        my_chores = [(inst, tmpl) for inst, tmpl in my_chores_all if inst.date <= today]
+    else:
+        target_date = future_dates[page - 1]
+        personal_tasks = [pt for pt in personal_tasks_all if pt.date_execution == target_date]
+        my_chores = [(inst, tmpl) for inst, tmpl in my_chores_all if inst.date == target_date]
 
     if not personal_tasks and not my_chores:
         await call.answer("Нет активных задач для переноса!", show_alert=False)
@@ -2155,11 +2271,13 @@ async def handle_my_shift_select(call: types.CallbackQuery, db_user: User = None
         clean = clean_task_text(t.text)
         is_urgent = "🔴" in t.text or "срочно" in t.text.lower()
         prefix = "🔴 " if is_urgent else "🟡 " if t.date_execution < today else ""
-        builder.row(InlineKeyboardButton(text=f"{prefix}{clean}", callback_data=f"shift_pt_menu:{t.id}"))
+        builder.row(InlineKeyboardButton(text=f"{prefix}{clean}", callback_data=f"shift_pt_menu:{t.id}:{page}"))
         
     for inst, tmpl in my_chores:
         prefix = "🟡 " if inst.date < today else ""
-        builder.row(InlineKeyboardButton(text=f"{prefix}🏠 {tmpl.title}", callback_data=f"shift_chore_menu:{inst.id}"))
+        builder.row(InlineKeyboardButton(text=f"{prefix}🏠 {tmpl.title}", callback_data=f"shift_chore_menu:{inst.id}:{page}"))
+
+    builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data=f"my_page:{page}"))
 
     await call.message.edit_text("🔄 Выберите задачу для переноса:", reply_markup=builder.as_markup())
 
@@ -2167,7 +2285,9 @@ async def handle_my_shift_select(call: types.CallbackQuery, db_user: User = None
 # Reschedule choice menu (tomorrow/day after/calendar)
 @dp.callback_query(F.data.startswith("shift_pt_menu:"))
 async def handle_shift_pt_menu(call: types.CallbackQuery, db_user: User = None):
-    t_id = int(call.data.split(":")[1])
+    parts = call.data.split(":")
+    t_id = int(parts[1])
+    page = int(parts[2]) if len(parts) > 2 else 0
     today = datetime.now().date()
     d1 = today + timedelta(days=1)
     d2 = today + timedelta(days=2)
@@ -2175,9 +2295,12 @@ async def handle_shift_pt_menu(call: types.CallbackQuery, db_user: User = None):
     
     keyboard = [
         [
-            InlineKeyboardButton(text=f"{d1.strftime('%d.%m')} ({days_ru[d1.weekday()]})", callback_data=f"shift_pt:{t_id}:{d1.strftime('%Y-%m-%d')}"),
-            InlineKeyboardButton(text=f"{d2.strftime('%d.%m')} ({days_ru[d2.weekday()]})", callback_data=f"shift_pt:{t_id}:{d2.strftime('%Y-%m-%d')}"),
-            InlineKeyboardButton(text="Другая дата", callback_data=f"rc_months_pt:{t_id}")
+            InlineKeyboardButton(text=f"{d1.strftime('%d.%m')} ({days_ru[d1.weekday()]})", callback_data=f"shift_pt:{page}:{t_id}:{d1.strftime('%Y-%m-%d')}"),
+            InlineKeyboardButton(text=f"{d2.strftime('%d.%m')} ({days_ru[d2.weekday()]})", callback_data=f"shift_pt:{page}:{t_id}:{d2.strftime('%Y-%m-%d')}"),
+            InlineKeyboardButton(text="Другая дата", callback_data=f"rc_months_pt:{t_id}:{page}")
+        ],
+        [
+            InlineKeyboardButton(text="❌ Отмена", callback_data=f"my_shift_select:{page}")
         ]
     ]
     await call.message.edit_text("На какой день перенести задачу?", reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
@@ -2185,7 +2308,9 @@ async def handle_shift_pt_menu(call: types.CallbackQuery, db_user: User = None):
 
 @dp.callback_query(F.data.startswith("shift_chore_menu:"))
 async def handle_shift_chore_menu(call: types.CallbackQuery, db_user: User = None):
-    inst_id = int(call.data.split(":")[1])
+    parts = call.data.split(":")
+    inst_id = int(parts[1])
+    page = int(parts[2]) if len(parts) > 2 else 0
     today = datetime.now().date()
     d1 = today + timedelta(days=1)
     d2 = today + timedelta(days=2)
@@ -2193,9 +2318,12 @@ async def handle_shift_chore_menu(call: types.CallbackQuery, db_user: User = Non
     
     keyboard = [
         [
-            InlineKeyboardButton(text=f"{d1.strftime('%d.%m')} ({days_ru[d1.weekday()]})", callback_data=f"shift_chore:{inst_id}:{d1.strftime('%Y-%m-%d')}"),
-            InlineKeyboardButton(text=f"{d2.strftime('%d.%m')} ({days_ru[d2.weekday()]})", callback_data=f"shift_chore:{inst_id}:{d2.strftime('%Y-%m-%d')}"),
-            InlineKeyboardButton(text="Другая дата", callback_data=f"rc_months_chore:{inst_id}")
+            InlineKeyboardButton(text=f"{d1.strftime('%d.%m')} ({days_ru[d1.weekday()]})", callback_data=f"shift_chore:{page}:{inst_id}:{d1.strftime('%Y-%m-%d')}"),
+            InlineKeyboardButton(text=f"{d2.strftime('%d.%m')} ({days_ru[d2.weekday()]})", callback_data=f"shift_chore:{page}:{inst_id}:{d2.strftime('%Y-%m-%d')}"),
+            InlineKeyboardButton(text="Другая дата", callback_data=f"rc_months_chore:{inst_id}:{page}")
+        ],
+        [
+            InlineKeyboardButton(text="❌ Отмена", callback_data=f"my_shift_select:{page}")
         ]
     ]
     await call.message.edit_text("На какой день перенести задачу?", reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
@@ -2204,9 +2332,11 @@ async def handle_shift_chore_menu(call: types.CallbackQuery, db_user: User = Non
 # Calendar navigation & shift execution callbacks
 @dp.callback_query(F.data.startswith("rc_months_pt:"))
 async def handle_rc_months_pt(call: types.CallbackQuery, db_user: User = None):
-    t_id = int(call.data.split(":")[1])
+    parts = call.data.split(":")
+    t_id = int(parts[1])
+    page = int(parts[2]) if len(parts) > 2 else 0
     today = datetime.now().date()
-    markup = create_calendar_keyboard_custom(t_id, today.year, today.month, today, "pt")
+    markup = create_calendar_keyboard_custom(t_id, today.year, today.month, today, f"pt:{page}")
     header = format_calendar_header(today)
     await call.message.edit_text(header, reply_markup=markup, parse_mode="Markdown")
 
@@ -2214,11 +2344,18 @@ async def handle_rc_months_pt(call: types.CallbackQuery, db_user: User = None):
 @dp.callback_query(F.data.startswith("cal_nav_pt:"))
 async def handle_cal_nav_pt(call: types.CallbackQuery, db_user: User = None):
     parts = call.data.split(":")
-    t_id = int(parts[1])
-    year = int(parts[2])
-    month = int(parts[3])
+    if len(parts) >= 5:
+        page = int(parts[1])
+        t_id = int(parts[2])
+        year = int(parts[3])
+        month = int(parts[4])
+    else:
+        page = 0
+        t_id = int(parts[1])
+        year = int(parts[2])
+        month = int(parts[3])
     today = datetime.now().date()
-    markup = create_calendar_keyboard_custom(t_id, year, month, today, "pt")
+    markup = create_calendar_keyboard_custom(t_id, year, month, today, f"pt:{page}")
     header = format_calendar_header(today)
     await call.message.edit_text(header, reply_markup=markup, parse_mode="Markdown")
 
@@ -2226,8 +2363,14 @@ async def handle_cal_nav_pt(call: types.CallbackQuery, db_user: User = None):
 @dp.callback_query(F.data.startswith("shift_pt:"))
 async def handle_shift_pt(call: types.CallbackQuery, db_user: User = None):
     parts = call.data.split(":")
-    t_id = int(parts[1])
-    date_str = parts[2]
+    if len(parts) >= 4:
+        page = int(parts[1])
+        t_id = int(parts[2])
+        date_str = parts[3]
+    else:
+        page = 0
+        t_id = int(parts[1])
+        date_str = parts[2]
     new_date = datetime.strptime(date_str, "%Y-%m-%d").date()
     
     async with AsyncSessionLocal() as session:
@@ -2241,14 +2384,16 @@ async def handle_shift_pt(call: types.CallbackQuery, db_user: User = None):
         else:
             await call.answer("⚠️ Задача не найдена!", show_alert=False)
             
-    await render_today(call.message, db_user, is_callback=False)
+    await render_today(call.message, db_user, is_callback=False, page=page)
 
 
 @dp.callback_query(F.data.startswith("rc_months_chore:"))
 async def handle_rc_months_chore(call: types.CallbackQuery, db_user: User = None):
-    inst_id = int(call.data.split(":")[1])
+    parts = call.data.split(":")
+    inst_id = int(parts[1])
+    page = int(parts[2]) if len(parts) > 2 else 0
     today = datetime.now().date()
-    markup = create_calendar_keyboard_custom(inst_id, today.year, today.month, today, "chore")
+    markup = create_calendar_keyboard_custom(inst_id, today.year, today.month, today, f"chore:{page}")
     header = format_calendar_header(today)
     await call.message.edit_text(header, reply_markup=markup, parse_mode="Markdown")
 
@@ -2256,11 +2401,18 @@ async def handle_rc_months_chore(call: types.CallbackQuery, db_user: User = None
 @dp.callback_query(F.data.startswith("cal_nav_chore:"))
 async def handle_cal_nav_chore(call: types.CallbackQuery, db_user: User = None):
     parts = call.data.split(":")
-    inst_id = int(parts[1])
-    year = int(parts[2])
-    month = int(parts[3])
+    if len(parts) >= 5:
+        page = int(parts[1])
+        inst_id = int(parts[2])
+        year = int(parts[3])
+        month = int(parts[4])
+    else:
+        page = 0
+        inst_id = int(parts[1])
+        year = int(parts[2])
+        month = int(parts[3])
     today = datetime.now().date()
-    markup = create_calendar_keyboard_custom(inst_id, year, month, today, "chore")
+    markup = create_calendar_keyboard_custom(inst_id, year, month, today, f"chore:{page}")
     header = format_calendar_header(today)
     await call.message.edit_text(header, reply_markup=markup, parse_mode="Markdown")
 
@@ -2268,8 +2420,14 @@ async def handle_cal_nav_chore(call: types.CallbackQuery, db_user: User = None):
 @dp.callback_query(F.data.startswith("shift_chore:"))
 async def handle_shift_chore(call: types.CallbackQuery, db_user: User = None):
     parts = call.data.split(":")
-    inst_id = int(parts[1])
-    date_str = parts[2]
+    if len(parts) >= 4:
+        page = int(parts[1])
+        inst_id = int(parts[2])
+        date_str = parts[3]
+    else:
+        page = 0
+        inst_id = int(parts[1])
+        date_str = parts[2]
     new_date = datetime.strptime(date_str, "%Y-%m-%d").date()
     
     async with AsyncSessionLocal() as session:
@@ -2303,37 +2461,61 @@ async def handle_shift_chore(call: types.CallbackQuery, db_user: User = None):
         else:
             await call.answer("⚠️ Задача не найдена!", show_alert=False)
             
-    await render_today(call.message, db_user, is_callback=False)
+    await render_today(call.message, db_user, is_callback=False, page=page)
 
 
 # Delete select menu & callbacks
-@dp.callback_query(F.data == "my_delete_select")
+@dp.callback_query(F.data.startswith("my_delete_select"))
 async def handle_my_delete_select(call: types.CallbackQuery, db_user: User = None):
+    parts = call.data.split(":")
+    page = int(parts[1]) if len(parts) > 1 else 0
     today = datetime.now().date()
+    
     async with AsyncSessionLocal() as session:
-        personal_tasks = (await session.execute(
+        result = await session.execute(
             select(PersonalTask).where(
                 and_(
                     PersonalTask.user_id == db_user.id,
-                    PersonalTask.date_execution <= today,
                     PersonalTask.is_completed == False,
-                    PersonalTask.is_deleted == False
+                    PersonalTask.is_deleted == False,
                 )
-            ).order_by(PersonalTask.id)
-        )).scalars().all()
-        
-        my_chores = (await session.execute(
+            ).order_by(PersonalTask.date_execution, PersonalTask.id)
+        )
+        personal_tasks_all = result.scalars().all()
+
+        chores_result = await session.execute(
             select(TaskInstance, TaskTemplate)
             .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
             .where(
                 and_(
                     TaskInstance.done_by_user_id == db_user.id,
-                    TaskInstance.status == "in_progress",
-                    TaskInstance.date <= today
+                    TaskInstance.status == "in_progress"
                 )
             )
-            .order_by(TaskInstance.id)
-        )).all()
+            .order_by(TaskInstance.date, TaskInstance.id)
+        )
+        my_chores_all = chores_result.all()
+
+    all_dates = set()
+    for pt in personal_tasks_all:
+        all_dates.add(pt.date_execution)
+    for inst, tmpl in my_chores_all:
+        all_dates.add(inst.date)
+
+    future_dates = sorted([d for d in all_dates if d > today])
+    total_pages = 1 + len(future_dates)
+    if page < 0:
+        page = 0
+    if page >= total_pages:
+        page = total_pages - 1
+
+    if page == 0:
+        personal_tasks = [pt for pt in personal_tasks_all if pt.date_execution <= today]
+        my_chores = [(inst, tmpl) for inst, tmpl in my_chores_all if inst.date <= today]
+    else:
+        target_date = future_dates[page - 1]
+        personal_tasks = [pt for pt in personal_tasks_all if pt.date_execution == target_date]
+        my_chores = [(inst, tmpl) for inst, tmpl in my_chores_all if inst.date == target_date]
 
     if not personal_tasks and not my_chores:
         await call.answer("Нет активных задач для удаления!", show_alert=False)
@@ -2344,18 +2526,22 @@ async def handle_my_delete_select(call: types.CallbackQuery, db_user: User = Non
         clean = clean_task_text(t.text)
         is_urgent = "🔴" in t.text or "срочно" in t.text.lower()
         prefix = "🔴 " if is_urgent else "🟡 " if t.date_execution < today else ""
-        builder.row(InlineKeyboardButton(text=f"🗑 {prefix}{clean}", callback_data=f"del_pt:{t.id}"))
+        builder.row(InlineKeyboardButton(text=f"🗑 {prefix}{clean}", callback_data=f"del_pt:{t.id}:{page}"))
         
     for inst, tmpl in my_chores:
         prefix = "🟡 " if inst.date < today else ""
-        builder.row(InlineKeyboardButton(text=f"🗑 {prefix}🏠 {tmpl.title}", callback_data=f"del_chore_inst:{inst.id}"))
+        builder.row(InlineKeyboardButton(text=f"🗑 {prefix}🏠 {tmpl.title}", callback_data=f"del_chore_inst:{inst.id}:{page}"))
+
+    builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data=f"my_page:{page}"))
 
     await call.message.edit_text("🗑 Выберите задачу для удаления:", reply_markup=builder.as_markup())
 
 
 @dp.callback_query(F.data.startswith("del_pt:"))
 async def handle_del_pt(call: types.CallbackQuery, db_user: User = None):
-    t_id = int(call.data.split(":")[1])
+    parts = call.data.split(":")
+    t_id = int(parts[1])
+    page = int(parts[2]) if len(parts) > 2 else 0
     async with AsyncSessionLocal() as session:
         task = await session.get(PersonalTask, t_id)
         if task:
@@ -2367,12 +2553,14 @@ async def handle_del_pt(call: types.CallbackQuery, db_user: User = None):
         else:
             await call.answer("⚠️ Задача не найдена!", show_alert=False)
             
-    await render_today(call.message, db_user, is_callback=False)
+    await render_today(call.message, db_user, is_callback=False, page=page)
 
 
 @dp.callback_query(F.data.startswith("del_chore_inst:"))
 async def handle_del_chore_inst(call: types.CallbackQuery, db_user: User = None):
-    inst_id = int(call.data.split(":")[1])
+    parts = call.data.split(":")
+    inst_id = int(parts[1])
+    page = int(parts[2]) if len(parts) > 2 else 0
     async with AsyncSessionLocal() as session:
         inst = await session.get(TaskInstance, inst_id)
         if inst:
@@ -2385,13 +2573,15 @@ async def handle_del_chore_inst(call: types.CallbackQuery, db_user: User = None)
         else:
             await call.answer("⚠️ Задача не найдена!", show_alert=False)
             
-    await render_today(call.message, db_user, is_callback=False)
+    await render_today(call.message, db_user, is_callback=False, page=page)
 
 
 # ── Done task ─────────────────────────────────────────────────────────────────
 @dp.callback_query(F.data.startswith("done_task:"))
 async def handle_done_task(call: types.CallbackQuery, db_user: User = None):
-    t_id = int(call.data.split(":")[1])
+    parts = call.data.split(":")
+    t_id = int(parts[1])
+    page = int(parts[2]) if len(parts) > 2 else 0
     async with AsyncSessionLocal() as session:
         task = await session.get(PersonalTask, t_id)
         if task:
@@ -2411,12 +2601,14 @@ async def handle_done_task(call: types.CallbackQuery, db_user: User = None):
                 )
                 session.add(new_task)
             await session.commit()
-    await render_today(call.message, db_user, True)
+    await render_today(call.message, db_user, is_callback=True, page=page)
 
 
 @dp.callback_query(F.data.startswith("done_chore_inst:"))
 async def handle_done_chore_inst(call: types.CallbackQuery, db_user: User = None):
-    inst_id = int(call.data.split(":")[1])
+    parts = call.data.split(":")
+    inst_id = int(parts[1])
+    page = int(parts[2]) if len(parts) > 2 else 0
     async with AsyncSessionLocal() as session:
         inst = await session.get(TaskInstance, inst_id)
         if inst and inst.done_by_user_id == db_user.id:
@@ -2440,7 +2632,7 @@ async def handle_done_chore_inst(call: types.CallbackQuery, db_user: User = None
             await call.answer(f"✅ Выполнено! Начислено +{pts} 🍪", show_alert=False)
         else:
             await call.answer("⚠️ Задача не найдена или не назначена на вас!", show_alert=False)
-    await render_today(call.message, db_user, is_callback=True)
+    await render_today(call.message, db_user, is_callback=True, page=page)
 
 
 @dp.callback_query(F.data.startswith("unclaim_chore_inst:"))
