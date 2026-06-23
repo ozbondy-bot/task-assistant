@@ -12,7 +12,9 @@ from db.models import AsyncSessionLocal, User, House, TaskTemplate, TaskInstance
 from bot.handlers.base import (
     bot, dp, ACTIVE_HOUSE_ID, ALLOWED_TELEGRAM_IDS, logger,
     get_partner_user, get_house_today_date, generate_daily_chores_if_needed,
-    render_today, get_main_keyboard, EditTemplateState, AddTemplateState
+    render_today, get_main_keyboard, EditTemplateState, AddTemplateState,
+    format_calendar_header, find_scheduled_date_on_or_after,
+    get_template_next_date, get_template_next_date_val, get_period_label
 )
 
 
@@ -245,162 +247,6 @@ def create_calendar_keyboard_custom(target_id: int, year: int, month: int, today
         kb.append(row)
         
     return InlineKeyboardMarkup(inline_keyboard=kb)
-
-
-def format_calendar_header(today_date: date) -> str:
-    days_full_ru = ["Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"]
-    weekday_idx = (today_date.weekday() + 1) % 7
-    return f"📌 *Выберите дату переноса*\n_({days_full_ru[weekday_idx]}, {today_date.strftime('%d.%m.%Y')})_\n\n"
-
-
-def find_scheduled_date_on_or_after(t: TaskTemplate, search_date: date) -> date:
-    curr = search_date
-    p = t.periodicity
-    if p == "weekly":
-        target_wd = t.weekday if t.weekday is not None else 0
-        for _ in range(365):
-            if curr.weekday() == target_wd:
-                return curr
-            curr += timedelta(days=1)
-    elif p == "twice_weekly":
-        for _ in range(365):
-            if curr.weekday() in (0, 3):
-                return curr
-            curr += timedelta(days=1)
-    elif p == "monthly":
-        target_md = t.month_day if t.month_day is not None else 1
-        for _ in range(365):
-            if curr.day == target_md:
-                return curr
-            curr += timedelta(days=1)
-    elif p == "twice_monthly":
-        for _ in range(365):
-            if curr.day in (5, 20):
-                return curr
-            curr += timedelta(days=1)
-    elif p == "quarterly":
-        target_qm = t.weekday if t.weekday is not None else 1
-        target_md = t.month_day if t.month_day is not None else 1
-        for _ in range(365 * 2):
-            if curr.day == target_md:
-                pos = ((curr.month - 1) % 3) + 1
-                if pos == target_qm:
-                    return curr
-            curr += timedelta(days=1)
-    return curr
-
-
-def get_template_next_date(t: TaskTemplate, last_done_date: date, active_inst_date: date, today_date: date) -> date:
-    if active_inst_date:
-        return max(active_inst_date, today_date)
-        
-    ref_start = t.start_date or today_date
-    
-    if t.periodicity == "once":
-        if last_done_date:
-            return date(2099, 12, 31)
-        else:
-            return max(ref_start, today_date)
-            
-    if t.periodicity == "daily":
-        if last_done_date:
-            if last_done_date >= today_date:
-                return today_date + timedelta(days=1)
-            else:
-                return today_date
-        else:
-            return max(ref_start, today_date)
-            
-    if t.periodicity == "every_x_days":
-        p_days = t.period_days or 1
-        if last_done_date:
-            next_date = last_done_date + timedelta(days=p_days)
-            return max(next_date, today_date)
-        else:
-            return max(ref_start, today_date)
-            
-    # For weekly, twice_weekly, monthly, twice_monthly, quarterly:
-    search_start = last_done_date if last_done_date else ref_start
-    search_start = max(search_start, ref_start)
-    
-    S = find_scheduled_date_on_or_after(t, search_start)
-    
-    if last_done_date:
-        threshold = 4
-        if t.periodicity == "twice_weekly":
-            threshold = 2
-        elif t.periodicity == "monthly":
-            threshold = 15
-        elif t.periodicity == "twice_monthly":
-            threshold = 6
-        elif t.periodicity == "quarterly":
-            threshold = 45
-            
-        if S >= last_done_date and (S - last_done_date).days < threshold:
-            S = find_scheduled_date_on_or_after(t, S + timedelta(days=1))
-            
-    return max(S, today_date)
-
-
-async def get_template_next_date_val(session: AsyncSession, t: TaskTemplate, today_date: date):
-    from zoneinfo import ZoneInfo
-    from datetime import timezone as dt_timezone
-    
-    house = await session.get(House, t.house_id)
-    tz_str = house.timezone if house else "Europe/Moscow"
-    tz = ZoneInfo(tz_str)
-
-    # 1. last done date
-    last_comp = await session.execute(
-        select(Completion.created_at)
-        .join(TaskInstance, Completion.task_instance_id == TaskInstance.id)
-        .where(TaskInstance.template_id == t.id)
-        .order_by(Completion.created_at.desc())
-        .limit(1)
-    )
-    last_done_dt = last_comp.scalar()
-    if last_done_dt:
-        utc_dt = last_done_dt.replace(tzinfo=dt_timezone.utc)
-        local_dt = utc_dt.astimezone(tz)
-        last_done_date = local_dt.date()
-    else:
-        last_done_date = None
-
-    # 2. active inst date
-    active_inst_date = await session.scalar(
-        select(TaskInstance.date).where(
-            and_(
-                TaskInstance.template_id == t.id,
-                TaskInstance.status.in_(["free", "shifted", "in_progress"])
-            )
-        ).order_by(TaskInstance.date.desc()).limit(1)
-    )
-
-    nd = get_template_next_date(t, last_done_date, active_inst_date, today_date)
-    return last_done_date, nd
-
-
-def get_period_label(tmpl: TaskTemplate) -> str:
-    p = tmpl.periodicity
-    if p in ("every_x_days", "everyxdays"):
-        days = tmpl.period_days or 1
-        if days % 10 == 1 and days % 100 != 11:
-            return f"каждый {days} день"
-        elif days % 10 in (2, 3, 4) and days % 100 not in (12, 13, 14):
-            return f"каждые {days} дня"
-        else:
-            return f"каждые {days} дней"
-    
-    mapping = {
-        "daily": "каждый день",
-        "weekly": "раз в неделю",
-        "twice_weekly": "2 раза в неделю",
-        "monthly": "раз в месяц",
-        "twice_monthly": "2 раза в месяц",
-        "quarterly": "раз в квартал",
-        "once": "один раз"
-    }
-    return mapping.get(p, p)
 
 
 async def redirect_to_template_settings(message: types.Message, tid: int, src: str, db_user: User, is_callback=True):
@@ -1485,5 +1331,4 @@ async def handle_unclaim_chore_inst(call: types.CallbackQuery, db_user: User = N
 
 
 # Obsolete Move/Delete handlers removed (fully replaced by my_shift_select / my_delete_select workflows)
-
 

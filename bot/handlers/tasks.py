@@ -12,7 +12,7 @@ from sqlalchemy import select, and_
 from db.models import AsyncSessionLocal, User, PersonalTask, TaskTemplate, TaskInstance
 from bot.parser import get_recurrence_delta, clean_task_text
 from bot.handlers.base import (
-    bot, dp, ACTIVE_HOUSE_ID, logger, get_house_today_date, render_today, AddPersonalTaskState
+    bot, dp, ACTIVE_HOUSE_ID, logger, get_house_today_date, render_today, AddPersonalTaskState, format_calendar_header
 )
 
 

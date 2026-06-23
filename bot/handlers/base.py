@@ -727,3 +727,164 @@ async def render_today(message: types.Message, db_user: User, is_callback=False,
         await message.answer(text, reply_markup=markup, parse_mode="HTML")
 
 
+def format_calendar_header(today_date: date) -> str:
+    days_full_ru = ["Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"]
+    weekday_idx = (today_date.weekday() + 1) % 7
+    return f"📌 *Выберите дату переноса*\n_({days_full_ru[weekday_idx]}, {today_date.strftime('%d.%m.%Y')})_\n\n"
+
+
+def find_scheduled_date_on_or_after(t: TaskTemplate, search_date: date) -> date:
+    p = t.periodicity
+    if p == "daily":
+        return search_date
+    elif p == "weekly":
+        target_w = t.weekday if t.weekday is not None else 0
+        days_ahead = target_w - search_date.weekday()
+        if days_ahead < 0:
+            days_ahead += 7
+        return search_date + timedelta(days=days_ahead)
+    elif p == "twice_weekly":
+        # 0 (Mon), 3 (Thu)
+        w = search_date.weekday()
+        if w <= 0:
+            return search_date + timedelta(days=-w)
+        elif w <= 3:
+            return search_date + timedelta(days=3-w)
+        else:
+            return search_date + timedelta(days=7-w)
+    elif p == "monthly":
+        target_d = t.month_day if t.month_day is not None else 1
+        d = search_date
+        try:
+            candidate = date(d.year, d.month, target_d)
+        except ValueError:
+            candidate = date(d.year, d.month, 28)
+        if candidate >= search_date:
+            return candidate
+        # Next month
+        m = d.month + 1
+        y = d.year
+        if m > 12:
+            m = 1
+            y += 1
+        try:
+            return date(y, m, target_d)
+        except ValueError:
+            return date(y, m, 28)
+    elif p == "twice_monthly":
+        # 5 and 20
+        d = search_date.day
+        if d <= 5:
+            return date(search_date.year, search_date.month, 5)
+        elif d <= 20:
+            return date(search_date.year, search_date.month, 20)
+        else:
+            m = search_date.month + 1
+            y = search_date.year
+            if m > 12:
+                m = 1
+                y += 1
+            return date(y, m, 5)
+    elif p == "quarterly":
+        target_d = t.month_day if t.month_day is not None else 1
+        target_q_month = t.weekday if t.weekday is not None else 1
+        d = search_date
+        # Check current month and future months in the current year
+        for m_offset in range(12):
+            m = ((d.month - 1 + m_offset) % 12) + 1
+            y = d.year + ((d.month - 1 + m_offset) // 12)
+            pos = ((m - 1) % 3) + 1
+            if pos == target_q_month:
+                try:
+                    candidate = date(y, m, target_d)
+                except ValueError:
+                    candidate = date(y, m, 28)
+                if candidate >= search_date:
+                    return candidate
+    elif p == "every_x_days":
+        # Handled in val calc, default fallback
+        return search_date
+    return search_date
+
+
+def get_template_next_date(t: TaskTemplate, last_done_date: date, active_inst_date: date, today_date: date) -> date:
+    """Compute the next scheduled execution date for a task template."""
+    p = t.periodicity
+    if p == "once":
+        return t.start_date if t.start_date else today_date
+        
+    # Standard recurring schedules
+    anchor = last_done_date or t.start_date or (today_date - timedelta(days=30))
+    
+    if active_inst_date and active_inst_date >= today_date:
+        return active_inst_date
+        
+    search_start = max(anchor + timedelta(days=1), today_date)
+    
+    if p == "every_x_days":
+        days = t.period_days or 1
+        if last_done_date:
+            next_d = last_done_date + timedelta(days=days)
+            while next_d < today_date:
+                next_d += timedelta(days=days)
+            return next_d
+        elif t.start_date:
+            if t.start_date >= today_date:
+                return t.start_date
+            next_d = t.start_date
+            while next_d < today_date:
+                next_d += timedelta(days=days)
+            return next_d
+        else:
+            return today_date
+            
+    return find_scheduled_date_on_or_after(t, search_start)
+
+
+async def get_template_next_date_val(session: AsyncSession, t: TaskTemplate, today_date: date):
+    # Find last done date
+    last_done_result = await session.execute(
+        select(sa.func.max(TaskInstance.date))
+        .where(and_(TaskInstance.template_id == t.id, TaskInstance.status == "done"))
+    )
+    last_done = last_done_result.scalar()
+    
+    # Find active today/future instance
+    active_inst_result = await session.execute(
+        select(sa.func.min(TaskInstance.date))
+        .where(
+            and_(
+                TaskInstance.template_id == t.id,
+                TaskInstance.status.in_(["free", "in_progress", "shifted"])
+            )
+        )
+    )
+    active_inst_date = active_inst_result.scalar()
+    
+    nd = get_template_next_date(t, last_done, active_inst_date, today_date)
+    return last_done, nd
+
+
+def get_period_label(tmpl: TaskTemplate) -> str:
+    p = tmpl.periodicity
+    if p in ("every_x_days", "everyxdays"):
+        days = tmpl.period_days or 1
+        if days % 10 == 1 and days % 100 != 11:
+            return f"каждый {days} день"
+        elif days % 10 in (2, 3, 4) and days % 100 not in (12, 13, 14):
+            return f"каждые {days} дня"
+        else:
+            return f"каждые {days} дней"
+    
+    mapping = {
+        "daily": "каждый день",
+        "weekly": "раз в неделю",
+        "twice_weekly": "2 раза в неделю",
+        "monthly": "раз в месяц",
+        "twice_monthly": "2 раза в месяц",
+        "quarterly": "раз в квартал",
+        "once": "один раз"
+    }
+    return mapping.get(p, p)
+
+
