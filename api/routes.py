@@ -224,7 +224,7 @@ async def claim_house_task(instance_id: int, user: User = Depends(get_current_us
 
 
 @app.post("/api/house/tasks/{instance_id}/done")
-async def complete_house_task(instance_id: int, user: User = Depends(get_current_user)):
+async def complete_house_task(instance_id: int, points: Optional[int] = None, user: User = Depends(get_current_user)):
     async with AsyncSessionLocal() as session:
         inst = await session.get(TaskInstance, instance_id)
         if not inst or inst.done_by_user_id != user.id:
@@ -236,7 +236,13 @@ async def complete_house_task(instance_id: int, user: User = Depends(get_current
 
         # Award points
         db_user = await session.get(User, user.id)
-        pts = tmpl.points if tmpl else 1
+        if points is not None:
+            pts = points
+        else:
+            if tmpl and tmpl.title == "Готовка":
+                pts = 5  # default cooking points
+            else:
+                pts = tmpl.points if tmpl else 1
         db_user.points = (db_user.points or 0) + pts
 
         # Record completion
