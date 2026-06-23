@@ -877,6 +877,18 @@ async def get_template_next_date_val(session: AsyncSession, t: TaskTemplate, tod
         )
     )
     active_inst_date = active_inst_result.scalar()
+
+    # If daily generation for today has already run, and no instance exists today,
+    # treat today as already handled so the next occurrence starts searching from tomorrow.
+    house = await session.get(House, t.house_id) if t.house_id else None
+    generation_done = (house.last_summary_date >= today_date) if (house and house.last_summary_date) else False
+    if generation_done:
+        today_inst_count = await session.scalar(
+            select(sa.func.count(TaskInstance.id))
+            .where(and_(TaskInstance.template_id == t.id, TaskInstance.date == today_date))
+        )
+        if today_inst_count == 0:
+            last_handled = today_date
     
     nd = get_template_next_date(t, last_handled, active_inst_date, today_date)
     return last_done, nd
