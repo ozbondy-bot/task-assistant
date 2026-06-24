@@ -141,6 +141,49 @@ def get_recurrence_delta(recurrence: str) -> timedelta:
 
 
 
+import aiohttp
+import os
+import json
+import logging
+
+logger = logging.getLogger(__name__)
+
+async def get_ai_emoji(text: str) -> str:
+    """Use Gemini API to get a single fitting emoji for the task text. Fallback to None if not set or fails."""
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        return None
+        
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+    headers = {"Content-Type": "application/json"}
+    prompt = (
+        f"Тебе дана задача: '{text}'. "
+        "Верни ровно один наиболее подходящий эмодзи для этой задачи. "
+        "Не пиши никаких объяснений, никаких других слов, только один символ эмодзи."
+    )
+    payload = {
+        "contents": [{
+            "parts": [{"text": prompt}]
+        }]
+    }
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, json=payload, timeout=5) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    emoji_text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                    emoji_text = emoji_text.replace(" ", "").replace("\n", "").replace("\r", "")
+                    # Match any emoji character
+                    match = re.match(r'^([\u2600-\u27BF\U0001f000-\U0001f9ff])', emoji_text)
+                    if match:
+                        return match.group(1)
+    except Exception as e:
+        logger.error(f"Error fetching AI emoji: {e}")
+        
+    return None
+
+
 def clean_task_text(text: str) -> str:
     """Remove status icons from task text and add custom category emoji if matching."""
     is_urgent = text.startswith("🔴")
@@ -150,6 +193,12 @@ def clean_task_text(text: str) -> str:
     for marker in STATUS_ICONS:
         clean_text = clean_text.replace(marker, "")
     clean_text = clean_text.strip()
+
+    # If already starts with an emoji (excluding 🔴), do not prepend a new one
+    if re.match(r'^[\u2600-\u27BF\U0001f000-\U0001f9ff]', clean_text):
+        if is_urgent:
+            clean_text = f"🔴 {clean_text}"
+        return clean_text
     
     # Add custom category emoji
     text_lower = clean_text.lower()

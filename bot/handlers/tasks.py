@@ -42,13 +42,11 @@ async def handle_my_add(call: types.CallbackQuery, state: FSMContext, db_user: U
     await state.set_state(AddPersonalTaskState.waiting_for_text)
     await state.update_data(page=page)
     
-    builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data=f"my_add_cancel:{page}"))
     await call.message.edit_text(
         "✏️ <b>Новая личная задача</b>:\n\n"
         "Введите текст задачи (например: Купить хлеб).\n"
         "Если задача срочная, напишите слово <b>«срочно»</b>.",
-        reply_markup=builder.as_markup(),
+        reply_markup=None,
         parse_mode="HTML"
     )
 
@@ -75,6 +73,12 @@ async def handle_my_add_text(message: types.Message, state: FSMContext, db_user:
     is_urgent = "срочно" in text.lower()
     clean_text = re.sub(r'срочно', '', text, flags=re.IGNORECASE).strip().capitalize()
     
+    # Resolve AI emoji
+    from bot.parser import get_ai_emoji
+    ai_emoji = await get_ai_emoji(clean_text)
+    if ai_emoji:
+        clean_text = f"{ai_emoji} {clean_text}"
+    
     db_text = f"🔴 {clean_text}" if is_urgent else clean_text
     
     await state.update_data(text=db_text)
@@ -92,9 +96,6 @@ async def handle_my_add_text(message: types.Message, state: FSMContext, db_user:
         InlineKeyboardButton(text=f"{d_today.strftime('%d.%m')} ({days_ru[d_today.weekday()]})", callback_data="addpt_date:today"),
         InlineKeyboardButton(text=f"{d_tomorrow.strftime('%d.%m')} ({days_ru[d_tomorrow.weekday()]})", callback_data="addpt_date:tomorrow"),
         InlineKeyboardButton(text="Другая дата", callback_data="addpt_date:calendar")
-    )
-    builder.row(
-        InlineKeyboardButton(text="❌ Отмена", callback_data=f"my_add_cancel:{page}")
     )
     
     await message.answer(
@@ -156,9 +157,6 @@ async def ask_for_recurrence(message: types.Message, state: FSMContext):
         InlineKeyboardButton(text="Единоразово", callback_data="addpt_period:once"),
         InlineKeyboardButton(text="Каждые X дней", callback_data="addpt_period:every_x_days")
     )
-    builder.row(
-        InlineKeyboardButton(text="❌ Отмена", callback_data=f"my_add_cancel:{page}")
-    )
     
     try:
         await message.edit_text(
@@ -203,11 +201,9 @@ async def handle_addpt_period(call: types.CallbackQuery, state: FSMContext, db_u
         await render_today(call.message, db_user, is_callback=True, page=page)
     else:
         await state.set_state(AddPersonalTaskState.waiting_for_recurrence_days)
-        builder = InlineKeyboardBuilder()
-        builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data=f"my_add_cancel:{page}"))
         await call.message.edit_text(
             "Укажите число дней, с каким интервалом повторять задачу (например, 5):",
-            reply_markup=builder.as_markup()
+            reply_markup=None
         )
 
 

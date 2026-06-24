@@ -103,7 +103,7 @@ async def handle_chores_add_menu(call: types.CallbackQuery, db_user: User = None
     )
     await call.message.edit_text(
         "➕ *Добавить задачу:*",
-        reply_markup=builder.as_markup(),
+        reply_markup=None,
         parse_mode="Markdown"
     )
 
@@ -161,7 +161,7 @@ async def handle_add_from_templates_list(call: types.CallbackQuery, db_user: Use
         else:
             text = "⚠️ Шаблонов дел пока нет!"
 
-    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+    await call.message.edit_text(text, reply_markup=None, parse_mode="Markdown")
 
 
 @dp.callback_query(F.data.startswith("spawn_chore:"))
@@ -272,9 +272,9 @@ async def redirect_to_template_settings(message: types.Message, tid: int, src: s
         InlineKeyboardButton(text="🗑 Удалить", callback_data=f"te_del_confirm:{tmpl.id}:{src}")
     )
     if is_callback:
-        await message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+        await message.edit_text(text, reply_markup=None, parse_mode="HTML")
     else:
-        await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+        await message.answer(text, reply_markup=None, parse_mode="HTML")
 
 
 @dp.callback_query(F.data.startswith("tmpl_set:"))
@@ -343,7 +343,7 @@ async def handle_tmpl_set(call: types.CallbackQuery, db_user: User = None):
             f"📅last: {last_done_str}\n"
             f"🔮next : {next_done_str}"
         )
-        await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode=None)
+        await call.message.edit_text(text, reply_markup=None, parse_mode=None)
     else:
         await redirect_to_template_settings(call.message, tmpl.id, src, db_user, is_callback=True)
 
@@ -366,9 +366,7 @@ async def handle_te_title_start(call: types.CallbackQuery, state: FSMContext):
     await state.update_data(edit_tid=tid, edit_src=src)
     await state.set_state(EditTemplateState.waiting_for_title)
     
-    builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data=f"te_cancel:{tid}:{src}"))
-    await call.message.edit_text("Введите новое название для шаблона:", reply_markup=builder.as_markup())
+    await call.message.edit_text("Введите новое название для шаблона:", reply_markup=None)
 
 
 @dp.message(StateFilter(EditTemplateState.waiting_for_title))
@@ -418,7 +416,7 @@ async def handle_te_title_input(message: types.Message, state: FSMContext, db_us
                 InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_act:{pending.id}")
             )
             try:
-                await bot.send_message(chat_id=partner.telegram_id, text=partner_text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+                await bot.send_message(chat_id=partner.telegram_id, text=partner_text, reply_markup=None, parse_mode="Markdown")
             except Exception as e:
                 logger.error(f"Failed to send approval message to partner: {e}")
             await state.clear()
@@ -439,9 +437,7 @@ async def handle_te_points_start(call: types.CallbackQuery, state: FSMContext):
     await state.update_data(edit_tid=tid, edit_src=src)
     await state.set_state(EditTemplateState.waiting_for_points)
     
-    builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data=f"te_cancel:{tid}:{src}"))
-    await call.message.edit_text("Введите новое количество баллов (печенек):", reply_markup=builder.as_markup())
+    await call.message.edit_text("Введите новое количество баллов (печенек):", reply_markup=None)
 
 
 @dp.message(StateFilter(EditTemplateState.waiting_for_points))
@@ -494,7 +490,7 @@ async def handle_te_points_input(message: types.Message, state: FSMContext, db_u
                 InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_act:{pending.id}")
             )
             try:
-                await bot.send_message(chat_id=partner.telegram_id, text=partner_text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+                await bot.send_message(chat_id=partner.telegram_id, text=partner_text, reply_markup=None, parse_mode="Markdown")
             except Exception as e:
                 logger.error(f"Failed to send approval message to partner: {e}")
             await state.clear()
@@ -521,10 +517,8 @@ async def handle_te_period_start(call: types.CallbackQuery, state: FSMContext):
         InlineKeyboardButton(text="Каждый день", callback_data="te_period_sel:daily"),
         InlineKeyboardButton(text="Каждые X дней", callback_data="te_period_sel:every_x_days")
     )
-    builder.row(
-        InlineKeyboardButton(text="❌ Отмена", callback_data=f"te_cancel:{tid}:{src}")
-    )
-    await call.message.edit_text("Выберите периодичность для шаблона:", reply_markup=builder.as_markup())
+
+    await call.message.edit_text("Выберите периодичность для шаблона:", reply_markup=None)
 
 
 @dp.callback_query(StateFilter(EditTemplateState.waiting_for_periodicity), F.data.startswith("te_period_sel:"))
@@ -571,7 +565,7 @@ async def handle_te_period_selected(call: types.CallbackQuery, state: FSMContext
                     InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_act:{pending.id}")
                 )
                 try:
-                    await bot.send_message(chat_id=partner.telegram_id, text=partner_text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+                    await bot.send_message(chat_id=partner.telegram_id, text=partner_text, reply_markup=None, parse_mode="Markdown")
                 except Exception as e:
                     logger.error(f"Failed to send approval message to partner: {e}")
                 await state.clear()
@@ -585,9 +579,7 @@ async def handle_te_period_selected(call: types.CallbackQuery, state: FSMContext
                 await redirect_to_template_settings(call.message, tid, src, db_user, is_callback=True)
     else:
         await state.set_state(EditTemplateState.waiting_for_period_days)
-        builder = InlineKeyboardBuilder()
-        builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data=f"te_cancel:{tid}:{src}"))
-        await call.message.edit_text("Укажите число дней, с каким интервалом повторять задачу (например, 5):", reply_markup=builder.as_markup())
+        await call.message.edit_text("Укажите число дней, с каким интервалом повторять задачу (например, 5):", reply_markup=None)
 
 
 @dp.message(StateFilter(EditTemplateState.waiting_for_period_days))
@@ -640,7 +632,7 @@ async def handle_te_period_days_input(message: types.Message, state: FSMContext,
                 InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_act:{pending.id}")
             )
             try:
-                await bot.send_message(chat_id=partner.telegram_id, text=partner_text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+                await bot.send_message(chat_id=partner.telegram_id, text=partner_text, reply_markup=None, parse_mode="Markdown")
             except Exception as e:
                 logger.error(f"Failed to send approval message to partner: {e}")
             await state.clear()
@@ -684,10 +676,9 @@ async def handle_te_del_confirm(call: types.CallbackQuery, db_user: User = None)
         name = tmpl.title if tmpl else "задача"
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"te_del:{tid}:{src}"),
-        InlineKeyboardButton(text="❌ Отмена", callback_data=f"tmpl_set:{tid}:{src}")
+        InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"te_del:{tid}:{src}")
     )
-    await call.message.edit_text(f"Точно удалить «{name}»?", reply_markup=builder.as_markup())
+    await call.message.edit_text(f"Точно удалить «{name}»?", reply_markup=None)
 
 
 @dp.callback_query(F.data.startswith("nudge:"))
@@ -914,9 +905,9 @@ async def render_chores_settings(message: types.Message, db_user: User = None, i
     text = "🛠 <b>Список задач дома:</b>" if templates else "Задач пока нет."
 
     if is_callback:
-        await message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+        await message.edit_text(text, reply_markup=None, parse_mode="HTML")
     else:
-        await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+        await message.answer(text, reply_markup=None, parse_mode="HTML")
 
 
 @dp.callback_query(F.data == "chores_settings")
@@ -988,13 +979,13 @@ async def handle_chores_archive(call: types.CallbackQuery, db_user: User = None)
             
         nav = []
         if page < len(sorted_dates) - 1:
-            nav.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"chores_arch:{page+1}"))
+            nav.append(InlineKeyboardButton(text="⏪", callback_data=f"chores_arch:{page+1}"))
         if page > 0:
-            nav.append(InlineKeyboardButton(text="Вперед ▶️", callback_data=f"chores_arch:{page-1}"))
+            nav.append(InlineKeyboardButton(text="⏩", callback_data=f"chores_arch:{page-1}"))
         if nav:
             builder.row(*nav)
             
-    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+    await call.message.edit_text(text, reply_markup=None, parse_mode="Markdown")
 
 
 # Add template FSM flow
@@ -1003,9 +994,7 @@ async def handle_add_tmpl_start(call: types.CallbackQuery, state: FSMContext):
     await state.set_state(AddTemplateState.waiting_for_title)
     await call.message.edit_text(
         "Пиши название задачи 📝:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="❌ Отмена", callback_data="add_tmpl_cancel")
-        ]]),
+        reply_markup=None,
         parse_mode=None
     )
 
@@ -1027,9 +1016,7 @@ async def handle_add_tmpl_title(message: types.Message, state: FSMContext):
     await state.set_state(AddTemplateState.waiting_for_points)
     await message.answer(
         "Сколько печенек 🍪 за нее дадим?",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="❌ Отмена", callback_data="add_tmpl_cancel")
-        ]]),
+        reply_markup=None,
         parse_mode=None
     )
 
@@ -1055,7 +1042,7 @@ async def handle_add_tmpl_points(message: types.Message, state: FSMContext):
     
     await message.answer(
         "Отлично! Как часто это делаем? 📅",
-        reply_markup=builder.as_markup()
+        reply_markup=None
     )
 
 
@@ -1069,10 +1056,9 @@ async def handle_add_tmpl_periodicity(call: types.CallbackQuery, state: FSMConte
     if periodicity == "every_x_days":
         await state.set_state(AddTemplateState.waiting_for_period_days)
         builder = InlineKeyboardBuilder()
-        builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data="add_tmpl_cancel"))
         await call.message.edit_text(
             "Укажите число дней, с каким интервалом повторять задачу (например, 5):",
-            reply_markup=builder.as_markup()
+            reply_markup=None
         )
         return
         
@@ -1109,7 +1095,7 @@ async def handle_add_tmpl_periodicity(call: types.CallbackQuery, state: FSMConte
                 InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_act:{pending.id}")
             )
             try:
-                await bot.send_message(chat_id=partner.telegram_id, text=partner_text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+                await bot.send_message(chat_id=partner.telegram_id, text=partner_text, reply_markup=None, parse_mode="Markdown")
             except Exception as e:
                 logger.error(f"Failed to send approval message to partner: {e}")
             await state.clear()
@@ -1187,7 +1173,7 @@ async def handle_add_tmpl_period_days(message: types.Message, state: FSMContext,
                 InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_act:{pending.id}")
             )
             try:
-                await bot.send_message(chat_id=partner.telegram_id, text=partner_text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+                await bot.send_message(chat_id=partner.telegram_id, text=partner_text, reply_markup=None, parse_mode="Markdown")
             except Exception as e:
                 logger.error(f"Failed to send approval message to partner: {e}")
             await state.clear()
@@ -1236,11 +1222,11 @@ async def handle_done_chore_inst(call: types.CallbackQuery, db_user: User = None
                 builder.row(InlineKeyboardButton(text="⏳ 30 - 60 мин (5 🍪)", callback_data=f"cook_time:{inst.id}:5:{page}"))
                 builder.row(InlineKeyboardButton(text="⏳ 60 - 90 мин (8 🍪)", callback_data=f"cook_time:{inst.id}:8:{page}"))
                 builder.row(InlineKeyboardButton(text="⏳ Более 90 мин (10 🍪)", callback_data=f"cook_time:{inst.id}:10:{page}"))
-                builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data=f"my_page:{page}"))
+
                 
                 await call.message.edit_text(
                     "🍳 *Готовка*\nСколько активного времени вы потратили на нее?",
-                    reply_markup=builder.as_markup(),
+                    reply_markup=None,
                     parse_mode="Markdown"
                 )
                 await call.answer()
@@ -1324,9 +1310,7 @@ async def handle_te_shift_start(call: types.CallbackQuery, db_user: User = None)
         
     markup = create_calendar_keyboard_custom(tmpl_id, today.year, today.month, today, "tmpl_start")
     header = format_calendar_header(today) + "\n*(выберите дату начала/отсчета для задачи)*"
-    keyboard = markup.inline_keyboard + [[
-        InlineKeyboardButton(text="❌ Отмена", callback_data=f"tmpl_set:{tmpl_id}:{src}")
-    ]]
+    keyboard = markup.inline_keyboard
     await call.message.edit_text(header, reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard), parse_mode="Markdown")
 
 
@@ -1342,9 +1326,7 @@ async def handle_cal_nav_tmpl_start(call: types.CallbackQuery, db_user: User = N
         
     markup = create_calendar_keyboard_custom(tmpl_id, year, month, today, "tmpl_start")
     header = format_calendar_header(today) + "\n*(выберите дату начала/отсчета для задачи)*"
-    keyboard = markup.inline_keyboard + [[
-        InlineKeyboardButton(text="❌ Отмена", callback_data=f"tmpl_set:{tmpl_id}:settings")
-    ]]
+    keyboard = markup.inline_keyboard
     await call.message.edit_text(header, reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard), parse_mode="Markdown")
 
 
@@ -1372,7 +1354,7 @@ async def handle_shift_tmpl_start(call: types.CallbackQuery, db_user: User = Non
                 .values(date=new_date)
             )
             await session.commit()
-            await call.answer(f"✅ Дата отсчета перенесена на {new_date.strftime('%d.%m')}!", show_alert=True)
+            await call.answer(f"✅ Дата отсчета перенесена на {new_date.strftime('%d.%m')}!", show_alert=False)
             
     await redirect_to_template_settings(call.message, tmpl_id, "settings", db_user, is_callback=True)
 

@@ -645,10 +645,18 @@ async def render_today(message: types.Message, db_user: User, is_callback=False,
         )
         my_chores_all = chores_result.all()
 
-    # 3. Find unique dates
+    # 3. Find unique dates and upcoming recurring task dates
     all_dates = set()
     for pt in personal_tasks_all:
         all_dates.add(pt.date_execution)
+        if pt.recurrence:
+            delta = get_recurrence_delta(pt.recurrence)
+            # Add next 4 occurrences (limit to 30 days ahead)
+            for k in range(1, 5):
+                occ_date = pt.date_execution + k * delta
+                if occ_date <= today + timedelta(days=30):
+                    all_dates.add(occ_date)
+                    
     for inst, tmpl in my_chores_all:
         all_dates.add(inst.date)
 
@@ -665,27 +673,46 @@ async def render_today(message: types.Message, db_user: User, is_callback=False,
     personal_tasks = []
     my_chores = []
 
+    def is_pt_occurring_on(pt, target_d):
+        if pt.date_execution == target_d:
+            return True
+        if pt.recurrence and target_d > pt.date_execution:
+            delta = get_recurrence_delta(pt.recurrence)
+            return (target_d - pt.date_execution).days % delta.days == 0
+        return False
+
     if page == 0:
         personal_tasks = [pt for pt in personal_tasks_all if pt.date_execution <= today]
         my_chores = [(inst, tmpl) for inst, tmpl in my_chores_all if inst.date <= today]
         text = "📋 <b>Мои дела на сегодня</b> (и просроченные):\n👉 <i>Нажми на дело для выполнения:</i>"
     else:
         target_date = future_dates[page - 1]
-        personal_tasks = [pt for pt in personal_tasks_all if pt.date_execution == target_date]
+        personal_tasks = [pt for pt in personal_tasks_all if is_pt_occurring_on(pt, target_date)]
         my_chores = [(inst, tmpl) for inst, tmpl in my_chores_all if inst.date == target_date]
         text = f"📋 <b>Мои дела на {target_date.strftime('%d.%m.%Y')}</b>:\n👉 <i>Нажми на дело для выполнения:</i>"
 
     builder = InlineKeyboardBuilder()
+
+    # Pagination row at the top
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="⏪", callback_data=f"my_page:{page-1}"))
+    if page < total_pages - 1:
+        nav.append(InlineKeyboardButton(text="⏩", callback_data=f"my_page:{page+1}"))
+    if nav:
+        builder.row(*nav)
 
     # Personal tasks rendering
     for t in personal_tasks:
         clean = clean_task_text(t.text)
         is_urgent = "🔴" in t.text
         
+        t_date = target_date if page > 0 else t.date_execution
+        
         if is_urgent:
             right_text = "🔴"
-        elif t.date_execution < today:
-            right_text = f"🟡 {t.date_execution.strftime('%d.%m.')}"
+        elif t_date < today:
+            right_text = f"🟡 {t_date.strftime('%d.%m.')}"
         elif t.recurrence:
             right_text = "🔁"
         else:
@@ -709,15 +736,6 @@ async def render_today(message: types.Message, db_user: User, is_callback=False,
             InlineKeyboardButton(text=f"🏠 {tmpl.title}", callback_data=f"done_chore_inst:{inst.id}:{page}"),
             InlineKeyboardButton(text=right_text, callback_data=f"done_chore_inst:{inst.id}:{page}")
         )
-
-    # Pagination row
-    nav = []
-    if page > 0:
-        nav.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"my_page:{page-1}"))
-    if page < total_pages - 1:
-        nav.append(InlineKeyboardButton(text="Вперед ▶️", callback_data=f"my_page:{page+1}"))
-    if nav:
-        builder.row(*nav)
 
     # Toolbar row
     builder.row(

@@ -176,9 +176,9 @@ async def handle_stat_arch(call: types.CallbackQuery, db_user: User = None):
 
     nav = []
     if page < total_days - 1:
-        nav.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"stat_arch:{page+1}"))
+        nav.append(InlineKeyboardButton(text="⏪", callback_data=f"stat_arch:{page+1}"))
     if page > 0:
-        nav.append(InlineKeyboardButton(text="Вперед ▶️", callback_data=f"stat_arch:{page-1}"))
+        nav.append(InlineKeyboardButton(text="⏩", callback_data=f"stat_arch:{page-1}"))
     if nav:
         builder.row(*nav)
 
@@ -316,9 +316,9 @@ async def handle_rewards_purchases(call: types.CallbackQuery, db_user: User = No
     builder = InlineKeyboardBuilder()
     nav = []
     if page > 0:
-        nav.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"rewards_purchases:{page-1}"))
+        nav.append(InlineKeyboardButton(text="⏪", callback_data=f"rewards_purchases:{page-1}"))
     if len(rows) == 5:
-        nav.append(InlineKeyboardButton(text="Вперед ▶️", callback_data=f"rewards_purchases:{page+1}"))
+        nav.append(InlineKeyboardButton(text="⏩", callback_data=f"rewards_purchases:{page+1}"))
     if nav:
         builder.row(*nav)
     await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
@@ -331,7 +331,7 @@ async def handle_add_reward_start(call: types.CallbackQuery, state: FSMContext):
     await call.message.edit_text(
         "✏️ *Добавление новой награды*\n\nВведите название награды (например: Пицца за счет дома):",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="❌ Отмена", callback_data="add_reward_cancel")
+
         ]]),
         parse_mode="Markdown"
     )
@@ -355,7 +355,7 @@ async def handle_add_reward_title(message: types.Message, state: FSMContext):
     await message.answer(
         f"Установлено название: *{title}*\n\nСколько баллов (🍪) должна стоить эта награда? (Введите число, например: 50):",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="❌ Отмена", callback_data="add_reward_cancel")
+
         ]]),
         parse_mode="Markdown"
     )
