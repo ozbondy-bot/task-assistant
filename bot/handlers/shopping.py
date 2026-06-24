@@ -103,7 +103,7 @@ async def handle_fulfill_reward(call: types.CallbackQuery, db_user: User = None)
             return
             
         if purchase.user_id == db_user.id:
-            await call.answer("Награду должен выполнить партнёр! 😉", show_alert=False)
+            await call.answer("Эту награду должен выполнить твой партнёр! 😉", show_alert=True)
             return
             
         buyer = await session.get(User, purchase.user_id)
@@ -136,7 +136,7 @@ async def handle_fulfill_reward(call: types.CallbackQuery, db_user: User = None)
         except Exception as e:
             logger.error(f"Failed to send confirmation message to buyer: {e}")
             
-    await call.answer("Запрос отправлен партнёру! ⏳", show_alert=False)
+    await call.answer("Запрос на подтверждение отправлен партнёру! ⏳", show_alert=True)
     await render_shop(call.message, db_user, True)
 
 
@@ -150,7 +150,7 @@ async def handle_confirm_reward(call: types.CallbackQuery, db_user: User = None)
             return
             
         if purchase.user_id != db_user.id:
-            await call.answer("Подтвердить может только покупатель!", show_alert=False)
+            await call.answer("Только покупатель может подтвердить выполнение!", show_alert=True)
             return
             
         purchase.status = "used"
@@ -185,7 +185,7 @@ async def handle_reject_reward(call: types.CallbackQuery, db_user: User = None):
             return
             
         if purchase.user_id != db_user.id:
-            await call.answer("Отклонить может только покупатель!", show_alert=False)
+            await call.answer("Только покупатель может отклонить выполнение!", show_alert=True)
             return
             
         purchase.status = "purchased"
@@ -315,10 +315,6 @@ async def s_archive(call: types.CallbackQuery):
 
     text = "📜 *Архив покупок*\n👉 _Тапни, чтобы вернуть в список:_\n\n"
     b = InlineKeyboardBuilder()
-    for i in items:
-        price_str = f"({i.price}₽)" if i.price > 0 else ""
-        b.button(text=f"✅ {i.item_name} {price_str}", callback_data=f"restore_shop:{i.id}:{page}")
-    b.adjust(1)
     nav = []
     if page > 0:
         nav.append(InlineKeyboardButton(text="⏪", callback_data=f"s_arch:{page-1}"))
@@ -326,6 +322,10 @@ async def s_archive(call: types.CallbackQuery):
         nav.append(InlineKeyboardButton(text="⏩", callback_data=f"s_arch:{page+1}"))
     if nav:
         b.row(*nav)
+        
+    for i in items:
+        price_str = f"({i.price}₽)" if i.price > 0 else ""
+        b.row(InlineKeyboardButton(text=f"✅ {i.item_name} {price_str}", callback_data=f"restore_shop:{i.id}:{page}"))
     await call.message.edit_text(text, reply_markup=b.as_markup(), parse_mode="Markdown")
 
 

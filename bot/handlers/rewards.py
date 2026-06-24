@@ -37,6 +37,13 @@ async def render_shop_and_purchases(message: types.Message, db_user: User, is_ca
         text += f"🦸\u200d♂️ {usr.display_name}: {usr.points or 0} 🍪 (+{weekly} 🍪)\n"
 
     builder = InlineKeyboardBuilder()
+    nav = []
+    if page < total_days - 1:
+        nav.append(InlineKeyboardButton(text="⏪", callback_data=f"stat_arch:{page+1}"))
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="⏩", callback_data=f"stat_arch:{page-1}"))
+    if nav:
+        builder.row(*nav)
     builder.row(
         InlineKeyboardButton(text="Магазин", callback_data="rewards_shop_view"),
         InlineKeyboardButton(text="Покупки", callback_data="shop_view_items"),
@@ -157,6 +164,13 @@ async def handle_stat_arch(call: types.CallbackQuery, db_user: User = None):
 
     text = f"📅 *Дата:* {current_date.strftime('%d.%m.%Y')}"
     builder = InlineKeyboardBuilder()
+    nav = []
+    if page < total_days - 1:
+        nav.append(InlineKeyboardButton(text="⏪", callback_data=f"stat_arch:{page+1}"))
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="⏩", callback_data=f"stat_arch:{page-1}"))
+    if nav:
+        builder.row(*nav)
 
     for e in day_entries:
         if e.get("is_personal"):
@@ -174,13 +188,7 @@ async def handle_stat_arch(call: types.CallbackQuery, db_user: User = None):
             InlineKeyboardButton(text=right_text, callback_data="noop")
         )
 
-    nav = []
-    if page < total_days - 1:
-        nav.append(InlineKeyboardButton(text="⏪", callback_data=f"stat_arch:{page+1}"))
-    if page > 0:
-        nav.append(InlineKeyboardButton(text="⏩", callback_data=f"stat_arch:{page-1}"))
-    if nav:
-        builder.row(*nav)
+
 
     await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
 
@@ -196,6 +204,13 @@ async def render_rewards_settings(message: types.Message, db_user: User, is_call
 
     text = "⚙️ *Управление наградами:*\n\n"
     builder = InlineKeyboardBuilder()
+    nav = []
+    if page < total_days - 1:
+        nav.append(InlineKeyboardButton(text="⏪", callback_data=f"stat_arch:{page+1}"))
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="⏩", callback_data=f"stat_arch:{page-1}"))
+    if nav:
+        builder.row(*nav)
     if rewards:
         for r in rewards:
             text += f"• *{r.title}* — `{r.price} 🍪`\n"
@@ -226,6 +241,13 @@ async def handle_rewards_shop_view(call: types.CallbackQuery, db_user: User = No
     text = "🎁 Магазин наград\nДля покупки нажми на выбранную награду:"
 
     builder = InlineKeyboardBuilder()
+    nav = []
+    if page < total_days - 1:
+        nav.append(InlineKeyboardButton(text="⏪", callback_data=f"stat_arch:{page+1}"))
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="⏩", callback_data=f"stat_arch:{page-1}"))
+    if nav:
+        builder.row(*nav)
     if rewards:
         for r in rewards:
             builder.row(InlineKeyboardButton(text=f"{r.title} ({r.price}🍪)", callback_data=f"buy_reward:{r.id}"))
@@ -315,10 +337,17 @@ async def handle_rewards_purchases(call: types.CallbackQuery, db_user: User = No
 
     builder = InlineKeyboardBuilder()
     nav = []
+    if page < total_days - 1:
+        nav.append(InlineKeyboardButton(text="⏪", callback_data=f"stat_arch:{page+1}"))
     if page > 0:
-        nav.append(InlineKeyboardButton(text="⏪", callback_data=f"rewards_purchases:{page-1}"))
+        nav.append(InlineKeyboardButton(text="⏩", callback_data=f"stat_arch:{page-1}"))
+    if nav:
+        builder.row(*nav)
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"rewards_purchases:{page-1}"))
     if len(rows) == 5:
-        nav.append(InlineKeyboardButton(text="⏩", callback_data=f"rewards_purchases:{page+1}"))
+        nav.append(InlineKeyboardButton(text="Вперед ▶️", callback_data=f"rewards_purchases:{page+1}"))
     if nav:
         builder.row(*nav)
     await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
@@ -330,9 +359,7 @@ async def handle_add_reward_start(call: types.CallbackQuery, state: FSMContext):
     await state.set_state(AddRewardState.waiting_for_title)
     await call.message.edit_text(
         "✏️ *Добавление новой награды*\n\nВведите название награды (например: Пицца за счет дома):",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-
-        ]]),
+        reply_markup=None,
         parse_mode="Markdown"
     )
 
@@ -354,9 +381,7 @@ async def handle_add_reward_title(message: types.Message, state: FSMContext):
     await state.set_state(AddRewardState.waiting_for_price)
     await message.answer(
         f"Установлено название: *{title}*\n\nСколько баллов (🍪) должна стоить эта награда? (Введите число, например: 50):",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-
-        ]]),
+        reply_markup=None,
         parse_mode="Markdown"
     )
 

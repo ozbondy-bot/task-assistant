@@ -73,12 +73,6 @@ async def handle_my_add_text(message: types.Message, state: FSMContext, db_user:
     is_urgent = "срочно" in text.lower()
     clean_text = re.sub(r'срочно', '', text, flags=re.IGNORECASE).strip().capitalize()
     
-    # Resolve AI emoji
-    from bot.parser import get_ai_emoji
-    ai_emoji = await get_ai_emoji(clean_text)
-    if ai_emoji:
-        clean_text = f"{ai_emoji} {clean_text}"
-    
     db_text = f"🔴 {clean_text}" if is_urgent else clean_text
     
     await state.update_data(text=db_text)
@@ -97,6 +91,7 @@ async def handle_my_add_text(message: types.Message, state: FSMContext, db_user:
         InlineKeyboardButton(text=f"{d_tomorrow.strftime('%d.%m')} ({days_ru[d_tomorrow.weekday()]})", callback_data="addpt_date:tomorrow"),
         InlineKeyboardButton(text="Другая дата", callback_data="addpt_date:calendar")
     )
+
     
     await message.answer(
         f"📅 <b>Выберите дату выполнения</b> для задачи «{db_text}»:",
@@ -157,6 +152,7 @@ async def ask_for_recurrence(message: types.Message, state: FSMContext):
         InlineKeyboardButton(text="Единоразово", callback_data="addpt_period:once"),
         InlineKeyboardButton(text="Каждые X дней", callback_data="addpt_period:every_x_days")
     )
+
     
     try:
         await message.edit_text(
@@ -311,8 +307,6 @@ async def handle_my_shift_select(call: types.CallbackQuery, db_user: User = None
         prefix = "🟡 " if inst.date < today else ""
         builder.row(InlineKeyboardButton(text=f"{prefix}🏠 {tmpl.title}", callback_data=f"shift_chore_menu:{inst.id}:{page}"))
 
-    builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data=f"my_page:{page}"))
-
     await call.message.edit_text("🔄 Выберите задачу для переноса:", reply_markup=builder.as_markup())
 
 
@@ -335,9 +329,6 @@ async def handle_shift_pt_menu(call: types.CallbackQuery, db_user: User = None):
             InlineKeyboardButton(text=f"{d1.strftime('%d.%m')} ({days_ru[d1.weekday()]})", callback_data=f"shift_pt:{page}:{t_id}:{d1.strftime('%Y-%m-%d')}"),
             InlineKeyboardButton(text=f"{d2.strftime('%d.%m')} ({days_ru[d2.weekday()]})", callback_data=f"shift_pt:{page}:{t_id}:{d2.strftime('%Y-%m-%d')}"),
             InlineKeyboardButton(text="Другая дата", callback_data=f"rc_months_pt:{t_id}:{page}")
-        ],
-        [
-            InlineKeyboardButton(text="❌ Отмена", callback_data=f"my_shift_select:{page}")
         ]
     ]
     await call.message.edit_text("На какой день перенести задачу?", reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
@@ -361,9 +352,6 @@ async def handle_shift_chore_menu(call: types.CallbackQuery, db_user: User = Non
             InlineKeyboardButton(text=f"{d1.strftime('%d.%m')} ({days_ru[d1.weekday()]})", callback_data=f"shift_chore:{page}:{inst_id}:{d1.strftime('%Y-%m-%d')}"),
             InlineKeyboardButton(text=f"{d2.strftime('%d.%m')} ({days_ru[d2.weekday()]})", callback_data=f"shift_chore:{page}:{inst_id}:{d2.strftime('%Y-%m-%d')}"),
             InlineKeyboardButton(text="Другая дата", callback_data=f"rc_months_chore:{inst_id}:{page}")
-        ],
-        [
-            InlineKeyboardButton(text="❌ Отмена", callback_data=f"my_shift_select:{page}")
         ]
     ]
     await call.message.edit_text("На какой день перенести задачу?", reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
@@ -575,8 +563,6 @@ async def handle_my_delete_select(call: types.CallbackQuery, db_user: User = Non
     for inst, tmpl in my_chores:
         prefix = "🟡 " if inst.date < today else ""
         builder.row(InlineKeyboardButton(text=f"🗑 {prefix}🏠 {tmpl.title}", callback_data=f"del_chore_inst:{inst.id}:{page}"))
-
-    builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data=f"my_page:{page}"))
 
     await call.message.edit_text("🗑 Выберите задачу для удаления:", reply_markup=builder.as_markup())
 
@@ -791,18 +777,18 @@ async def t_archive(call: types.CallbackQuery, db_user: User = None):
 
     text = "📜 *Архив задач*\n👉 _Тапни, чтобы вернуть на сегодня:_\n\n"
     b = InlineKeyboardBuilder()
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="⏪", callback_data=f"t_arch:{page-1}"))
+    if len(tasks) == 10:
+        nav.append(InlineKeyboardButton(text="⏩", callback_data=f"t_arch:{page+1}"))
+    if nav:
+        b.row(*nav)
+        
     for t in tasks:
         clean = clean_task_text(t.text)
         ds = t.date_execution.strftime('%d.%m')
-        b.button(text=f"[{ds}] {clean}", callback_data=f"restore_t:{t.id}")
-    b.adjust(1)
-    nav = []
-    if page > 0:
-        nav.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"t_arch:{page-1}"))
-    if len(tasks) == 10:
-        nav.append(InlineKeyboardButton(text="Вперед ▶️", callback_data=f"t_arch:{page+1}"))
-    if nav:
-        b.row(*nav)
+        b.row(InlineKeyboardButton(text=f"[{ds}] {clean}", callback_data=f"restore_t:{t.id}"))
     await call.message.edit_text(text, reply_markup=b.as_markup(), parse_mode="Markdown")
 
 
