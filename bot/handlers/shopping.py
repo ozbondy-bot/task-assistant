@@ -103,7 +103,7 @@ async def handle_fulfill_reward(call: types.CallbackQuery, db_user: User = None)
             return
             
         if purchase.user_id == db_user.id:
-            await call.answer("Эту награду должен выполнить твой партнёр! 😉", show_alert=True)
+            await call.answer("Эту награду должен выполнить твой партнёр! 😉", show_alert=False)
             return
             
         buyer = await session.get(User, purchase.user_id)
@@ -136,7 +136,7 @@ async def handle_fulfill_reward(call: types.CallbackQuery, db_user: User = None)
         except Exception as e:
             logger.error(f"Failed to send confirmation message to buyer: {e}")
             
-    await call.answer("Запрос на подтверждение отправлен партнёру! ⏳", show_alert=True)
+    await call.answer("Запрос на подтверждение отправлен партнёру! ⏳", show_alert=False)
     await render_shop(call.message, db_user, True)
 
 
@@ -150,7 +150,7 @@ async def handle_confirm_reward(call: types.CallbackQuery, db_user: User = None)
             return
             
         if purchase.user_id != db_user.id:
-            await call.answer("Только покупатель может подтвердить выполнение!", show_alert=True)
+            await call.answer("Только покупатель может подтвердить выполнение!", show_alert=False)
             return
             
         purchase.status = "used"
@@ -185,7 +185,7 @@ async def handle_reject_reward(call: types.CallbackQuery, db_user: User = None):
             return
             
         if purchase.user_id != db_user.id:
-            await call.answer("Только покупатель может отклонить выполнение!", show_alert=True)
+            await call.answer("Только покупатель может отклонить выполнение!", show_alert=False)
             return
             
         purchase.status = "purchased"

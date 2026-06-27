@@ -1353,7 +1353,7 @@ async def handle_shift_tmpl_start(call: types.CallbackQuery, db_user: User = Non
                 .values(date=new_date)
             )
             await session.commit()
-            await call.answer(f"✅ Дата отсчета перенесена на {new_date.strftime('%d.%m')}!", show_alert=True)
+            await call.answer(f"✅ Дата отсчета перенесена на {new_date.strftime('%d.%m')}!", show_alert=False)
             
     await redirect_to_template_settings(call.message, tmpl_id, "settings", db_user, is_callback=True)
 
