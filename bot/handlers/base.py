@@ -898,7 +898,7 @@ async def get_template_next_date_val(session: AsyncSession, t: TaskTemplate, tod
         .where(
             and_(
                 TaskInstance.template_id == t.id,
-                TaskInstance.status.in_(["free", "in_progress", "shifted"])
+                TaskInstance.status.in_(["free", "in_progress"])
             )
         )
     )
