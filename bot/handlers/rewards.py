@@ -37,13 +37,6 @@ async def render_shop_and_purchases(message: types.Message, db_user: User, is_ca
         text += f"🦸\u200d♂️ {usr.display_name}: {usr.points or 0} 🍪 (+{weekly} 🍪)\n"
 
     builder = InlineKeyboardBuilder()
-    nav = []
-    if page < total_days - 1:
-        nav.append(InlineKeyboardButton(text="⏪", callback_data=f"stat_arch:{page+1}"))
-    if page > 0:
-        nav.append(InlineKeyboardButton(text="⏩", callback_data=f"stat_arch:{page-1}"))
-    if nav:
-        builder.row(*nav)
     builder.row(
         InlineKeyboardButton(text="Магазин", callback_data="rewards_shop_view"),
         InlineKeyboardButton(text="Покупки", callback_data="shop_view_items"),
@@ -64,6 +57,11 @@ async def handle_shop_and_purchases_btn(message: types.Message, db_user: User = 
 
 @dp.callback_query(F.data == "shop_and_purchases_back")
 async def handle_shop_and_purchases_back(call: types.CallbackQuery, db_user: User = None):
+    await render_shop_and_purchases(call.message, db_user, is_callback=True)
+
+
+@dp.callback_query(F.data == "stats_view")
+async def handle_stats_view(call: types.CallbackQuery, db_user: User = None):
     await render_shop_and_purchases(call.message, db_user, is_callback=True)
 
 
@@ -204,13 +202,6 @@ async def render_rewards_settings(message: types.Message, db_user: User, is_call
 
     text = "⚙️ *Управление наградами:*\n\n"
     builder = InlineKeyboardBuilder()
-    nav = []
-    if page < total_days - 1:
-        nav.append(InlineKeyboardButton(text="⏪", callback_data=f"stat_arch:{page+1}"))
-    if page > 0:
-        nav.append(InlineKeyboardButton(text="⏩", callback_data=f"stat_arch:{page-1}"))
-    if nav:
-        builder.row(*nav)
     if rewards:
         for r in rewards:
             text += f"• *{r.title}* — `{r.price} 🍪`\n"
@@ -241,13 +232,6 @@ async def handle_rewards_shop_view(call: types.CallbackQuery, db_user: User = No
     text = "🎁 Магазин наград\nДля покупки нажми на выбранную награду:"
 
     builder = InlineKeyboardBuilder()
-    nav = []
-    if page < total_days - 1:
-        nav.append(InlineKeyboardButton(text="⏪", callback_data=f"stat_arch:{page+1}"))
-    if page > 0:
-        nav.append(InlineKeyboardButton(text="⏩", callback_data=f"stat_arch:{page-1}"))
-    if nav:
-        builder.row(*nav)
     if rewards:
         for r in rewards:
             builder.row(InlineKeyboardButton(text=f"{r.title} ({r.price}🍪)", callback_data=f"buy_reward:{r.id}"))
@@ -336,13 +320,6 @@ async def handle_rewards_purchases(call: types.CallbackQuery, db_user: User = No
         text += "Покупок пока не было."
 
     builder = InlineKeyboardBuilder()
-    nav = []
-    if page < total_days - 1:
-        nav.append(InlineKeyboardButton(text="⏪", callback_data=f"stat_arch:{page+1}"))
-    if page > 0:
-        nav.append(InlineKeyboardButton(text="⏩", callback_data=f"stat_arch:{page-1}"))
-    if nav:
-        builder.row(*nav)
     nav = []
     if page > 0:
         nav.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"rewards_purchases:{page-1}"))

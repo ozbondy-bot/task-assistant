@@ -400,6 +400,19 @@ async def generate_daily_chores_if_needed(session, house_id: int):
     if not house:
         return
 
+    # Rollover old uncompleted tasks (excluding completed or skipped) first
+    # to avoid creating duplicate instances for today.
+    await session.execute(
+        update(TaskInstance)
+        .where(
+            and_(
+                TaskInstance.date < today,
+                TaskInstance.status.notin_(["done", "skipped"])
+            )
+        )
+        .values(date=today)
+    )
+
     result = await session.execute(
         select(TaskTemplate).where(
             and_(
@@ -457,18 +470,6 @@ async def generate_daily_chores_if_needed(session, house_id: int):
                     priority=0
                 )
                 session.add(inst)
-
-    # Rollover old uncompleted tasks (excluding completed or skipped)
-    await session.execute(
-        update(TaskInstance)
-        .where(
-            and_(
-                TaskInstance.date < today,
-                TaskInstance.status.notin_(["done", "skipped"])
-            )
-        )
-        .values(date=today)
-    )
 
     house.last_summary_date = today
     await session.commit()
