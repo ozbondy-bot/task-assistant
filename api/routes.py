@@ -45,6 +45,7 @@ async def get_current_user(x_init_data: str = Header(None)) -> User:
 
 # ── Health check ──────────────────────────────────────────────────────────────
 @app.get("/health")
+@app.head("/health")
 async def health():
     return {"status": "ok", "ts": datetime.utcnow().isoformat()}
 
