@@ -632,7 +632,10 @@ async def handle_ob_page(call: types.CallbackQuery, db_user: User = None):
             "Зарабатывайте печеньки и радуйте друг друга наградами! 🎉"
         )
         builder = InlineKeyboardBuilder()
-        builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="ob_page:1"))
+        builder.row(
+            InlineKeyboardButton(text="⬅️ Назад", callback_data="ob_page:1"),
+            InlineKeyboardButton(text="Перейти к задачам", callback_data="home_view")
+        )
         await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
         # Pin onboarding on transition to page 2
         try:
@@ -738,13 +741,17 @@ async def render_today(message: types.Message, db_user: User, is_callback=False,
 
     builder = InlineKeyboardBuilder()
     
-    # Top Tab Row
+    # Row 1 (Main Tabs)
     builder.row(
         InlineKeyboardButton(text="🏠 Home", callback_data="home_view"),
         InlineKeyboardButton(text="⚡📋 My⚡", callback_data="noop"),
         InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
     )
-    builder = InlineKeyboardBuilder()
+    
+    # Row 2 (Sub-tabs)
+    builder.row(
+        InlineKeyboardButton(text="➕ Добавить", callback_data=f"my_add:{page}")
+    )
 
     # Personal tasks rendering    # Personal tasks rendering
     for t in personal_tasks:
@@ -804,10 +811,7 @@ async def render_today(message: types.Message, db_user: User, is_callback=False,
         
     builder.row(*nav)
 
-    # Toolbar row (only Add button remains)
-    builder.row(
-        InlineKeyboardButton(text="➕ Добавить", callback_data=f"my_add:{page}")
-    )
+    # Bottom Add button moved to Row 2
 
     markup = builder.as_markup()
     if is_callback:

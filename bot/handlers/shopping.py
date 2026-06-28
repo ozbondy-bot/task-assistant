@@ -54,24 +54,42 @@ async def render_shop(message: types.Message, db_user: User, is_callback=False):
         random.setstate(state)
         return e
 
-    builder = InlineKeyboardBuilder()
+    items_builder = InlineKeyboardBuilder()
     
     # 1. Render grocery items
     for item in items:
         prefix = "🔴 " if item.priority == "high" else ""
         price_str = f"{item.price}₽ " if item.price > 0 else ""
         emoji = get_emoji(item.id)
-        builder.button(text=f"{price_str}{emoji} {prefix}{item.item_name}", callback_data=f"done_shop:{item.id}")
+        items_builder.button(text=f"{price_str}{emoji} {prefix}{item.item_name}", callback_data=f"done_shop:{item.id}")
         
     # 2. Render reward purchases
     for purchase in purchases:
         buyer_name = user_name_map.get(purchase.user_id, "?")
         if purchase.status == "pending_use":
-            builder.button(text=f"⏳ 🎁 {purchase.reward_title} ({buyer_name})", callback_data="noop")
+            items_builder.button(text=f"⏳ 🎁 {purchase.reward_title} ({buyer_name})", callback_data="noop")
         else:
-            builder.button(text=f"🎁 {purchase.reward_title} ({buyer_name})", callback_data=f"fulfill_rew:{purchase.id}")
+            items_builder.button(text=f"🎁 {purchase.reward_title} ({buyer_name})", callback_data=f"fulfill_rew:{purchase.id}")
             
-    builder.adjust(1)
+    items_builder.adjust(1)
+    
+    builder = InlineKeyboardBuilder()
+    
+    # Row 1 (Main Tabs)
+    builder.row(
+        InlineKeyboardButton(text="🏠 Home", callback_data="home_view"),
+        InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
+        InlineKeyboardButton(text="⚡📊 Stat⚡", callback_data="noop")
+    )
+    
+    # Row 2 (Sub-tabs)
+    builder.row(
+        InlineKeyboardButton(text="🛍 Магазин", callback_data="rewards_shop_view"),
+        InlineKeyboardButton(text="⚡🛒 Покупки⚡", callback_data="noop"),
+        InlineKeyboardButton(text="📜 Архив", callback_data="stat_arch:0")
+    )
+    
+    builder.attach(items_builder)
     
     # Bottom actions row (WITHOUT Back button)
     if items or purchases:
@@ -364,6 +382,20 @@ async def s_archive(call: types.CallbackQuery):
 
     text = "📜 *Архив покупок и наград*\n👉 _Тапни на покупку, чтобы вернуть её в список:_\n\n"
     b = InlineKeyboardBuilder()
+    
+    # Row 1 (Main Tabs)
+    b.row(
+        InlineKeyboardButton(text="🏠 Home", callback_data="home_view"),
+        InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
+        InlineKeyboardButton(text="⚡📊 Stat⚡", callback_data="noop")
+    )
+    
+    # Row 2 (Sub-tabs)
+    b.row(
+        InlineKeyboardButton(text="🛍 Магазин", callback_data="rewards_shop_view"),
+        InlineKeyboardButton(text="⚡🛒 Покупки⚡", callback_data="noop"),
+        InlineKeyboardButton(text="📜 Архив", callback_data="stat_arch:0")
+    )
     
     for entry in page_items:
         if entry["type"] == "shopping_item":

@@ -106,17 +106,18 @@ async def render_shop_and_purchases(message: types.Message, db_user: User, is_ca
 
     builder = InlineKeyboardBuilder()
     
-    # Top Tab Row
+    # Row 1 (Main Tabs)
     builder.row(
         InlineKeyboardButton(text="🏠 Home", callback_data="home_view"),
         InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
         InlineKeyboardButton(text="⚡📊 Stat⚡", callback_data="noop")
     )
     
+    # Row 2 (Sub-tabs)
     builder.row(
-        InlineKeyboardButton(text="Магазин", callback_data="rewards_shop_view"),
-        InlineKeyboardButton(text="Покупки", callback_data="shop_view_items"),
-        InlineKeyboardButton(text="Архив", callback_data="stat_arch:0"),
+        InlineKeyboardButton(text="🛍 Магазин", callback_data="rewards_shop_view"),
+        InlineKeyboardButton(text="🛒 Покупки", callback_data="shop_view_items"),
+        InlineKeyboardButton(text="📜 Архив", callback_data="stat_arch:0")
     )
     markup = builder.as_markup()
     if is_callback:
@@ -145,153 +146,121 @@ async def handle_stat_arch(call: types.CallbackQuery, db_user: User = None):
     parts = call.data.split(":")
     page = int(parts[1])
     
-    # 1. Fetch completions for the house
     async with AsyncSessionLocal() as session:
-        # Get all user IDs in the house
-        users_result = await session.execute(
-            select(User).where(User.house_id == ACTIVE_HOUSE_ID)
-        )
-        users = users_result.scalars().all()
-        house_user_ids = [u.id for u in users]
-        user_name_map = {u.id: (u.display_name or u.username or "?") for u in users}
+        today = await get_house_today_date(session)
+        target_date = today - timedelta(days=page)
         
-        # Get all completions for these users
-        comps_result = await session.execute(
-            select(Completion).where(Completion.user_id.in_(house_user_ids))
-        )
-        completions = comps_result.scalars().all()
-        
-        # Get task instances and templates to get titles
-        inst_ids = [c.task_instance_id for c in completions]
-        insts_result = await session.execute(
-            select(TaskInstance).where(TaskInstance.id.in_(inst_ids)) if inst_ids else select(TaskInstance).where(False)
-        )
-        insts = insts_result.scalars().all()
-        inst_map = {i.id: i for i in insts}
-        
-        tmpl_ids = [i.template_id for i in insts]
-        tmpls_result = await session.execute(
-            select(TaskTemplate).where(TaskTemplate.id.in_(tmpl_ids)) if tmpl_ids else select(TaskTemplate).where(False)
-        )
-        tmpls = tmpls_result.scalars().all()
-        tmpl_map = {t.id: t for t in tmpls}
-        
-        # Also fetch personal tasks completions
-        pt_result = await session.execute(
-            select(PersonalTask).where(
-                and_(PersonalTask.user_id.in_(house_user_ids), PersonalTask.is_completed == True, PersonalTask.is_deleted == False)
+        # 1. House chores completed on target_date
+        chores_result = await session.execute(
+            select(Completion, TaskInstance, TaskTemplate, User)
+            .join(TaskInstance, Completion.task_instance_id == TaskInstance.id)
+            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
+            .join(User, Completion.user_id == User.id)
+            .where(
+                and_(
+                    TaskTemplate.house_id == ACTIVE_HOUSE_ID,
+                    func.date(Completion.created_at) == target_date
+                )
             )
         )
-        personal_completed = pt_result.scalars().all()
-
-    # Group all entries by date
-    from collections import defaultdict
-    grouped = defaultdict(list)
-    from datetime import date, datetime
-    
-    for c in completions:
-        dt = c.created_at
-        local_date = dt.date()
-        inst = inst_map.get(c.task_instance_id)
-        title = "Чора"
-        if inst:
-            tmpl = tmpl_map.get(inst.template_id)
-            if tmpl:
-                title = tmpl.title
-        user_name = user_name_map.get(c.user_id, "?")
-        points = c.points
-        grouped[local_date].append({
-            "is_personal": False,
-            "id": c.id,
-            "title": title,
-            "user_name": user_name,
-            "points": points,
-            "sort_dt": dt
-        })
+        chores_rows = chores_result.all()
         
-    for pt in personal_completed:
-        dt = pt.completed_at or pt.date_execution
-        # convert to datetime if date
-        if isinstance(dt, date) and not isinstance(dt, datetime):
-            dt_datetime = datetime.combine(dt, datetime.min.time())
-        else:
-            dt_datetime = dt
-        local_date = dt_datetime.date()
-        user_name = user_name_map.get(pt.user_id, "?")
-        grouped[local_date].append({
-            "is_personal": True,
+        # 2. Personal tasks completed on target_date
+        users_result = await session.execute(select(User.id).where(User.house_id == ACTIVE_HOUSE_ID))
+        house_user_ids = [u[0] for u in users_result.all()]
+        
+        pts_result = await session.execute(
+            select(PersonalTask, User)
+            .join(User, PersonalTask.user_id == User.id)
+            .where(
+                and_(
+                    PersonalTask.user_id.in_(house_user_ids),
+                    PersonalTask.is_completed == True,
+                    func.date(PersonalTask.completed_at) == target_date
+                )
+            )
+        )
+        pts_rows = pts_result.all()
+
+    # Combine
+    day_entries = []
+    for comp, inst, tmpl, usr in chores_rows:
+        day_entries.append({
+            "type": "chore",
+            "id": comp.id,
+            "title": tmpl.title,
+            "points": comp.points,
+            "user": usr.display_name,
+            "time": comp.created_at.strftime("%H:%M")
+        })
+    for pt, usr in pts_rows:
+        day_entries.append({
+            "type": "personal",
             "id": pt.id,
-            "title": pt.text,
-            "user_name": user_name,
+            "title": clean_task_text(pt.text),
             "points": 0,
-            "sort_dt": dt_datetime
+            "user": usr.display_name,
+            "time": pt.completed_at.strftime("%H:%M")
         })
-
-    unique_dates = sorted(list(grouped.keys()), reverse=True)
-    total_days = len(unique_dates)
-    
-    if total_days == 0:
-        await call.answer("Архив выполненных задач пуст!", show_alert=False)
-        return
         
-    if page < 0:
-        page = 0
-    if page >= total_days:
-        page = total_days - 1
-        
-    current_date = unique_dates[page]
-    day_entries = grouped[current_date]
-    day_entries.sort(key=lambda x: x["sort_dt"], reverse=True)
+    day_entries.sort(key=lambda x: x["time"], reverse=True)
 
-    text = "📋 <b>Выполненные задачи вашего дома</b>\n👉 <i>Для возврата задачи нажмите на неё:</i>"
-    
-    def get_ru_weekday_abbr(d) -> str:
+    # Header date label
+    date_lbl = target_date.strftime("%d.%m")
+    # Get weekday
+    def get_ru_weekday_abbr_local(d) -> str:
         abbrs = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
         return abbrs[d.weekday()]
+    weekday_lbl = get_ru_weekday_abbr_local(target_date)
+    
+    text = f"📜 *Архив выполненных задач* — {date_lbl} ({weekday_lbl}):\n\n"
+    if day_entries:
+        for e in day_entries:
+            pts_str = f" (+{e['points']}🍪)" if e['points'] > 0 else ""
+            text += f"• *[{e['time']}]* {e['user']}: {e['title']}{pts_str}\n"
+    else:
+        text += "В этот день никто ничего не выполнял."
 
     builder = InlineKeyboardBuilder()
     
-    for e in day_entries:
-        if e.get("is_personal"):
-            clean = clean_task_text(e["title"])
-            left_text = f"👤 {clean}"
-            right_text = f"{e['user_name']}"
-            callback = f"rollback_pt:{e['id']}:{page}"
-        else:
-            left_text = f"🏠 {e['title']}"
-            right_text = f"{e['user_name']} ({e['points']}🍪)"
-            callback = f"rollback_chore:{e['id']}:{page}"
-            
-        builder.row(
-            InlineKeyboardButton(text=left_text, callback_data="noop"),
-            InlineKeyboardButton(text=right_text, callback_data=callback)
-        )
-
-    # Pagination row at the bottom (3-button layout)
-    nav = []
-    # Left arrow
-    if page < total_days - 1:
-        nav.append(InlineKeyboardButton(text="⏪", callback_data=f"stat_arch:{page+1}"))
-    else:
-        nav.append(InlineKeyboardButton(text=" ", callback_data="noop"))
-        
-    # Middle label
-    date_lbl = f"{current_date.strftime('%d.%m')} ({get_ru_weekday_abbr(current_date)})"
-    nav.append(InlineKeyboardButton(text=date_lbl, callback_data="noop"))
+    # Row 1 (Main Tabs)
+    builder.row(
+        InlineKeyboardButton(text="🏠 Home", callback_data="home_view"),
+        InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
+        InlineKeyboardButton(text="⚡📊 Stat⚡", callback_data="noop")
+    )
     
-    # Right arrow
+    # Row 2 (Sub-tabs)
+    builder.row(
+        InlineKeyboardButton(text="🛍 Магазин", callback_data="rewards_shop_view"),
+        InlineKeyboardButton(text="🛒 Покупки", callback_data="shop_view_items"),
+        InlineKeyboardButton(text="⚡📜 Архив⚡", callback_data="noop")
+    )
+    
+    for e in day_entries:
+        if e["type"] == "chore":
+            builder.row(InlineKeyboardButton(text=f"🔄 Отменить: {e['title']}", callback_data=f"rollback_chore:{e['id']}:{page}"))
+        else:
+            builder.row(InlineKeyboardButton(text=f"🔄 Отменить: {e['title']}", callback_data=f"rollback_task:{e['id']}:{page}"))
+
+    # Bottom pagination (3-button layout)
+    nav = []
+    nav.append(InlineKeyboardButton(text="⏪", callback_data=f"stat_arch:{page+1}"))
+    
+    # Middle button shows date and weekday
+    nav.append(InlineKeyboardButton(text=f"{date_lbl} ({weekday_lbl})", callback_data="noop"))
+    
     if page > 0:
         nav.append(InlineKeyboardButton(text="⏩", callback_data=f"stat_arch:{page-1}"))
     else:
         nav.append(InlineKeyboardButton(text=" ", callback_data="noop"))
         
     builder.row(*nav)
+    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
 
-    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
-
-@dp.callback_query(F.data.startswith("rollback_pt:"))
-async def handle_rollback_pt(call: types.CallbackQuery, db_user: User = None):
+@dp.callback_query(F.data.startswith("rollback_task:"))
+async def handle_rollback_task(call: types.CallbackQuery, db_user: User = None):
     parts = call.data.split(":")
     pt_id = int(parts[1])
     page = int(parts[2])
@@ -343,6 +312,39 @@ async def handle_rollback_chore(call: types.CallbackQuery, db_user: User = None)
     await handle_stat_arch(call, db_user)
 
 
+@dp.callback_query(F.data.startswith("rollback_chore:"))
+async def handle_rollback_chore(call: types.CallbackQuery, db_user: User = None):
+    parts = call.data.split(":")
+    comp_id = int(parts[1])
+    page = int(parts[2])
+    async with AsyncSessionLocal() as session:
+        comp = await session.get(Completion, comp_id)
+        if comp:
+            user = await session.get(User, comp.user_id)
+            inst = await session.get(TaskInstance, comp.task_instance_id)
+            tmpl = await session.get(TaskTemplate, inst.template_id) if inst else None
+            
+            # Revert points
+            if user:
+                user.points = max(0, (user.points or 0) - comp.points)
+                
+            # Revert chore status to in_progress assigned to the user
+            if inst:
+                inst.status = "in_progress"
+                inst.done_by_user_id = comp.user_id
+                inst.done_at = None
+                
+            await session.delete(comp)
+            await session.commit()
+            
+            title = tmpl.title if tmpl else "Домашнее дело"
+            await call.answer(f"🔄 Восстановлено в Мои дела: {title}. Списано {comp.points} 🍪", show_alert=False)
+        else:
+            await call.answer("⚠️ Выполнение не найдено!", show_alert=False)
+            
+    await handle_stat_arch(call, db_user)
+
+
 
 # ── Rewards Shop (Магазин наград) ─────────────────────────────────────────────
 async def render_rewards_settings(message: types.Message, db_user: User, is_callback=False):
@@ -353,20 +355,41 @@ async def render_rewards_settings(message: types.Message, db_user: User, is_call
         rewards = result.scalars().all()
 
     text = "⚙️ *Управление наградами:*\n\n"
-    builder = InlineKeyboardBuilder()
+    
+    rewards_builder = InlineKeyboardBuilder()
     if rewards:
         for r in rewards:
             adj = await get_adjusted_price(session, r.price)
             text += f"• *{r.title}* — `{adj} 🍪` (цена: `{r.price}` дн.)\n"
-            builder.button(text=f"❌ {r.title}", callback_data=f"del_reward:{r.id}")
+            rewards_builder.button(text=f"❌ {r.title}", callback_data=f"del_reward:{r.id}")
         text += "\n_Нажмите на кнопку с наградой, чтобы удалить её._"
     else:
         text += "Наград пока нет."
 
-    builder.adjust(1)
+    rewards_builder.adjust(1)
+    
+    builder = InlineKeyboardBuilder()
+    
+    # Row 1 (Main Tabs)
+    builder.row(
+        InlineKeyboardButton(text="🏠 Home", callback_data="home_view"),
+        InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
+        InlineKeyboardButton(text="⚡📊 Stat⚡", callback_data="noop")
+    )
+    
+    # Row 2 (Sub-tabs)
+    builder.row(
+        InlineKeyboardButton(text="⚡🛍 Магазин⚡", callback_data="noop"),
+        InlineKeyboardButton(text="🛒 Покупки", callback_data="shop_view_items"),
+        InlineKeyboardButton(text="📜 Архив", callback_data="stat_arch:0")
+    )
+    
+    builder.attach(rewards_builder)
+    
     builder.row(
         InlineKeyboardButton(text="➕ Добавить награду", callback_data="add_reward_start")
     )
+    
     markup = builder.as_markup()
     if is_callback:
         await message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
@@ -385,6 +408,21 @@ async def handle_rewards_shop_view(call: types.CallbackQuery, db_user: User = No
     text = "🎁 Магазин наград\nДля покупки нажми на выбранную награду:"
 
     builder = InlineKeyboardBuilder()
+    
+    # Row 1 (Main Tabs)
+    builder.row(
+        InlineKeyboardButton(text="🏠 Home", callback_data="home_view"),
+        InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
+        InlineKeyboardButton(text="⚡📊 Stat⚡", callback_data="noop")
+    )
+    
+    # Row 2 (Sub-tabs)
+    builder.row(
+        InlineKeyboardButton(text="⚡🛍 Магазин⚡", callback_data="noop"),
+        InlineKeyboardButton(text="🛒 Покупки", callback_data="shop_view_items"),
+        InlineKeyboardButton(text="📜 Архив", callback_data="stat_arch:0")
+    )
+    
     if rewards:
         for r in rewards:
             adj = await get_adjusted_price(session, r.price)
@@ -476,6 +514,21 @@ async def handle_rewards_purchases(call: types.CallbackQuery, db_user: User = No
         text += "Покупок пока не было."
 
     builder = InlineKeyboardBuilder()
+    
+    # Row 1 (Main Tabs)
+    builder.row(
+        InlineKeyboardButton(text="🏠 Home", callback_data="home_view"),
+        InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
+        InlineKeyboardButton(text="⚡📊 Stat⚡", callback_data="noop")
+    )
+    
+    # Row 2 (Sub-tabs)
+    builder.row(
+        InlineKeyboardButton(text="⚡🛍 Магазин⚡", callback_data="noop"),
+        InlineKeyboardButton(text="🛒 Покупки", callback_data="shop_view_items"),
+        InlineKeyboardButton(text="📜 Архив", callback_data="stat_arch:0")
+    )
+    
     nav = []
     # Left arrow
     if page > 0:

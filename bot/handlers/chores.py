@@ -63,12 +63,15 @@ async def render_household_chores(message: types.Message, db_user: User, is_call
 
     builder = InlineKeyboardBuilder()
 
-    # Top Tab Row
+    # Row 1 (Main Tabs)
     builder.row(
         InlineKeyboardButton(text="⚡🏠 Home⚡", callback_data="noop"),
         InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
         InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
     )
+    
+    # Row 2 (Sub-tabs)
+    # Bottom buttons moved to Row 2
 
     if chores:
         for inst, tmpl in chores:
@@ -80,10 +83,7 @@ async def render_household_chores(message: types.Message, db_user: User, is_call
                 InlineKeyboardButton(text=pts_str, callback_data=f"tmpl_set:{tmpl.id}:today")
             )
 
-    builder.row(
-        InlineKeyboardButton(text="➕ Добавить", callback_data="chores_add_menu"),
-        InlineKeyboardButton(text="⚙️ Настройки", callback_data="chores_settings"),
-    )
+    # Bottom buttons moved to Row 2
     markup = builder.as_markup()
     if is_callback:
         await message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
@@ -108,6 +108,20 @@ async def handle_chores_back(call: types.CallbackQuery, db_user: User = None):
 @dp.callback_query(F.data == "chores_add_menu")
 async def handle_chores_add_menu(call: types.CallbackQuery, db_user: User = None):
     builder = InlineKeyboardBuilder()
+    
+    # Row 1 (Main Tabs)
+    builder.row(
+        InlineKeyboardButton(text="⚡🏠 Home⚡", callback_data="noop"),
+        InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
+        InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
+    )
+    
+    # Row 2 (Sub-tabs)
+    builder.row(
+        InlineKeyboardButton(text="⚡➕ Добавить⚡", callback_data="noop"),
+        InlineKeyboardButton(text="⚙️ Настройки", callback_data="chores_settings")
+    )
+    
     builder.row(
         InlineKeyboardButton(text="Добавить из базы", callback_data="add_from_templates_list"),
         InlineKeyboardButton(text="Создать новую", callback_data="add_tmpl_start")
@@ -895,6 +909,20 @@ async def render_chores_settings(message: types.Message, db_user: User = None, i
         templates = result.scalars().all()
 
         builder = InlineKeyboardBuilder()
+        
+        # Row 1 (Main Tabs)
+        builder.row(
+            InlineKeyboardButton(text="⚡🏠 Home⚡", callback_data="noop"),
+            InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
+            InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
+        )
+        
+        # Row 2 (Sub-tabs)
+        builder.row(
+            InlineKeyboardButton(text="➕ Добавить", callback_data="chores_add_menu"),
+            InlineKeyboardButton(text="⚡⚙️ Настройки⚡", callback_data="noop")
+        )
+        
         if templates:
             temp_data = []
             for t in templates:
