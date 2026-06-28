@@ -154,7 +154,7 @@ async def get_ai_emoji(text: str) -> str:
     if not api_key:
         return None
         
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
     headers = {"Content-Type": "application/json"}
     prompt = (
         f"Тебе дана задача: '{text}'. "

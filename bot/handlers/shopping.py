@@ -365,15 +365,29 @@ async def s_archive(call: types.CallbackQuery):
     text = "📜 *Архив покупок и наград*\n👉 _Тапни на покупку, чтобы вернуть её в список:_\n\n"
     b = InlineKeyboardBuilder()
     
-    # Pagination row (purple)
+    # Pagination row (3-button layout)
     nav = []
+    # Left arrow
     if page > 0:
-        nav.append(InlineKeyboardButton(text="🟣 ⏪", callback_data=f"s_arch:{page-1}"))
-    if offset + limit < len(archive_list):
-        nav.append(InlineKeyboardButton(text="⏩ 🟣", callback_data=f"s_arch:{page+1}"))
-    if nav:
-        b.row(*nav)
+        nav.append(InlineKeyboardButton(text="⏪", callback_data=f"s_arch:{page-1}"))
+    else:
+        nav.append(InlineKeyboardButton(text=" ", callback_data="noop"))
         
+    # Middle button
+    today_d = datetime.now().date()
+    def get_ru_weekday_abbr_local(d) -> str:
+        abbrs = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
+        return abbrs[d.weekday()]
+    date_lbl = f"{today_d.strftime('%d.%m')} ({get_ru_weekday_abbr_local(today_d)})"
+    nav.append(InlineKeyboardButton(text=date_lbl, callback_data="noop"))
+    
+    # Right arrow
+    if offset + limit < len(archive_list):
+        nav.append(InlineKeyboardButton(text="⏩", callback_data=f"s_arch:{page+1}"))
+    else:
+        nav.append(InlineKeyboardButton(text=" ", callback_data="noop"))
+        
+    b.row(*nav)
     for entry in page_items:
         if entry["type"] == "shopping_item":
             price_str = f"({entry['price']}₽)" if entry["price"] > 0 else ""

@@ -236,15 +236,31 @@ async def handle_stat_arch(call: types.CallbackQuery, db_user: User = None):
     day_entries = grouped[current_date]
     day_entries.sort(key=lambda x: x["sort_dt"], reverse=True)
 
-    text = f"📅 *Дата:* {current_date.strftime('%d.%m.%Y')}"
+    text = "📋 <b>Выполненные задачи вашего дома</b>\n👉 <i>Для возврата задачи нажмите на неё:</i>"
+    
+    def get_ru_weekday_abbr(d) -> str:
+        abbrs = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
+        return abbrs[d.weekday()]
+
     builder = InlineKeyboardBuilder()
     nav = []
+    # Left arrow
     if page < total_days - 1:
-        nav.append(InlineKeyboardButton(text="🟢 ⏪", callback_data=f"stat_arch:{page+1}"))
+        nav.append(InlineKeyboardButton(text="⏪", callback_data=f"stat_arch:{page+1}"))
+    else:
+        nav.append(InlineKeyboardButton(text=" ", callback_data="noop"))
+        
+    # Middle label
+    date_lbl = f"{current_date.strftime('%d.%m')} ({get_ru_weekday_abbr(current_date)})"
+    nav.append(InlineKeyboardButton(text=date_lbl, callback_data="noop"))
+    
+    # Right arrow
     if page > 0:
-        nav.append(InlineKeyboardButton(text="⏩ 🟢", callback_data=f"stat_arch:{page-1}"))
-    if nav:
-        builder.row(*nav)
+        nav.append(InlineKeyboardButton(text="⏩", callback_data=f"stat_arch:{page-1}"))
+    else:
+        nav.append(InlineKeyboardButton(text=" ", callback_data="noop"))
+        
+    builder.row(*nav)
 
     for e in day_entries:
         if e.get("is_personal"):
@@ -270,7 +286,7 @@ async def handle_stat_arch(call: types.CallbackQuery, db_user: User = None):
             InlineKeyboardButton(text=right_text, callback_data=callback)
         )
 
-    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
 
 @dp.callback_query(F.data.startswith("rollback_pt:"))
@@ -460,13 +476,28 @@ async def handle_rewards_purchases(call: types.CallbackQuery, db_user: User = No
 
     builder = InlineKeyboardBuilder()
     nav = []
+    # Left arrow
     if page > 0:
-        nav.append(InlineKeyboardButton(text="🟡 ⏪", callback_data=f"rewards_purchases:{page-1}"))
+        nav.append(InlineKeyboardButton(text="⏪", callback_data=f"rewards_purchases:{page-1}"))
+    else:
+        nav.append(InlineKeyboardButton(text=" ", callback_data="noop"))
+        
+    # Middle label
+    import datetime
+    today_d = datetime.date.today()
+    def get_ru_weekday_abbr_local(d) -> str:
+        abbrs = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
+        return abbrs[d.weekday()]
+    date_lbl = f"{today_d.strftime('%d.%m')} ({get_ru_weekday_abbr_local(today_d)})"
+    nav.append(InlineKeyboardButton(text=date_lbl, callback_data="noop"))
+    
+    # Right arrow
     if len(rows) == 5:
-        nav.append(InlineKeyboardButton(text="⏩ 🟡", callback_data=f"rewards_purchases:{page+1}"))
-    if nav:
-        builder.row(*nav)
-    builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="rewards_back"))
+        nav.append(InlineKeyboardButton(text="⏩", callback_data=f"rewards_purchases:{page+1}"))
+    else:
+        nav.append(InlineKeyboardButton(text=" ", callback_data="noop"))
+        
+    builder.row(*nav)
     await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
 
 
