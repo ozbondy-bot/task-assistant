@@ -302,30 +302,86 @@ async def ed_shop_process(message: types.Message, state: FSMContext, db_user: Us
 async def s_archive(call: types.CallbackQuery):
     page = int(call.data.split(":")[1])
     async with AsyncSessionLocal() as session:
-        result = await session.execute(
+        # 1. Fetch bought shopping items
+        result_items = await session.execute(
             select(ShoppingItem).where(
                 and_(ShoppingItem.house_id == ACTIVE_HOUSE_ID, ShoppingItem.is_bought == True, ShoppingItem.is_deleted == False)
-            ).order_by(ShoppingItem.id.desc()).offset(page * 10).limit(10)
+            )
         )
-        items = result.scalars().all()
+        items = result_items.scalars().all()
 
-    if not items and page == 0:
+        # 2. Fetch all users in the house to map user IDs to names
+        users_result = await session.execute(
+            select(User).where(User.house_id == ACTIVE_HOUSE_ID)
+        )
+        users = users_result.scalars().all()
+        house_user_ids = [u.id for u in users]
+        user_name_map = {u.id: (u.display_name or u.username or "?") for u in users}
+
+        # 3. Fetch used reward purchases
+        result_purchases = await session.execute(
+            select(RewardPurchase).where(
+                and_(
+                    RewardPurchase.user_id.in_(house_user_ids),
+                    RewardPurchase.status == "used"
+                )
+            )
+        )
+        purchases = result_purchases.scalars().all()
+
+    # Combine and sort by date desc
+    archive_list = []
+    for i in items:
+        dt = i.bought_at or datetime.min
+        archive_list.append({
+            "type": "shopping_item",
+            "id": i.id,
+            "name": i.item_name,
+            "price": i.price,
+            "date": dt,
+        })
+    for p in purchases:
+        dt = p.used_at or p.created_at or datetime.min
+        buyer_name = user_name_map.get(p.user_id, "?")
+        archive_list.append({
+            "type": "reward_purchase",
+            "id": p.id,
+            "name": f"🎁 Награда: {p.reward_title} ({buyer_name})",
+            "price": p.price,
+            "date": dt,
+        })
+
+    archive_list.sort(key=lambda x: x["date"], reverse=True)
+
+    # Paginate (10 per page)
+    offset = page * 10
+    limit = 10
+    page_items = archive_list[offset:offset+limit]
+
+    if not archive_list and page == 0:
         await call.answer("Архив покупок пуст!", show_alert=False)
         return
 
-    text = "📜 *Архив покупок*\n👉 _Тапни, чтобы вернуть в список:_\n\n"
+    text = "📜 *Архив покупок и наград*\n👉 _Тапни на покупку, чтобы вернуть её в список:_\n\n"
     b = InlineKeyboardBuilder()
+    
+    # Pagination row (purple)
     nav = []
     if page > 0:
-        nav.append(InlineKeyboardButton(text="⏪", callback_data=f"s_arch:{page-1}"))
-    if len(items) == 10:
-        nav.append(InlineKeyboardButton(text="⏩", callback_data=f"s_arch:{page+1}"))
+        nav.append(InlineKeyboardButton(text="🟣 ⏪", callback_data=f"s_arch:{page-1}"))
+    if offset + limit < len(archive_list):
+        nav.append(InlineKeyboardButton(text="⏩ 🟣", callback_data=f"s_arch:{page+1}"))
     if nav:
         b.row(*nav)
         
-    for i in items:
-        price_str = f"({i.price}₽)" if i.price > 0 else ""
-        b.row(InlineKeyboardButton(text=f"✅ {i.item_name} {price_str}", callback_data=f"restore_shop:{i.id}:{page}"))
+    for entry in page_items:
+        if entry["type"] == "shopping_item":
+            price_str = f"({entry['price']}₽)" if entry["price"] > 0 else ""
+            b.row(InlineKeyboardButton(text=f"✅ {entry['name']} {price_str}", callback_data=f"restore_shop:{entry['id']}:{page}"))
+        else:
+            price_str = f"({entry['price']}🍪)"
+            b.row(InlineKeyboardButton(text=f"{entry['name']} {price_str}", callback_data="noop"))
+            
     await call.message.edit_text(text, reply_markup=b.as_markup(), parse_mode="Markdown")
 
 

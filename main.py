@@ -50,8 +50,43 @@ async def run_api():
     await server.serve()
 
 
+async def migrate_template_emojis():
+    from db.models import AsyncSessionLocal, TaskTemplate
+    from bot.parser import get_ai_emoji
+    from sqlalchemy import select
+    import re
+    
+    logger.info("Starting template emoji migration...")
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(TaskTemplate))
+        templates = result.scalars().all()
+        
+        updated_count = 0
+        for tmpl in templates:
+            # Check if title already starts with an emoji
+            if not re.match(r'^[\u2600-\u27BF\U0001f000-\U0001f9ff]', tmpl.title):
+                emoji = await get_ai_emoji(tmpl.title)
+                if emoji:
+                    tmpl.title = f"{emoji} {tmpl.title}"
+                    updated_count += 1
+                    logger.info(f"Prepend emoji {emoji} to chore: {tmpl.title}")
+                    
+        if updated_count > 0:
+            await session.commit()
+            logger.info(f"Successfully migrated {updated_count} template emojis.")
+        else:
+            logger.info("No templates needed emoji migration.")
+
+
 async def main():
     from bot.handlers.base import scheduler_loop
+    
+    # Run database migration for chore emojis
+    try:
+        await migrate_template_emojis()
+    except Exception as e:
+        logger.error(f"Migration failed: {e}")
+
     # Run bot polling, FastAPI, and scheduler loop concurrently
     await asyncio.gather(
         run_bot(),

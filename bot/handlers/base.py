@@ -177,7 +177,7 @@ async def send_morning_message():
             .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
             .where(and_(
                 TaskTemplate.house_id == ACTIVE_HOUSE_ID,
-                TaskInstance.date == today,
+                TaskInstance.date <= today,
                 TaskInstance.status == "free",
                 TaskTemplate.deleted == False
             ))
@@ -218,7 +218,7 @@ async def send_14_reminder():
             res = await session.execute(
                 select(TaskInstance).where(and_(
                     TaskInstance.done_by_user_id == u.id,
-                    TaskInstance.date == today,
+                    TaskInstance.date <= today,
                     TaskInstance.status.in_(["in_progress", "done"])
                 ))
             )
@@ -243,7 +243,7 @@ async def send_17_reminder():
             .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
             .where(and_(
                 TaskTemplate.house_id == ACTIVE_HOUSE_ID,
-                TaskInstance.date == today,
+                TaskInstance.date <= today,
                 TaskInstance.status == "free",
                 TaskTemplate.deleted == False
             ))
@@ -400,18 +400,8 @@ async def generate_daily_chores_if_needed(session, house_id: int):
     if not house:
         return
 
-    # Rollover old uncompleted tasks (excluding completed or skipped) first
-    # to avoid creating duplicate instances for today.
-    await session.execute(
-        update(TaskInstance)
-        .where(
-            and_(
-                TaskInstance.date < today,
-                TaskInstance.status.notin_(["done", "skipped"])
-            )
-        )
-        .values(date=today)
-    )
+    # Rollover old uncompleted tasks is disabled (we keep their original date)
+    # to naturally show them with their original date and yellow circles.
 
     result = await session.execute(
         select(TaskTemplate).where(
@@ -454,11 +444,12 @@ async def generate_daily_chores_if_needed(session, house_id: int):
                 should_create = True
 
         if should_create:
+            # Prevent duplication by checking if there is any active instance of this template
             exists = await session.scalar(
                 select(TaskInstance).where(
                     and_(
                         TaskInstance.template_id == tmpl.id,
-                        TaskInstance.date == today
+                        TaskInstance.status.in_(["free", "in_progress"])
                     )
                 )
             )
@@ -682,24 +673,28 @@ async def render_today(message: types.Message, db_user: User, is_callback=False,
             return (target_d - pt.date_execution).days % delta.days == 0
         return False
 
+    def get_ru_weekday_abbr(d: date) -> str:
+        abbrs = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
+        return abbrs[d.weekday()]
+
     if page == 0:
         personal_tasks = [pt for pt in personal_tasks_all if pt.date_execution <= today]
         my_chores = [(inst, tmpl) for inst, tmpl in my_chores_all if inst.date <= today]
-        text = "📋 <b>Мои дела на сегодня</b> (и просроченные):\n👉 <i>Нажми на дело для выполнения:</i>"
+        text = f"📋 <b>Мои дела на сегодня {today.strftime('%d.%m')} ({get_ru_weekday_abbr(today)})</b> (и просроченные):\n👉 <i>Нажми на дело для выполнения:</i>"
     else:
         target_date = future_dates[page - 1]
         personal_tasks = [pt for pt in personal_tasks_all if is_pt_occurring_on(pt, target_date)]
         my_chores = [(inst, tmpl) for inst, tmpl in my_chores_all if inst.date == target_date]
-        text = f"📋 <b>Мои дела на {target_date.strftime('%d.%m.%Y')}</b>:\n👉 <i>Нажми на дело для выполнения:</i>"
+        text = f"📋 <b>Мои дела на {target_date.strftime('%d.%m')} ({get_ru_weekday_abbr(target_date)})</b>:\n👉 <i>Нажми на дело для выполнения:</i>"
 
     builder = InlineKeyboardBuilder()
 
-    # Pagination row at the top
+    # Pagination row at the top (colored)
     nav = []
     if page > 0:
-        nav.append(InlineKeyboardButton(text="⏪", callback_data=f"my_page:{page-1}"))
+        nav.append(InlineKeyboardButton(text="🔵 ⏪", callback_data=f"my_page:{page-1}"))
     if page < total_pages - 1:
-        nav.append(InlineKeyboardButton(text="⏩", callback_data=f"my_page:{page+1}"))
+        nav.append(InlineKeyboardButton(text="⏩ 🔵", callback_data=f"my_page:{page+1}"))
     if nav:
         builder.row(*nav)
 
@@ -709,40 +704,40 @@ async def render_today(message: types.Message, db_user: User, is_callback=False,
         is_urgent = "🔴" in t.text
         
         t_date = target_date if page > 0 else t.date_execution
+        date_str = t_date.strftime('%d.%m.')
         
-        if is_urgent:
-            right_text = "🔴"
-        elif t_date < today:
-            right_text = f"🟡 {t_date.strftime('%d.%m.')}"
-        elif t.recurrence:
-            right_text = "🔁"
-        else:
-            right_text = "👤"
+        # Emoji: 🔴 for urgent, 🔁 for recurring, otherwise 👤
+        emoji = "🔴" if is_urgent else ("🔁" if t.recurrence else "👤")
+        
+        # Circle if overdue/shifted
+        circle = "🟡 " if t_date < today else ""
+        
+        right_text = f"{circle}{date_str} {emoji} ℹ️"
             
         builder.row(
             InlineKeyboardButton(text=clean, callback_data=f"done_task:{t.id}:{page}"),
-            InlineKeyboardButton(text=right_text, callback_data=f"done_task:{t.id}:{page}")
+            InlineKeyboardButton(text=right_text, callback_data=f"pt_info:{t.id}:{page}")
         )
 
     # Chores rendering
     for inst, tmpl in my_chores:
         pts_str = "2-8" if tmpl.title == "Готовка" else str(tmpl.points)
+        c_date = inst.date
+        date_str = c_date.strftime('%d.%m.')
         
-        if inst.date < today:
-            right_text = f"🟡 {pts_str}🍪 {inst.date.strftime('%d.%m.')}"
-        else:
-            right_text = f"{pts_str}🍪"
+        # Circle if overdue
+        circle = "🟡 " if c_date < today else ""
+        
+        right_text = f"{circle}{date_str} 🏠 {pts_str}🍪 ℹ️"
             
         builder.row(
             InlineKeyboardButton(text=f"🏠 {tmpl.title}", callback_data=f"done_chore_inst:{inst.id}:{page}"),
-            InlineKeyboardButton(text=right_text, callback_data=f"done_chore_inst:{inst.id}:{page}")
+            InlineKeyboardButton(text=right_text, callback_data=f"my_chore_info:{inst.id}:{page}")
         )
 
-    # Toolbar row
+    # Toolbar row (only Add button remains)
     builder.row(
-        InlineKeyboardButton(text="Добавить", callback_data=f"my_add:{page}"),
-        InlineKeyboardButton(text="Сдвиг", callback_data=f"my_shift_select:{page}"),
-        InlineKeyboardButton(text="Удалить", callback_data=f"my_delete_select:{page}"),
+        InlineKeyboardButton(text="➕ Добавить", callback_data=f"my_add:{page}")
     )
 
     markup = builder.as_markup()
@@ -750,6 +745,83 @@ async def render_today(message: types.Message, db_user: User, is_callback=False,
         await message.edit_text(text, reply_markup=markup, parse_mode="HTML")
     else:
         await message.answer(text, reply_markup=markup, parse_mode="HTML")
+
+
+@dp.callback_query(F.data.startswith("pt_info:"))
+async def handle_pt_info(call: types.CallbackQuery, db_user: User = None):
+    parts = call.data.split(":")
+    pt_id = int(parts[1])
+    page = int(parts[2])
+    
+    async with AsyncSessionLocal() as session:
+        pt = await session.get(PersonalTask, pt_id)
+        if not pt:
+            await call.answer("⚠️ Задача не найдена!", show_alert=False)
+            return
+            
+    clean = clean_task_text(pt.text)
+    cycle_str = pt.recurrence or "нет"
+    dt_str = pt.date_execution.strftime('%d.%m.%Y')
+    
+    text = (
+        f"ℹ️ <b>Информация о задаче:</b>\n\n"
+        f"📝 <b>Текст:</b> {clean}\n"
+        f"📅 <b>Дата выполнения:</b> {dt_str}\n"
+        f"🔁 <b>Цикл:</b> {cycle_str}"
+    )
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="🗓 Сдвиг", callback_data=f"shift_pt_menu:{pt.id}:{page}"),
+        InlineKeyboardButton(text="🗑 Удалить", callback_data=f"del_pt:{pt.id}:{page}")
+    )
+    builder.row(
+        InlineKeyboardButton(text="⬅️ Назад", callback_data=f"my_page:{page}")
+    )
+    
+    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+
+
+@dp.callback_query(F.data.startswith("my_chore_info:"))
+async def handle_my_chore_info(call: types.CallbackQuery, db_user: User = None):
+    parts = call.data.split(":")
+    inst_id = int(parts[1])
+    page = int(parts[2])
+    
+    async with AsyncSessionLocal() as session:
+        inst = await session.get(TaskInstance, inst_id)
+        if not inst:
+            await call.answer("⚠️ Задача не найдена!", show_alert=False)
+            return
+        tmpl = await session.get(TaskTemplate, inst.template_id)
+        if not tmpl:
+            await call.answer("⚠️ Шаблон не найден!", show_alert=False)
+            return
+            
+    clean = tmpl.title
+    pts_str = "2-8" if tmpl.title == "Готовка" else str(tmpl.points)
+    cycle_str = get_period_label(tmpl).capitalize()
+    dt_str = inst.date.strftime('%d.%m.%Y')
+    
+    text = (
+        f"ℹ️ <b>Информация о деле:</b>\n\n"
+        f"🏠 <b>Название:</b> {clean}\n"
+        f"🍪 <b>Награда:</b> {pts_str} печенек\n"
+        f"📅 <b>Дата выполнения:</b> {dt_str}\n"
+        f"🔁 <b>Цикл:</b> {cycle_str}"
+    )
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="🗓 Сдвиг", callback_data=f"shift_chore_menu:{inst.id}:{page}"),
+        InlineKeyboardButton(text="🔄 Вернуть в общую очередь", callback_data=f"unclaim_chore_inst:{inst.id}:{page}")
+    )
+    builder.row(
+        InlineKeyboardButton(text="🗑 Удалить", callback_data=f"del_chore_inst:{inst.id}:{page}"),
+        InlineKeyboardButton(text="⬅️ Назад", callback_data=f"my_page:{page}")
+    )
+    
+    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
 
 def format_calendar_header(today_date: date) -> str:

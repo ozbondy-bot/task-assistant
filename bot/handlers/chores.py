@@ -44,7 +44,7 @@ async def render_household_chores(message: types.Message, db_user: User, is_call
             .where(
                 and_(
                     TaskTemplate.house_id == ACTIVE_HOUSE_ID,
-                    TaskInstance.date == today,
+                    TaskInstance.date <= today,
                     TaskInstance.status == "free",
                     TaskTemplate.deleted == False
                 )
@@ -65,8 +65,9 @@ async def render_household_chores(message: types.Message, db_user: User, is_call
 
     if chores:
         for inst, tmpl in chores:
+            pts_prefix = "🟡 " if inst.date < today else ""
             # We hardcode Points to display 2-8🍪 for 'Готовка' to match the old bot
-            pts_str = "2-8🍪 ℹ️" if tmpl.title == "Готовка" else f"{tmpl.points}🍪 ℹ️"
+            pts_str = f"{pts_prefix}2-8🍪 ℹ️" if tmpl.title == "Готовка" else f"{pts_prefix}{tmpl.points}🍪 ℹ️"
             builder.row(
                 InlineKeyboardButton(text=tmpl.title, callback_data=f"claim_chore:{inst.id}"),
                 InlineKeyboardButton(text=pts_str, callback_data=f"tmpl_set:{tmpl.id}:today")
@@ -113,10 +114,7 @@ async def handle_add_from_templates_list(call: types.CallbackQuery, db_user: Use
     async with AsyncSessionLocal() as session:
         today = await get_house_today_date(session)
         subq = select(TaskInstance.template_id).where(
-            and_(
-                TaskInstance.date == today,
-                TaskInstance.status.in_(["free", "in_progress", "shifted"])
-            )
+            TaskInstance.status.in_(["free", "in_progress", "shifted"])
         )
         result = await session.execute(
             select(TaskTemplate).where(
@@ -304,7 +302,7 @@ async def handle_tmpl_set(call: types.CallbackQuery, db_user: User = None):
                     select(TaskInstance).where(
                         and_(
                             TaskInstance.template_id == tmpl.id,
-                            TaskInstance.date == today,
+                            TaskInstance.date <= today,
                             TaskInstance.status == "free"
                         )
                     )
@@ -375,6 +373,12 @@ async def handle_te_title_input(message: types.Message, state: FSMContext, db_us
     if not title:
         await message.answer("Название не может быть пустым. Попробуйте еще раз:")
         return
+        
+    # Resolve AI emoji for edit title
+    from bot.parser import get_ai_emoji
+    ai_emoji = await get_ai_emoji(title)
+    if ai_emoji:
+        title = f"{ai_emoji} {title}"
         
     data = await state.get_data()
     tid = data["edit_tid"]
@@ -1012,6 +1016,13 @@ async def handle_add_tmpl_title(message: types.Message, state: FSMContext):
     if not title:
         await message.answer("Название не может быть пустым. Попробуйте еще раз:")
         return
+        
+    # Resolve AI emoji for chores template
+    from bot.parser import get_ai_emoji
+    ai_emoji = await get_ai_emoji(title)
+    if ai_emoji:
+        title = f"{ai_emoji} {title}"
+        
     await state.update_data(title=title)
     await state.set_state(AddTemplateState.waiting_for_points)
     await message.answer(

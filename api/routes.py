@@ -189,7 +189,7 @@ async def get_house_tasks(user: User = Depends(get_current_user)):
             ).where(
                 and_(
                     TaskTemplate.house_id == ACTIVE_HOUSE_ID,
-                    TaskInstance.date == today,
+                    TaskInstance.date <= today,
                     TaskInstance.status == "free",
                     TaskTemplate.deleted == False,
                 )
