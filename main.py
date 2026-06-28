@@ -64,6 +64,7 @@ async def migrate_template_emojis():
     from db.models import AsyncSessionLocal, TaskTemplate
     from bot.parser import get_ai_emoji
     from sqlalchemy import select
+    import re
     
     logger.info("Starting template emoji migration...")
     async with AsyncSessionLocal() as session:
@@ -72,13 +73,18 @@ async def migrate_template_emojis():
         
         updated_count = 0
         for tmpl in templates:
-            # Check if title already starts with an emoji
-            if not has_leading_emoji(tmpl.title):
-                emoji = await get_ai_emoji(tmpl.title)
-                if emoji:
-                    tmpl.title = f"{emoji} {tmpl.title}"
+            title_clean = tmpl.title.strip()
+            # If template starts with an emoji, strip it first so we can re-evaluate
+            if has_leading_emoji(title_clean):
+                title_clean = re.sub(r'^[\u2000-\u32FF\U0001f000-\U0001f9ff\ufe0f]+\s*', '', title_clean)
+            
+            emoji = await get_ai_emoji(title_clean)
+            if emoji:
+                new_title = f"{emoji} {title_clean}"
+                if tmpl.title != new_title:
+                    tmpl.title = new_title
                     updated_count += 1
-                    logger.info(f"Prepend emoji {emoji} to chore: {tmpl.title}")
+                    logger.info(f"Updated template emoji to {emoji}: {new_title}")
                     
         if updated_count > 0:
             await session.commit()

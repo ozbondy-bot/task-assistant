@@ -181,27 +181,31 @@ async def get_ai_emoji(text: str) -> str:
         except Exception as e:
             logger.error(f"Error fetching AI emoji from Gemini: {e}")
             
-    # 2. Local fallback if Gemini fails or is missing key
-    if "пылесос" in text_lower:
-        return "🧹"
-    elif "посуда" in text_lower or "посудомойка" in text_lower:
-        return "🍽"
-    elif "мусор" in text_lower:
-        return "🗑"
-    elif "готовка" in text_lower or "готовит" in text_lower:
-        return "🍳"
-    elif "духовк" in text_lower or "плита" in text_lower:
-        return "🍳"
-    elif "шкаф" in text_lower:
-        return "🗄"
-    elif "ванн" in text_lower or "туалет" in text_lower or "душ" in text_lower:
-        return "🧼"
-    elif "полив" in text_lower or "цвет" in text_lower:
-        return "🌱"
-    elif "стирк" in text_lower or "постир" in text_lower or "бель" in text_lower:
-        return "🧺"
-    elif "уборк" in text_lower or "помыть" in text_lower or "протереть" in text_lower:
-        return "🧹"
+    # 2. Local fallback rules (detailed substring checks)
+    rules = [
+        (["таблет", "лекарств", "витамин", "аптек"], "💊"),
+        (["пылесос"], "🧹"),
+        (["посудомой", "посуд", "тарелк", "чашк", "ложек", "вилк"], "🍽"),
+        (["стир", "бель", "одеял", "наматрас", "постир", "сложить", "одежд"], "🧺"),
+        (["глаж", "гладить", "утюг"], "👔"),
+        (["зеркал", "окно", "окна", "стекл"], "✨"),
+        (["пыль"], "💨"),
+        (["поилк", "асю"], "🐈"),
+        (["цвет", "полив", "растен", "цветок"], "🌱"),
+        (["готовк", "готовит", "обед", "ужин", "завтр", "еда", "кухн"], "🍳"),
+        (["духовк", "плит"], "🍳"),
+        (["шкаф", "комод", "тумб"], "🗄"),
+        (["пол ", "полы"], "🧹"),
+        (["мусор", "пакет"], "🗑"),
+        (["разбор", "разобрать", "вещ", "коробк", "порядок"], "📦"),
+        (["стол"], "🧼"),
+        (["мыть", "чистк", "раковин", "кош", "корм", "кот", "животн", "ванн", "туалет", "душ", "сантех"], "🧼"),
+    ]
+    
+    for kw_list, emoji in rules:
+        for kw in kw_list:
+            if kw in text_lower:
+                return emoji
         
     return "🧹" # Default fallback chore emoji
 

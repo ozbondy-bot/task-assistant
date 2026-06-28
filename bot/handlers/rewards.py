@@ -47,14 +47,13 @@ async def get_activity_count_30_days(session) -> int:
     return chores_count + personal_count
 
 
-async def get_adjusted_price(session, base_days: int) -> int:
+async def get_shop_calculation_stats(session):
     from datetime import datetime, timedelta
     from db.models import Completion, User
     from sqlalchemy import select, func, and_
     
     thirty_days_ago = datetime.utcnow() - timedelta(days=30)
     
-    # Sum of all completed task points in the last 30 days
     total_points = await session.scalar(
         select(func.sum(Completion.points))
         .join(User, Completion.user_id == User.id)
@@ -66,17 +65,18 @@ async def get_adjusted_price(session, base_days: int) -> int:
         )
     ) or 0
     
-    # Count of active house users
     num_users = await session.scalar(
         select(func.count(User.id)).where(User.house_id == ACTIVE_HOUSE_ID)
     ) or 1
     if num_users == 0:
         num_users = 1
         
-    # Calculate points per user per day over 30 days (default floor 15.0)
+    # Points per user per day over 30 days (completely dynamic, no floor)
     points_per_day = total_points / (30.0 * num_users)
-    points_per_day = max(15.0, points_per_day)
-    
+    return total_points, num_users, points_per_day
+
+async def get_adjusted_price(session, base_days: int) -> int:
+    total_points, num_users, points_per_day = await get_shop_calculation_stats(session)
     price_cookies = base_days * points_per_day
     return max(1, int(round(price_cookies)))
 
@@ -404,8 +404,19 @@ async def handle_rewards_shop_view(call: types.CallbackQuery, db_user: User = No
             select(Reward).where(Reward.house_id == ACTIVE_HOUSE_ID).order_by(Reward.price)
         )
         rewards = result.scalars().all()
+        
+        total_points, num_users, points_per_day = await get_shop_calculation_stats(session)
 
-    text = "🎁 Магазин наград\nДля покупки нажми на выбранную награду:"
+    text = (
+        "🎁 <b>Магазин наград</b>\n\n"
+        "ℹ️ <b>Как рассчитываются цены (без минималок):</b>\n"
+        f"• За последние 30 дней в доме заработано: <code>{total_points} 🍪</code>\n"
+        f"• Активных участников: <code>{num_users}</code>\n"
+        f"• Печенек в день на человека: <code>{points_per_day:.2f} 🍪</code>\n"
+        "• Формула: <code>Цена = Дни × Печенек в день</code>\n\n"
+        "🛒 <b>Награды для покупки:</b>\n"
+        "Для покупки нажми на выбранную награду:"
+    )
 
     builder = InlineKeyboardBuilder()
     
@@ -425,7 +436,8 @@ async def handle_rewards_shop_view(call: types.CallbackQuery, db_user: User = No
     
     if rewards:
         for r in rewards:
-            adj = await get_adjusted_price(session, r.price)
+            price_cookies = r.price * points_per_day
+            adj = max(1, int(round(price_cookies)))
             builder.row(InlineKeyboardButton(text=f"{r.title} ({adj}🍪)", callback_data=f"buy_reward:{r.id}"))
     else:
         text += "\nНаград пока нет."
@@ -435,7 +447,7 @@ async def handle_rewards_shop_view(call: types.CallbackQuery, db_user: User = No
         InlineKeyboardButton(text="📜 Мои покупки", callback_data="rewards_purchases:0")
     )
 
-    await call.message.edit_text(text, reply_markup=builder.as_markup())
+    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
 
 @dp.callback_query(F.data == "rewards_back")
