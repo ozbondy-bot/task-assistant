@@ -63,6 +63,13 @@ async def render_household_chores(message: types.Message, db_user: User, is_call
 
     builder = InlineKeyboardBuilder()
 
+    # Top Tab Row
+    builder.row(
+        InlineKeyboardButton(text="⚡🏠 Home⚡", callback_data="noop"),
+        InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
+        InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
+    )
+
     if chores:
         for inst, tmpl in chores:
             pts_prefix = "🟡 " if inst.date < today else ""
@@ -77,7 +84,6 @@ async def render_household_chores(message: types.Message, db_user: User, is_call
         InlineKeyboardButton(text="➕ Добавить", callback_data="chores_add_menu"),
         InlineKeyboardButton(text="⚙️ Настройки", callback_data="chores_settings"),
     )
-
     markup = builder.as_markup()
     if is_callback:
         await message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
@@ -90,10 +96,14 @@ async def handle_household_chores_btn(message: types.Message, db_user: User = No
     await render_household_chores(message, db_user)
 
 
+@dp.callback_query(F.data == "home_view")
+async def handle_home_view(call: types.CallbackQuery, db_user: User = None):
+    await render_household_chores(call.message, db_user, is_callback=True)
+
+
 @dp.callback_query(F.data == "chores_back")
 async def handle_chores_back(call: types.CallbackQuery, db_user: User = None):
     await render_household_chores(call.message, db_user, is_callback=True)
-
 
 @dp.callback_query(F.data == "chores_add_menu")
 async def handle_chores_add_menu(call: types.CallbackQuery, db_user: User = None):

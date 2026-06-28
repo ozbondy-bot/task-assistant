@@ -561,16 +561,16 @@ async def cmd_start(message: types.Message, db_user: User = None):
     
     # Send onboarding page 1
     text = (
-        f"👋 Привет, *{name}*!\n\n"
-        "Я — твой семейный помощник для управления делами и покупками. \ud83c\udf6a\ud83c\udfe0\n\n"
+        f"👋 Привет, <b>{name}</b>!\n\n"
+        "Я — твой семейный помощник для управления делами и покупками. 🍪🏠\n\n"
         "Вот как устроен наш функционал:\n\n"
-        "🏠 *Home (Домашние дела)*\n"
+        "🏠 <b>Home (Домашние дела)</b>\n"
         "• Здесь собраны все общие дела по дому на сегодня.\n"
-        "• Любой жилец может нажать на задачу, чтобы взять её в работу (она перейдет во вкладку *📋 My*).\n"
+        "• Любой жилец может нажать на задачу, чтобы взять её в работу (она перейдет во вкладку 📋 My).\n"
         "• Внизу есть кнопки:\n"
-        "  - `➕ Добавить` — чтобы внести новую задачу или добавить из базы.\n"
-        "  - `⚙️ Настройки` — управление шаблонами и баллами задач.\n\n"
-        "📋 *My (Мои дела)*\n"
+        "  - <code>➕ Добавить</code> — чтобы внести новую задачу или добавить из базы.\n"
+        "  - <code>⚙️ Настройки</code> — управление шаблонами и баллами задач.\n\n"
+        "📋 <b>My (Мои дела)</b>\n"
         "• Твоя рабочая зона. Здесь находятся:\n"
         "  - Взятые тобой домашние дела (со смайликом 🏠).\n"
         "  - Твои личные задачи 👤.\n"
@@ -579,11 +579,11 @@ async def cmd_start(message: types.Message, db_user: User = None):
         "• 🟡 Желтый кружок означает просроченные дела с прошлых дней.\n"
         "• 🔴 Красный кружок — срочные задачи.\n"
         "• Кнопка управления:\n"
-        "  - `[ Добавить ]` — создать новую личную задачу.\n"
+        "  - <code>Добавить</code> — создать новую личную задачу.\n"
     )
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="Далее ➡️", callback_data="ob_page:2"))
-    await message.answer(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+    await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
 
 @dp.callback_query(F.data.startswith("ob_page:"))
@@ -593,16 +593,16 @@ async def handle_ob_page(call: types.CallbackQuery, db_user: User = None):
     
     if page == 1:
         text = (
-            f"👋 Привет, *{name}*!\n\n"
-            "Я — твой семейный помощник для управления делами и покупками. \ud83c\udf6a\ud83c\udfe0\n\n"
+            f"👋 Привет, <b>{name}</b>!\n\n"
+            "Я — твой семейный помощник для управления делами и покупками. 🍪🏠\n\n"
             "Вот как устроен наш функционал:\n\n"
-            "🏠 *Home (Домашние дела)*\n"
+            "🏠 <b>Home (Домашние дела)</b>\n"
             "• Здесь собраны все общие дела по дому на сегодня.\n"
-            "• Любой жилец может нажать на задачу, чтобы взять её в работу (она перейдет во вкладку *📋 My*).\n"
+            "• Любой жилец может нажать на задачу, чтобы взять её в работу (она перейдет во вкладку 📋 My).\n"
             "• Внизу есть кнопки:\n"
-            "  - `➕ Добавить` — чтобы внести новую задачу или добавить из базы.\n"
-            "  - `⚙️ Настройки` — управление шаблонами и баллами задач.\n\n"
-            "📋 *My (Мои дела)*\n"
+            "  - <code>➕ Добавить</code> — чтобы внести новую задачу или добавить из базы.\n"
+            "  - <code>⚙️ Настройки</code> — управление шаблонами и баллами задач.\n\n"
+            "📋 <b>My (Мои дела)</b>\n"
             "• Твоя рабочая зона. Здесь находятся:\n"
             "  - Взятые тобой домашние дела (со смайликом 🏠).\n"
             "  - Твои личные задачи 👤.\n"
@@ -611,25 +611,29 @@ async def handle_ob_page(call: types.CallbackQuery, db_user: User = None):
             "• 🟡 Желтый кружок означает просроченные дела с прошлых дней.\n"
             "• 🔴 Красный кружок — срочные задачи.\n"
             "• Кнопка управления:\n"
-            "  - `[ Добавить ]` — создать новую личную задачу.\n"
+            "  - <code>Добавить</code> — создать новую личную задачу.\n"
         )
         builder = InlineKeyboardBuilder()
         builder.row(InlineKeyboardButton(text="Далее ➡️", callback_data="ob_page:2"))
-        await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+        await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
         
     elif page == 2:
         text = (
-            "📊 *Stat (Магазин и Покупки)*\n"
+            "📊 <b>Stat (Магазин и Покупки)</b>\n"
             "• Показывает баланс печенек участников дома.\n"
             "• Кнопки:\n"
-            "  - `Магазин` — трать заработанные печеньки 🍪 на награды!\n"
-            "  - `Покупки` — твой список покупок (продукты, вещи).\n"
-            "  - `Архив` — история выполненных дел по дням.\n\n"
+            "  - <code>Магазин</code> — трать заработанные печеньки 🍪 на награды!\n"
+            "  - <code>Покупки</code> — твой список покупок (продукты, вещи).\n"
+            "  - <code>Архив</code> — история выполненных дел по дням.\n\n"
+            "🛍 <b>Магазин наград</b>\n"
+            "• Стоимость наград рассчитывается автоматически в днях!\n"
+            "• Бот берет количество заработанных печенек 🍪 домом за последние 30 дней и делит их на количество участников и дней.\n"
+            "• Например, если зарабатывать в среднем 15 🍪 в день, награда «Фильм на вечер» (ценой в 2 дня) будет стоить 30 🍪.\n\n"
             "Зарабатывайте печеньки и радуйте друг друга наградами! 🎉"
         )
         builder = InlineKeyboardBuilder()
         builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="ob_page:1"))
-        await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+        await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
         # Pin onboarding on transition to page 2
         try:
             await call.message.bot.pin_chat_message(chat_id=call.message.chat.id, message_id=call.message.message_id)
@@ -725,37 +729,24 @@ async def render_today(message: types.Message, db_user: User, is_callback=False,
     if page == 0:
         personal_tasks = [pt for pt in personal_tasks_all if pt.date_execution <= today]
         my_chores = [(inst, tmpl) for inst, tmpl in my_chores_all if inst.date <= today]
-        text = f"📋 <b>Мои дела на сегодня {today.strftime('%d.%m')} ({get_ru_weekday_abbr(today)})</b>:\n👉 <i>Нажми на дело для выполнения:</i>"
+        text = "📋 <b>Мои дела на сегодня</b>:\n👉 <i>Нажми на дело для выполнения:</i>"
     else:
         target_date = future_dates[page - 1]
         personal_tasks = [pt for pt in personal_tasks_all if is_pt_occurring_on(pt, target_date)]
         my_chores = [(inst, tmpl) for inst, tmpl in my_chores_all if inst.date == target_date]
-        text = f"📋 <b>Мои дела на {target_date.strftime('%d.%m')} ({get_ru_weekday_abbr(target_date)})</b>:\n👉 <i>Нажми на дело для выполнения:</i>"
+        text = "📋 <b>Мои дела</b>:\n👉 <i>Нажми на дело для выполнения:</i>"
 
     builder = InlineKeyboardBuilder()
-
-    # Pagination row at the top (3-button layout)
-    nav = []
-    # Left arrow
-    if page > 0:
-        nav.append(InlineKeyboardButton(text="⏪", callback_data=f"my_page:{page-1}"))
-    else:
-        nav.append(InlineKeyboardButton(text=" ", callback_data="noop"))
-        
-    # Middle label: date and weekday (e.g. 29.06 (пн))
-    target_d = future_dates[page - 1] if page > 0 else today
-    date_lbl = f"{target_d.strftime('%d.%m')} ({get_ru_weekday_abbr(target_d)})"
-    nav.append(InlineKeyboardButton(text=date_lbl, callback_data="noop"))
     
-    # Right arrow
-    if page < total_pages - 1:
-        nav.append(InlineKeyboardButton(text="⏩", callback_data=f"my_page:{page+1}"))
-    else:
-        nav.append(InlineKeyboardButton(text=" ", callback_data="noop"))
-        
-    builder.row(*nav)
+    # Top Tab Row
+    builder.row(
+        InlineKeyboardButton(text="🏠 Home", callback_data="home_view"),
+        InlineKeyboardButton(text="⚡📋 My⚡", callback_data="noop"),
+        InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
+    )
+    builder = InlineKeyboardBuilder()
 
-    # Personal tasks rendering
+    # Personal tasks rendering    # Personal tasks rendering
     for t in personal_tasks:
         clean = clean_task_text(t.text)
         is_urgent = "🔴" in t.text
@@ -791,6 +782,27 @@ async def render_today(message: types.Message, db_user: User, is_callback=False,
             InlineKeyboardButton(text=f"🏠 {tmpl.title}", callback_data=f"done_chore_inst:{inst.id}:{page}"),
             InlineKeyboardButton(text=right_text, callback_data=f"my_chore_info:{inst.id}:{page}")
         )
+
+    # Pagination row at the bottom (3-button layout)
+    nav = []
+    # Left arrow
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="⏪", callback_data=f"my_page:{page-1}"))
+    else:
+        nav.append(InlineKeyboardButton(text=" ", callback_data="noop"))
+        
+    # Middle label: date and weekday (e.g. 29.06 (пн))
+    target_d = future_dates[page - 1] if page > 0 else today
+    date_lbl = f"{target_d.strftime('%d.%m')} ({get_ru_weekday_abbr(target_d)})"
+    nav.append(InlineKeyboardButton(text=date_lbl, callback_data="noop"))
+    
+    # Right arrow
+    if page < total_pages - 1:
+        nav.append(InlineKeyboardButton(text="⏩", callback_data=f"my_page:{page+1}"))
+    else:
+        nav.append(InlineKeyboardButton(text=" ", callback_data="noop"))
+        
+    builder.row(*nav)
 
     # Toolbar row (only Add button remains)
     builder.row(

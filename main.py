@@ -50,11 +50,20 @@ async def run_api():
     await server.serve()
 
 
+def has_leading_emoji(text: str) -> bool:
+    if not text:
+        return False
+    val = text.strip()
+    if not val:
+        return False
+    first_char_ord = ord(val[0])
+    return (0x2000 <= first_char_ord <= 0x32FF) or (0x1F000 <= first_char_ord <= 0x1FFFF)
+
+
 async def migrate_template_emojis():
     from db.models import AsyncSessionLocal, TaskTemplate
     from bot.parser import get_ai_emoji
     from sqlalchemy import select
-    import re
     
     logger.info("Starting template emoji migration...")
     async with AsyncSessionLocal() as session:
@@ -64,7 +73,7 @@ async def migrate_template_emojis():
         updated_count = 0
         for tmpl in templates:
             # Check if title already starts with an emoji
-            if not re.match(r'^[\u2600-\u27BF\U0001f000-\U0001f9ff]', tmpl.title):
+            if not has_leading_emoji(tmpl.title):
                 emoji = await get_ai_emoji(tmpl.title)
                 if emoji:
                     tmpl.title = f"{emoji} {tmpl.title}"
@@ -78,6 +87,31 @@ async def migrate_template_emojis():
             logger.info("No templates needed emoji migration.")
 
 
+async def migrate_reward_prices_to_days():
+    from db.models import AsyncSessionLocal, Reward
+    from sqlalchemy import select
+    
+    logger.info("Starting reward price to days migration...")
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(Reward))
+        rewards = result.scalars().all()
+        
+        updated_count = 0
+        for r in rewards:
+            if r.price > 14:
+                old_price = r.price
+                new_price = max(1, int(round(old_price / 15.0)))
+                r.price = new_price
+                updated_count += 1
+                logger.info(f"Converted reward '{r.title}' price from {old_price} cookies to {new_price} days.")
+                
+        if updated_count > 0:
+            await session.commit()
+            logger.info(f"Successfully converted {updated_count} reward prices to days.")
+        else:
+            logger.info("No rewards needed price migration.")
+
+
 async def main():
     from bot.handlers.base import scheduler_loop
     
@@ -86,6 +120,12 @@ async def main():
         await migrate_template_emojis()
     except Exception as e:
         logger.error(f"Migration failed: {e}")
+
+    # Run database migration for reward prices
+    try:
+        await migrate_reward_prices_to_days()
+    except Exception as e:
+        logger.error(f"Reward price migration failed: {e}")
 
     # Run bot polling, FastAPI, and scheduler loop concurrently
     await asyncio.gather(

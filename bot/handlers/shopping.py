@@ -365,7 +365,15 @@ async def s_archive(call: types.CallbackQuery):
     text = "📜 *Архив покупок и наград*\n👉 _Тапни на покупку, чтобы вернуть её в список:_\n\n"
     b = InlineKeyboardBuilder()
     
-    # Pagination row (3-button layout)
+    for entry in page_items:
+        if entry["type"] == "shopping_item":
+            price_str = f"({entry['price']}₽)" if entry["price"] > 0 else ""
+            b.row(InlineKeyboardButton(text=f"✅ {entry['name']} {price_str}", callback_data=f"restore_shop:{entry['id']}:{page}"))
+        else:
+            price_str = f"({entry['price']}🍪)"
+            b.row(InlineKeyboardButton(text=f"{entry['name']} {price_str}", callback_data="noop"))
+            
+    # Bottom pagination (3-button layout)
     nav = []
     # Left arrow
     if page > 0:
@@ -388,14 +396,6 @@ async def s_archive(call: types.CallbackQuery):
         nav.append(InlineKeyboardButton(text=" ", callback_data="noop"))
         
     b.row(*nav)
-    for entry in page_items:
-        if entry["type"] == "shopping_item":
-            price_str = f"({entry['price']}₽)" if entry["price"] > 0 else ""
-            b.row(InlineKeyboardButton(text=f"✅ {entry['name']} {price_str}", callback_data=f"restore_shop:{entry['id']}:{page}"))
-        else:
-            price_str = f"({entry['price']}🍪)"
-            b.row(InlineKeyboardButton(text=f"{entry['name']} {price_str}", callback_data="noop"))
-            
     await call.message.edit_text(text, reply_markup=b.as_markup(), parse_mode="Markdown")
 
 

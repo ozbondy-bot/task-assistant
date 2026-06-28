@@ -149,39 +149,61 @@ import logging
 logger = logging.getLogger(__name__)
 
 async def get_ai_emoji(text: str) -> str:
-    """Use Gemini API to get a single fitting emoji for the task text. Fallback to None if not set or fails."""
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        return None
-        
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
-    headers = {"Content-Type": "application/json"}
-    prompt = (
-        f"Тебе дана задача: '{text}'. "
-        "Верни ровно один наиболее подходящий эмодзи для этой задачи. "
-        "Не пиши никаких объяснений, никаких других слов, только один символ эмодзи."
-    )
-    payload = {
-        "contents": [{
-            "parts": [{"text": prompt}]
-        }]
-    }
+    text_lower = text.lower()
     
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, json=payload, timeout=5) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    emoji_text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
-                    emoji_text = emoji_text.replace(" ", "").replace("\n", "").replace("\r", "")
-                    # Match any emoji character
-                    match = re.match(r'^([\u2600-\u27BF\U0001f000-\U0001f9ff])', emoji_text)
-                    if match:
-                        return match.group(1)
-    except Exception as e:
-        logger.error(f"Error fetching AI emoji: {e}")
+    # 1. Try Gemini API
+    api_key = os.getenv("GEMINI_API_KEY")
+    if api_key:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+        headers = {"Content-Type": "application/json"}
+        prompt = (
+            f"Тебе дана задача: '{text}'. "
+            "Верни ровно один наиболее подходящий эмодзи для этой задачи. "
+            "Не пиши никаких объяснений, никаких других слов, только один символ эмодзи."
+        )
+        payload = {
+            "contents": [{
+                "parts": [{"text": prompt}]
+            }]
+        }
+        try:
+            import aiohttp
+            import re
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers=headers, json=payload, timeout=5) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        emoji_text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                        emoji_text = emoji_text.replace(" ", "").replace("\n", "").replace("\r", "")
+                        match = re.match(r'^([\u2600-\u27BF\U0001f000-\U0001f9ff])', emoji_text)
+                        if match:
+                            return match.group(1)
+        except Exception as e:
+            logger.error(f"Error fetching AI emoji from Gemini: {e}")
+            
+    # 2. Local fallback if Gemini fails or is missing key
+    if "пылесос" in text_lower:
+        return "🧹"
+    elif "посуда" in text_lower or "посудомойка" in text_lower:
+        return "🍽"
+    elif "мусор" in text_lower:
+        return "🗑"
+    elif "готовка" in text_lower or "готовит" in text_lower:
+        return "🍳"
+    elif "духовк" in text_lower or "плита" in text_lower:
+        return "🍳"
+    elif "шкаф" in text_lower:
+        return "🗄"
+    elif "ванн" in text_lower or "туалет" in text_lower or "душ" in text_lower:
+        return "🧼"
+    elif "полив" in text_lower or "цвет" in text_lower:
+        return "🌱"
+    elif "стирк" in text_lower or "постир" in text_lower or "бель" in text_lower:
+        return "🧺"
+    elif "уборк" in text_lower or "помыть" in text_lower or "протереть" in text_lower:
+        return "🧹"
         
-    return None
+    return "🧹" # Default fallback chore emoji
 
 
 def clean_task_text(text: str) -> str:
