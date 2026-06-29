@@ -74,9 +74,9 @@ async def render_household_chores(message: types.Message, db_user: User, is_call
         InlineKeyboardButton(text="⚙️ Настройки", callback_data="chores_settings")
     )
 
-    # Row 3 (Info headers combined into 1 button)
+    # Row 3 (Info header with 💈)
     builder.row(
-        InlineKeyboardButton(text=f"Лутай {total_cookies} 🍪 (жми на задачу, чтобы взять)", callback_data="noop")
+        InlineKeyboardButton(text=f"💈 Лутай {total_cookies} 🍪 (жми на задачу, чтобы взять) 💈", callback_data="noop")
     )
 
     if chores:
@@ -516,18 +516,18 @@ async def handle_te_title_input(message: types.Message, state: FSMContext, db_us
             
             if last_msg_id:
                 message.message_id = last_msg_id
-                await render_household_chores(message, db_user, is_callback=True, message_prefix=f"💈 Запрос на переименование задачи в «{title}» отправлен партнёру 💈")
+                await render_household_chores(message, db_user, is_callback=True, message_prefix=f"⏳ Запрос на переименование задачи в «{title}» отправлен партнёру.")
             else:
-                await render_household_chores(message, db_user, is_callback=False, message_prefix=f"💈 Запрос на переименование задачи в «{title}» отправлен партнёру 💈")
+                await render_household_chores(message, db_user, is_callback=False, message_prefix=f"⏳ Запрос на переименование задачи в «{title}» отправлен партнёру.")
         else:
             tmpl.title = title
             await session.commit()
             await state.clear()
             if last_msg_id:
                 message.message_id = last_msg_id
-                await render_household_chores(message, db_user, is_callback=True, message_prefix="💈 Задача успешно переименована 💈")
+                await render_household_chores(message, db_user, is_callback=True, message_prefix="✅ Задача успешно переименована!")
             else:
-                await render_household_chores(message, db_user, is_callback=False, message_prefix="💈 Задача успешно переименована 💈")
+                await render_household_chores(message, db_user, is_callback=False, message_prefix="✅ Задача успешно переименована!")
 
 
 @dp.callback_query(F.data.startswith("te_f:points:"))
@@ -616,18 +616,18 @@ async def handle_te_points_input(message: types.Message, state: FSMContext, db_u
             await state.clear()
             if last_msg_id:
                 message.message_id = last_msg_id
-                await render_household_chores(message, db_user, is_callback=True, message_prefix="💈 Запрос на изменение печенек задачи отправлен партнёру 💈")
+                await render_household_chores(message, db_user, is_callback=True, message_prefix="⏳ Запрос на изменение печенек задачи отправлен партнёру.")
             else:
-                await render_household_chores(message, db_user, is_callback=False, message_prefix="💈 Запрос на изменение печенек задачи отправлен партнёру 💈")
+                await render_household_chores(message, db_user, is_callback=False, message_prefix="⏳ Запрос на изменение печенек задачи отправлен партнёру.")
         else:
             tmpl.points = pts
             await session.commit()
             await state.clear()
             if last_msg_id:
                 message.message_id = last_msg_id
-                await render_household_chores(message, db_user, is_callback=True, message_prefix="💈 Награда за задачу успешно обновлена 💈")
+                await render_household_chores(message, db_user, is_callback=True, message_prefix="✅ Награда за задачу успешно обновлена!")
             else:
-                await render_household_chores(message, db_user, is_callback=False, message_prefix="💈 Награда за задачу успешно обновлена 💈")
+                await render_household_chores(message, db_user, is_callback=False, message_prefix="✅ Награда за задачу успешно обновлена!")
 
 
 @dp.callback_query(F.data.startswith("te_f:period:"))
@@ -703,14 +703,14 @@ async def handle_te_period_selected(call: types.CallbackQuery, state: FSMContext
                 except Exception as e:
                     logger.error(f"Failed to send approval message to partner: {e}")
                 await state.clear()
-                await render_household_chores(call.message, db_user, is_callback=True, message_prefix="💈 Запрос на изменение цикла задачи отправлен партнёру 💈")
+                await render_household_chores(call.message, db_user, is_callback=True, message_prefix="⏳ Запрос на изменение цикла задачи отправлен партнёру.")
             else:
                 tmpl.periodicity = p
                 tmpl.period_days = 0 if p == "once" else 1
                 await session.commit()
                 await call.answer("✅ Периодичность обновлена!", show_alert=False)
                 await state.clear()
-                await render_household_chores(call.message, db_user, is_callback=True, message_prefix="💈 Цикл задачи успешно обновлен 💈")
+                await render_household_chores(call.message, db_user, is_callback=True, message_prefix="✅ Цикл задачи успешно обновлен!")
     else:
         await state.set_state(EditTemplateState.waiting_for_period_days)
         builder = InlineKeyboardBuilder()
@@ -790,9 +790,9 @@ async def handle_te_period_days_input(message: types.Message, state: FSMContext,
             await state.clear()
             if last_msg_id:
                 message.message_id = last_msg_id
-                await render_household_chores(message, db_user, is_callback=True, message_prefix=f"💈 Запрос на изменение цикла задачи на каждые {days} дней отправлен партнёру 💈")
+                await render_household_chores(message, db_user, is_callback=True, message_prefix=f"⏳ Запрос на изменение цикла задачи на каждые {days} дней отправлен партнёру.")
             else:
-                await render_household_chores(message, db_user, is_callback=False, message_prefix=f"💈 Запрос на изменение цикла задачи на каждые {days} дней отправлен партнёру 💈")
+                await render_household_chores(message, db_user, is_callback=False, message_prefix=f"⏳ Запрос на изменение цикла задачи на каждые {days} дней отправлен партнёру.")
         else:
             tmpl.periodicity = "every_x_days"
             tmpl.period_days = days
@@ -800,9 +800,9 @@ async def handle_te_period_days_input(message: types.Message, state: FSMContext,
             await state.clear()
             if last_msg_id:
                 message.message_id = last_msg_id
-                await render_household_chores(message, db_user, is_callback=True, message_prefix="💈 Цикл задачи успешно обновлен 💈")
+                await render_household_chores(message, db_user, is_callback=True, message_prefix="✅ Цикл задачи успешно обновлен!")
             else:
-                await render_household_chores(message, db_user, is_callback=False, message_prefix="💈 Цикл задачи успешно обновлен 💈")
+                await render_household_chores(message, db_user, is_callback=False, message_prefix="✅ Цикл задачи успешно обновлен!")
 
 
 @dp.callback_query(F.data.startswith("te_del:"))
@@ -1381,7 +1381,7 @@ async def handle_add_tmpl_periodicity(call: types.CallbackQuery, state: FSMConte
                 logger.error(f"Failed to send approval message to partner: {e}")
             await state.clear()
             await call.answer("⏳ Отправлено на согласование партнёру", show_alert=False)
-            await render_household_chores(call.message, db_user, is_callback=True, message_prefix=f"💈 Задача «{title}» отправлена на согласование партнёру 💈")
+            await render_household_chores(call.message, db_user, is_callback=True, message_prefix=f"⏳ Задача «{title}» отправлена на согласование партнёру.")
         else:
             tmpl = TaskTemplate(
                 house_id=ACTIVE_HOUSE_ID,
@@ -1405,7 +1405,7 @@ async def handle_add_tmpl_periodicity(call: types.CallbackQuery, state: FSMConte
             
             await state.clear()
             await call.answer("✅ Шаблон успешно добавлен!", show_alert=False)
-            await render_household_chores(call.message, db_user, is_callback=True, message_prefix="💈 Задача успешно добавлена 💈")
+            await render_household_chores(call.message, db_user, is_callback=True, message_prefix="✅ Задача успешно добавлена!")
 
 
 @dp.message(StateFilter(AddTemplateState.waiting_for_period_days))
@@ -1468,9 +1468,9 @@ async def handle_add_tmpl_period_days(message: types.Message, state: FSMContext,
                 pass
             if last_msg_id:
                 message.message_id = last_msg_id
-                await render_household_chores(message, db_user, is_callback=True, message_prefix=f"💈 Задача «{title}» отправлена на согласование партнёру 💈")
+                await render_household_chores(message, db_user, is_callback=True, message_prefix=f"⏳ Задача «{title}» отправлена на согласование партнёру.")
             else:
-                await render_household_chores(message, db_user, is_callback=False, message_prefix=f"💈 Задача «{title}» отправлена на согласование партнёру 💈")
+                await render_household_chores(message, db_user, is_callback=False, message_prefix=f"⏳ Задача «{title}» отправлена на согласование партнёру.")
         else:
             tmpl = TaskTemplate(
                 house_id=ACTIVE_HOUSE_ID,
@@ -1501,9 +1501,9 @@ async def handle_add_tmpl_period_days(message: types.Message, state: FSMContext,
             await state.clear()
             if last_msg_id:
                 message.message_id = last_msg_id
-                await render_household_chores(message, db_user, is_callback=True, message_prefix="💈 Задача успешно добавлена 💈")
+                await render_household_chores(message, db_user, is_callback=True, message_prefix="✅ Задача успешно добавлена!")
             else:
-                await render_household_chores(message, db_user, is_callback=False, message_prefix="💈 Задача успешно добавлена 💈")
+                await render_household_chores(message, db_user, is_callback=False, message_prefix="✅ Задача успешно добавлена!")
 
 
 @dp.callback_query(F.data.startswith("done_chore_inst:"))
