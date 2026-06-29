@@ -171,6 +171,17 @@ async def handle_add_from_templates_list(call: types.CallbackQuery, db_user: Use
 
 
         builder = InlineKeyboardBuilder()
+        # Row 1 (Main Tabs)
+        builder.row(
+            InlineKeyboardButton(text="⚡🏠 Home⚡", callback_data="noop"),
+            InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
+            InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
+        )
+        # Row 2 (Sub-tabs)
+        builder.row(
+            InlineKeyboardButton(text="⚡➕ Добавить⚡", callback_data="noop"),
+            InlineKeyboardButton(text="⚙️ Настройки", callback_data="chores_settings")
+        )
         if tmpl_with_dates:
             text = "📋 *Выберите задачу для добавления на сегодня:*"
             for t, last_done_date, nd in tmpl_with_dates:
@@ -287,6 +298,17 @@ async def redirect_to_template_settings(message: types.Message, tid: int, src: s
     )
 
     builder = InlineKeyboardBuilder()
+    # Row 1 (Main Tabs)
+    builder.row(
+        InlineKeyboardButton(text="⚡🏠 Home⚡", callback_data="noop"),
+        InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
+        InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
+    )
+    # Row 2 (Sub-tabs)
+    builder.row(
+        InlineKeyboardButton(text="➕ Добавить", callback_data="chores_add_menu"),
+        InlineKeyboardButton(text="⚡⚙️ Настройки⚡", callback_data="noop")
+    )
     builder.row(
         InlineKeyboardButton(text="Имя", callback_data=f"te_f:title:{tmpl.id}:{src}"),
         InlineKeyboardButton(text="Цикл", callback_data=f"te_f:period:{tmpl.id}:{src}"),
@@ -353,6 +375,17 @@ async def handle_tmpl_set(call: types.CallbackQuery, db_user: User = None):
                 inst_id = inst.id
 
             builder = InlineKeyboardBuilder()
+            # Row 1 (Main Tabs)
+            builder.row(
+                InlineKeyboardButton(text="⚡🏠 Home⚡", callback_data="noop"),
+                InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
+                InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
+            )
+            # Row 2 (Sub-tabs)
+            builder.row(
+                InlineKeyboardButton(text="➕ Добавить", callback_data="chores_add_menu"),
+                InlineKeyboardButton(text="⚙️ Настройки", callback_data="chores_settings")
+            )
             builder.row(
                 InlineKeyboardButton(text="🔔 Намек", callback_data=f"nudge:{inst_id}"),
                 InlineKeyboardButton(text="📅 Сдвиг", callback_data=f"resched_menu:{inst_id}"),
@@ -1075,6 +1108,17 @@ async def handle_add_tmpl_points(message: types.Message, state: FSMContext):
     await state.set_state(AddTemplateState.waiting_for_periodicity)
     
     builder = InlineKeyboardBuilder()
+    # Row 1 (Main Tabs)
+    builder.row(
+        InlineKeyboardButton(text="⚡🏠 Home⚡", callback_data="noop"),
+        InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
+        InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
+    )
+    # Row 2 (Sub-tabs)
+    builder.row(
+        InlineKeyboardButton(text="➕ Добавить", callback_data="chores_add_menu"),
+        InlineKeyboardButton(text="⚙️ Настройки", callback_data="chores_settings")
+    )
     builder.row(
         InlineKeyboardButton(text="Единоразово", callback_data="set_tmpl_period:once"),
         InlineKeyboardButton(text="Каждые X дней", callback_data="set_tmpl_period:every_x_days")

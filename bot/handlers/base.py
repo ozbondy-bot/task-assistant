@@ -601,7 +601,14 @@ async def handle_ob_page(call: types.CallbackQuery, db_user: User = None):
             "• Любой жилец может нажать на задачу, чтобы взять её в работу (она перейдет во вкладку 📋 My).\n"
             "• Внизу есть кнопки:\n"
             "  - <code>➕ Добавить</code> — чтобы внести новую задачу или добавить из базы.\n"
-            "  - <code>⚙️ Настройки</code> — управление шаблонами и баллами задач.\n\n"
+            "  - <code>⚙️ Настройки</code> — управление шаблонами и баллами задач.\n"
+        )
+        builder = InlineKeyboardBuilder()
+        builder.row(InlineKeyboardButton(text="Далее ➡️", callback_data="ob_page:2"))
+        await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+        
+    elif page == 2:
+        text = (
             "📋 <b>My (Мои дела)</b>\n"
             "• Твоя рабочая зона. Здесь находятся:\n"
             "  - Взятые тобой домашние дела (со смайликом 🏠).\n"
@@ -614,10 +621,13 @@ async def handle_ob_page(call: types.CallbackQuery, db_user: User = None):
             "  - <code>Добавить</code> — создать новую личную задачу.\n"
         )
         builder = InlineKeyboardBuilder()
-        builder.row(InlineKeyboardButton(text="Далее ➡️", callback_data="ob_page:2"))
+        builder.row(
+            InlineKeyboardButton(text="⬅️ Назад", callback_data="ob_page:1"),
+            InlineKeyboardButton(text="Далее ➡️", callback_data="ob_page:3")
+        )
         await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
         
-    elif page == 2:
+    elif page == 3:
         text = (
             "📊 <b>Stat (Магазин и Покупки)</b>\n"
             "• Показывает баланс печенек участников дома.\n"
@@ -633,14 +643,14 @@ async def handle_ob_page(call: types.CallbackQuery, db_user: User = None):
         )
         builder = InlineKeyboardBuilder()
         builder.row(
-            InlineKeyboardButton(text="⬅️ Назад", callback_data="ob_page:1"),
+            InlineKeyboardButton(text="⬅️ Назад", callback_data="ob_page:2"),
             InlineKeyboardButton(text="Перейти к задачам", callback_data="home_view")
         )
         await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
-        # Pin onboarding on transition to page 2
+        # Pin onboarding on transition to page 3
         try:
             await call.message.bot.pin_chat_message(chat_id=call.message.chat.id, message_id=call.message.message_id)
-            logger.info("Pinned onboarding message on page 2 transition.")
+            logger.info("Pinned onboarding message on page 3 transition.")
         except Exception as e:
             logger.error(f"Failed to pin onboarding message: {e}")
 
@@ -836,6 +846,12 @@ async def handle_pt_info(call: types.CallbackQuery, db_user: User = None):
     )
     
     builder = InlineKeyboardBuilder()
+    # Row 1 (Main Tabs)
+    builder.row(
+        InlineKeyboardButton(text="🏠 Home", callback_data="home_view"),
+        InlineKeyboardButton(text="⚡📋 My⚡", callback_data="noop"),
+        InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
+    )
     builder.row(
         InlineKeyboardButton(text="🗓 Сдвиг", callback_data=f"shift_pt_menu:{pt.id}:{page}"),
         InlineKeyboardButton(text="🗑 Удалить", callback_data=f"del_pt:{pt.id}:{page}")
@@ -874,6 +890,12 @@ async def handle_my_chore_info(call: types.CallbackQuery, db_user: User = None):
     )
     
     builder = InlineKeyboardBuilder()
+    # Row 1 (Main Tabs)
+    builder.row(
+        InlineKeyboardButton(text="🏠 Home", callback_data="home_view"),
+        InlineKeyboardButton(text="⚡📋 My⚡", callback_data="noop"),
+        InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
+    )
     builder.row(
         InlineKeyboardButton(text="🗓 Сдвиг", callback_data=f"shift_chore_menu:{inst.id}:{page}"),
         InlineKeyboardButton(text="🔄 Вернуть", callback_data=f"unclaim_chore_inst:{inst.id}:{page}"),
@@ -1076,6 +1098,25 @@ def get_period_label(tmpl: TaskTemplate) -> str:
 
 def create_calendar_keyboard_custom(target_id: int, year: int, month: int, today_date: date, callback_prefix: str) -> InlineKeyboardMarkup:
     kb = []
+    # Add navigation bars at the top of the calendar
+    if 'pt' in callback_prefix or 'chore' in callback_prefix:
+        # My tab context
+        kb.append([
+            InlineKeyboardButton(text="🏠 Home", callback_data="home_view"),
+            InlineKeyboardButton(text="⚡📋 My⚡", callback_data="noop"),
+            InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
+        ])
+    else:
+        # Home tab context (chores)
+        kb.append([
+            InlineKeyboardButton(text="⚡🏠 Home⚡", callback_data="noop"),
+            InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
+            InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
+        ])
+        kb.append([
+            InlineKeyboardButton(text="➕ Добавить", callback_data="chores_add_menu"),
+            InlineKeyboardButton(text="⚙️ Настройки", callback_data="chores_settings")
+        ])
     month_names_ru = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"]
     kb.append([InlineKeyboardButton(text=f"🗓 {month_names_ru[month-1]} {year}", callback_data="noop")])
     

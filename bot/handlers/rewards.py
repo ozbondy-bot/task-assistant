@@ -242,11 +242,12 @@ async def handle_stat_arch(call: types.CallbackQuery, db_user: User = None, _pag
         InlineKeyboardButton(text="⚡📜 Архив⚡", callback_data="noop")
     )
     
-    for e in day_entries:
-        if e["type"] == "chore":
-            builder.row(InlineKeyboardButton(text=f"🔄 Отменить: {e['title']}", callback_data=f"rollback_chore:{e['id']}:{page}"))
-        else:
-            builder.row(InlineKeyboardButton(text=f"🔄 Отменить: {e['title']}", callback_data=f"rollback_task:{e['id']}:{page}"))
+    if page == 0:
+        for e in day_entries:
+            if e["type"] == "chore":
+                builder.row(InlineKeyboardButton(text=f"🔄 Отменить: {e['title']}", callback_data=f"rollback_chore:{e['id']}:{page}"))
+            else:
+                builder.row(InlineKeyboardButton(text=f"🔄 Отменить: {e['title']}", callback_data=f"rollback_task:{e['id']}:{page}"))
 
     # Bottom pagination (3-button layout)
     nav = []
