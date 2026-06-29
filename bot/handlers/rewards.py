@@ -101,7 +101,7 @@ async def render_shop_and_purchases(message: types.Message, db_user: User, is_ca
         for c in weekly_comps:
             weekly_map[c.user_id] = weekly_map.get(c.user_id, 0) + (c.points or 0)
 
-    text = "\u2800"
+    text = "\u3164"
 
     builder = InlineKeyboardBuilder()
     
@@ -207,7 +207,7 @@ async def handle_stat_arch(call: types.CallbackQuery, state: FSMContext = None, 
         return abbrs[d.weekday()]
     weekday_lbl = get_ru_weekday_abbr_local(target_date)
     
-    text = "\u2800"
+    text = "\u3164"
     
     builder = InlineKeyboardBuilder()
     
@@ -332,7 +332,7 @@ async def render_rewards_settings(message: types.Message, db_user: User, is_call
         )
         rewards = result.scalars().all()
 
-    text = "\u2800"
+    text = "\u3164"
     
     builder = InlineKeyboardBuilder()
     
@@ -396,7 +396,7 @@ async def handle_rewards_shop_view(call: types.CallbackQuery, state: FSMContext 
     else:
         stat_line = " Истории выполнения за 30 дней нет — цены в днях."
 
-    text = "\u2800"
+    text = "\u3164"
 
     builder = InlineKeyboardBuilder()
     

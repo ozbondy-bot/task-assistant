@@ -54,7 +54,7 @@ async def handle_my_add(call: types.CallbackQuery, state: FSMContext, db_user: U
         InlineKeyboardButton(text="💈 Пиши текст задачи 💈", callback_data="noop")
     )
     sent_msg = await call.message.edit_text(
-        "\u2800",
+        "\u3164",
         reply_markup=builder.as_markup(),
         parse_mode="Markdown"
     )
@@ -121,13 +121,13 @@ async def handle_my_add_text(message: types.Message, state: FSMContext, db_user:
         await message.bot.edit_message_text(
             chat_id=message.chat.id,
             message_id=last_msg_id,
-            text="\u2800",
+            text="\u3164",
             reply_markup=builder.as_markup(),
             parse_mode="Markdown"
         )
     else:
         sent_msg = await message.answer(
-            "\u2800",
+            "\u3164",
             reply_markup=builder.as_markup(),
             parse_mode="Markdown"
         )
@@ -248,7 +248,7 @@ async def handle_addpt_period(call: types.CallbackQuery, state: FSMContext, db_u
             InlineKeyboardButton(text="💈 Укажите интервал в днях 💈", callback_data="noop")
         )
         sent_msg = await call.message.edit_text(
-            "\u2800",
+            "\u3164",
             reply_markup=builder.as_markup(),
             parse_mode="Markdown"
         )

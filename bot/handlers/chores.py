@@ -55,7 +55,7 @@ async def render_household_chores(message: types.Message, db_user: User, is_call
 
     total_cookies = sum(tmpl.points for inst, tmpl in chores)
 
-    text = "\u2800"
+    text = "\u3164"
     if message_prefix:
         text = message_prefix
 
@@ -141,7 +141,7 @@ async def handle_chores_add_menu(call: types.CallbackQuery, state: FSMContext = 
         InlineKeyboardButton(text="Создать новую", callback_data="add_tmpl_start")
     )
     await call.message.edit_text(
-        "\u2800",
+        "\u3164",
         reply_markup=builder.as_markup(),
         parse_mode="Markdown"
     )
@@ -453,7 +453,7 @@ async def handle_te_title_start(call: types.CallbackQuery, state: FSMContext):
     builder.row(
         InlineKeyboardButton(text="💈 Пиши новое название 💈", callback_data="noop")
     )
-    sent_msg = await call.message.edit_text("\u2800", reply_markup=builder.as_markup())
+    sent_msg = await call.message.edit_text("\u3164", reply_markup=builder.as_markup())
     await state.update_data(last_msg_id=sent_msg.message_id)
 
 
@@ -554,7 +554,7 @@ async def handle_te_points_start(call: types.CallbackQuery, state: FSMContext):
     builder.row(
         InlineKeyboardButton(text="💈 Сколько печенек дадим? 💈", callback_data="noop")
     )
-    sent_msg = await call.message.edit_text("\u2800", reply_markup=builder.as_markup())
+    sent_msg = await call.message.edit_text("\u3164", reply_markup=builder.as_markup())
     await state.update_data(last_msg_id=sent_msg.message_id)
 
 
@@ -662,7 +662,7 @@ async def handle_te_period_start(call: types.CallbackQuery, state: FSMContext):
         InlineKeyboardButton(text="Каждый день", callback_data="te_period_sel:daily"),
         InlineKeyboardButton(text="Каждые X дней", callback_data="te_period_sel:every_x_days")
     )
-    sent_msg = await call.message.edit_text("\u2800", reply_markup=builder.as_markup())
+    sent_msg = await call.message.edit_text("\u3164", reply_markup=builder.as_markup())
     await state.update_data(last_msg_id=sent_msg.message_id)
 
 
@@ -735,7 +735,7 @@ async def handle_te_period_selected(call: types.CallbackQuery, state: FSMContext
         builder.row(
             InlineKeyboardButton(text="💈 Укажите интервал в днях 💈", callback_data="noop")
         )
-        sent_msg = await call.message.edit_text("\u2800", reply_markup=builder.as_markup())
+        sent_msg = await call.message.edit_text("\u3164", reply_markup=builder.as_markup())
         await state.update_data(last_msg_id=sent_msg.message_id)
 
 
@@ -1195,7 +1195,7 @@ async def handle_add_tmpl_start(call: types.CallbackQuery, state: FSMContext):
         InlineKeyboardButton(text="📝 Пиши название задачи:", callback_data="noop")
     )
     sent_msg = await call.message.edit_text(
-        "\u2800",
+        "\u3164",
         reply_markup=builder.as_markup(),
         parse_mode="Markdown"
     )
@@ -1251,13 +1251,13 @@ async def handle_add_tmpl_title(message: types.Message, state: FSMContext):
         await message.bot.edit_message_text(
             chat_id=message.chat.id,
             message_id=last_msg_id,
-            text="\u2800",
+            text="\u3164",
             reply_markup=builder.as_markup(),
             parse_mode="Markdown"
         )
     else:
         sent_msg = await message.answer(
-            "\u2800",
+            "\u3164",
             reply_markup=builder.as_markup(),
             parse_mode="Markdown"
         )
@@ -1313,13 +1313,13 @@ async def handle_add_tmpl_points(message: types.Message, state: FSMContext):
         await message.bot.edit_message_text(
             chat_id=message.chat.id,
             message_id=last_msg_id,
-            text="\u2800",
+            text="\u3164",
             reply_markup=builder.as_markup(),
             parse_mode="Markdown"
         )
     else:
         sent_msg = await message.answer(
-            "\u2800",
+            "\u3164",
             reply_markup=builder.as_markup(),
             parse_mode="Markdown"
         )
@@ -1349,7 +1349,7 @@ async def handle_add_tmpl_periodicity(call: types.CallbackQuery, state: FSMConte
             InlineKeyboardButton(text="Укажите число дней, с каким интервалом повторять задачу (например, 5):", callback_data="noop")
         )
         await call.message.edit_text(
-            "\u2800",
+            "\u3164",
             reply_markup=builder.as_markup(),
             parse_mode="Markdown"
         )

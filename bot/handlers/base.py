@@ -688,7 +688,7 @@ async def render_today(message: types.Message, db_user: User, is_callback=False,
         my_chores = [(inst, tmpl) for inst, tmpl in my_chores_all if inst.date == target_date]
         info_title = "Мои дела"
 
-    text = "\u2800"
+    text = "\u3164"
 
     builder = InlineKeyboardBuilder()
     
