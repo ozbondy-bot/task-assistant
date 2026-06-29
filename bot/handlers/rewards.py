@@ -112,7 +112,7 @@ async def render_shop_and_purchases(message: types.Message, db_user: User, is_ca
     builder.row(
         InlineKeyboardButton(text="🏠 Home", callback_data="home_view"),
         InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
-        InlineKeyboardButton(text="⚡📊 Stat⚡", callback_data="noop")
+        InlineKeyboardButton(text="⚡📊 Stat⚡", callback_data="stats_view")
     )
     
     # Row 2 (Sub-tabs)
@@ -228,13 +228,13 @@ async def handle_stat_arch(call: types.CallbackQuery, state: FSMContext = None, 
     builder.row(
         InlineKeyboardButton(text="🏠 Home", callback_data="home_view"),
         InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
-        InlineKeyboardButton(text="⚡📊 Stat⚡", callback_data="noop")
+        InlineKeyboardButton(text="⚡📊 Stat⚡", callback_data="stats_view")
     )
     # Row 2 (Sub-tabs)
     builder.row(
         InlineKeyboardButton(text="🛍 Магазин", callback_data="rewards_shop_view"),
         InlineKeyboardButton(text="🛒 Покупки", callback_data="shop_view_items"),
-        InlineKeyboardButton(text="⚡📜 Архив⚡", callback_data="noop")
+        InlineKeyboardButton(text="⚡📜 Архив⚡", callback_data="stat_arch:0")
     )
     
     # Row 3 (Pagination)
@@ -249,7 +249,7 @@ async def handle_stat_arch(call: types.CallbackQuery, state: FSMContext = None, 
     
     # Row 4+ (Completed chores/tasks matching My layout)
     for e in day_entries:
-        pts_str = "2-8" if e["title"] == "Готовка" else str(e["points"])
+        pts_str = str(e["points"])
         pts_suffix = f" (+{pts_str}🍪)" if e["points"] > 0 else ""
         left_text = f"{e['user']}: {e['title']}"
         right_text = f"{e['time']}{pts_suffix}"
@@ -355,7 +355,7 @@ async def render_rewards_settings(message: types.Message, db_user: User, is_call
     builder.row(
         InlineKeyboardButton(text="🏠 Home", callback_data="home_view"),
         InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
-        InlineKeyboardButton(text="⚡📊 Stat⚡", callback_data="noop")
+        InlineKeyboardButton(text="⚡📊 Stat⚡", callback_data="stats_view")
     )
     
     # Row 2 (Sub-tabs)
@@ -413,12 +413,12 @@ async def handle_rewards_shop_view(call: types.CallbackQuery, state: FSMContext 
     builder.row(
         InlineKeyboardButton(text="🏠 Home", callback_data="home_view"),
         InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
-        InlineKeyboardButton(text="⚡📊 Stat⚡", callback_data="noop")
+        InlineKeyboardButton(text="⚡📊 Stat⚡", callback_data="stats_view")
     )
     
     # Row 2 (Sub-tabs)
     builder.row(
-        InlineKeyboardButton(text="⚡🛑 Магазин⚡", callback_data="noop"),
+        InlineKeyboardButton(text="⚡🛍 Магазин⚡", callback_data="rewards_shop_view"),
         InlineKeyboardButton(text="🛒 Покупки", callback_data="shop_view_items"),
         InlineKeyboardButton(text="📜 Архив", callback_data="stat_arch:0")
     )
@@ -529,12 +529,12 @@ async def handle_rewards_purchases(call: types.CallbackQuery, db_user: User = No
     builder.row(
         InlineKeyboardButton(text="🏠 Home", callback_data="home_view"),
         InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
-        InlineKeyboardButton(text="⚡📊 Stat⚡", callback_data="noop")
+        InlineKeyboardButton(text="⚡📊 Stat⚡", callback_data="stats_view")
     )
     
     # Row 2 (Sub-tabs)
     builder.row(
-        InlineKeyboardButton(text="⚡🛍 Магазин⚡", callback_data="noop"),
+        InlineKeyboardButton(text="⚡🛍 Магазин⚡", callback_data="rewards_shop_view"),
         InlineKeyboardButton(text="🛒 Покупки", callback_data="shop_view_items"),
         InlineKeyboardButton(text="📜 Архив", callback_data="stat_arch:0")
     )

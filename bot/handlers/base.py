@@ -745,7 +745,7 @@ async def render_today(message: types.Message, db_user: User, is_callback=False,
     # Row 1 (Main Tabs)
     builder.row(
         InlineKeyboardButton(text="🏠 Home", callback_data="home_view"),
-        InlineKeyboardButton(text="⚡📋 My⚡", callback_data="noop"),
+        InlineKeyboardButton(text="⚡📋 My⚡", callback_data="my_page:0"),
         InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
     )
     
@@ -840,7 +840,7 @@ async def handle_pt_info(call: types.CallbackQuery, db_user: User = None):
     # Row 1 (Main Tabs)
     builder.row(
         InlineKeyboardButton(text="🏠 Home", callback_data="home_view"),
-        InlineKeyboardButton(text="⚡📋 My⚡", callback_data="noop"),
+        InlineKeyboardButton(text="⚡📋 My⚡", callback_data="my_page:0"),
         InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
     )
     builder.row(

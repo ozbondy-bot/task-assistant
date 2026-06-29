@@ -65,7 +65,7 @@ async def render_household_chores(message: types.Message, db_user: User, is_call
 
     # Row 1 (Main Tabs)
     builder.row(
-        InlineKeyboardButton(text="⚡🏠 Home⚡", callback_data="noop"),
+        InlineKeyboardButton(text="⚡🏠 Home⚡", callback_data="home_view"),
         InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
         InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
     )
@@ -116,14 +116,14 @@ async def handle_chores_add_menu(call: types.CallbackQuery, db_user: User = None
     
     # Row 1 (Main Tabs)
     builder.row(
-        InlineKeyboardButton(text="⚡🏠 Home⚡", callback_data="noop"),
+        InlineKeyboardButton(text="⚡🏠 Home⚡", callback_data="home_view"),
         InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
         InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
     )
     
     # Row 2 (Sub-tabs)
     builder.row(
-        InlineKeyboardButton(text="⚡➕ Добавить⚡", callback_data="noop"),
+        InlineKeyboardButton(text="⚡➕ Добавить⚡", callback_data="chores_add_menu"),
         InlineKeyboardButton(text="⚙️ Настройки", callback_data="chores_settings")
     )
     
@@ -176,13 +176,13 @@ async def handle_add_from_templates_list(call: types.CallbackQuery, db_user: Use
         builder = InlineKeyboardBuilder()
         # Row 1 (Main Tabs)
         builder.row(
-            InlineKeyboardButton(text="⚡🏠 Home⚡", callback_data="noop"),
+            InlineKeyboardButton(text="⚡🏠 Home⚡", callback_data="home_view"),
             InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
             InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
         )
         # Row 2 (Sub-tabs)
         builder.row(
-            InlineKeyboardButton(text="⚡➕ Добавить⚡", callback_data="noop"),
+            InlineKeyboardButton(text="⚡➕ Добавить⚡", callback_data="chores_add_menu"),
             InlineKeyboardButton(text="⚙️ Настройки", callback_data="chores_settings")
         )
         # Row 3 (Add options — Добавить из базы active)
@@ -308,14 +308,14 @@ async def redirect_to_template_settings(message: types.Message, tid: int, src: s
     builder = InlineKeyboardBuilder()
     # Row 1 (Main Tabs)
     builder.row(
-        InlineKeyboardButton(text="⚡🏠 Home⚡", callback_data="noop"),
+        InlineKeyboardButton(text="⚡🏠 Home⚡", callback_data="home_view"),
         InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
         InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
     )
     # Row 2 (Sub-tabs)
     builder.row(
         InlineKeyboardButton(text="➕ Добавить", callback_data="chores_add_menu"),
-        InlineKeyboardButton(text="⚡⚙️ Настройки⚡", callback_data="noop")
+        InlineKeyboardButton(text="⚡⚙️ Настройки⚡", callback_data="chores_settings")
     )
     builder.row(
         InlineKeyboardButton(text="Имя", callback_data=f"te_f:title:{tmpl.id}:{src}"),
@@ -385,7 +385,7 @@ async def handle_tmpl_set(call: types.CallbackQuery, db_user: User = None):
             builder = InlineKeyboardBuilder()
             # Row 1 (Main Tabs)
             builder.row(
-                InlineKeyboardButton(text="⚡🏠 Home⚡", callback_data="noop"),
+                InlineKeyboardButton(text="⚡🏠 Home⚡", callback_data="home_view"),
                 InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
                 InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
             )
@@ -432,7 +432,20 @@ async def handle_te_title_start(call: types.CallbackQuery, state: FSMContext):
     await state.update_data(edit_tid=tid, edit_src=src)
     await state.set_state(EditTemplateState.waiting_for_title)
     
-    await call.message.edit_text("Введите новое название для шаблона:", reply_markup=None)
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="Home", callback_data="home_view"),
+        InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
+        InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
+    )
+    builder.row(
+        InlineKeyboardButton(text="➕ Добавить", callback_data="chores_add_menu"),
+        InlineKeyboardButton(text="⚡⚙️ Настройки⚡", callback_data="chores_settings")
+    )
+    builder.row(
+        InlineKeyboardButton(text="❌ Отмена", callback_data=f"te_cancel:{tid}:{src}")
+    )
+    await call.message.edit_text("Введите новое название для шаблона:", reply_markup=builder.as_markup())
 
 
 @dp.message(StateFilter(EditTemplateState.waiting_for_title))
@@ -503,7 +516,20 @@ async def handle_te_points_start(call: types.CallbackQuery, state: FSMContext):
     await state.update_data(edit_tid=tid, edit_src=src)
     await state.set_state(EditTemplateState.waiting_for_points)
     
-    await call.message.edit_text("Введите новое количество баллов (печенек):", reply_markup=None)
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="Home", callback_data="home_view"),
+        InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
+        InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
+    )
+    builder.row(
+        InlineKeyboardButton(text="➕ Добавить", callback_data="chores_add_menu"),
+        InlineKeyboardButton(text="⚡⚙️ Настройки⚡", callback_data="chores_settings")
+    )
+    builder.row(
+        InlineKeyboardButton(text="❌ Отмена", callback_data=f"te_cancel:{tid}:{src}")
+    )
+    await call.message.edit_text("Введите новое количество баллов (печенек):", reply_markup=builder.as_markup())
 
 
 @dp.message(StateFilter(EditTemplateState.waiting_for_points))
@@ -645,7 +671,20 @@ async def handle_te_period_selected(call: types.CallbackQuery, state: FSMContext
                 await redirect_to_template_settings(call.message, tid, src, db_user, is_callback=True)
     else:
         await state.set_state(EditTemplateState.waiting_for_period_days)
-        await call.message.edit_text("Укажите число дней, с каким интервалом повторять задачу (например, 5):", reply_markup=None)
+        builder = InlineKeyboardBuilder()
+        builder.row(
+            InlineKeyboardButton(text="Home", callback_data="home_view"),
+            InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
+            InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
+        )
+        builder.row(
+            InlineKeyboardButton(text="➕ Добавить", callback_data="chores_add_menu"),
+            InlineKeyboardButton(text="⚡⚙️ Настройки⚡", callback_data="chores_settings")
+        )
+        builder.row(
+            InlineKeyboardButton(text="❌ Отмена", callback_data=f"te_cancel:{tid}:{src}")
+        )
+        await call.message.edit_text("Укажите число дней, с каким интервалом повторять задачу (например, 5):", reply_markup=builder.as_markup())
 
 
 @dp.message(StateFilter(EditTemplateState.waiting_for_period_days))
@@ -950,7 +989,7 @@ async def render_chores_settings(message: types.Message, db_user: User = None, i
         
         # Row 1 (Main Tabs)
         builder.row(
-            InlineKeyboardButton(text="⚡🏠 Home⚡", callback_data="noop"),
+            InlineKeyboardButton(text="⚡🏠 Home⚡", callback_data="home_view"),
             InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
             InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
         )
@@ -958,7 +997,7 @@ async def render_chores_settings(message: types.Message, db_user: User = None, i
         # Row 2 (Sub-tabs)
         builder.row(
             InlineKeyboardButton(text="➕ Добавить", callback_data="chores_add_menu"),
-            InlineKeyboardButton(text="⚡⚙️ Настройки⚡", callback_data="noop")
+            InlineKeyboardButton(text="⚡⚙️ Настройки⚡", callback_data="chores_settings")
         )
         
         if templates:
@@ -1072,9 +1111,26 @@ async def handle_chores_archive(call: types.CallbackQuery, db_user: User = None)
 @dp.callback_query(F.data == "add_tmpl_start")
 async def handle_add_tmpl_start(call: types.CallbackQuery, state: FSMContext):
     await state.set_state(AddTemplateState.waiting_for_title)
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="Home", callback_data="home_view"),
+        InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
+        InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
+    )
+    builder.row(
+        InlineKeyboardButton(text="➕ Добавить", callback_data="chores_add_menu"),
+        InlineKeyboardButton(text="⚙️ Настройки", callback_data="chores_settings")
+    )
+    builder.row(
+        InlineKeyboardButton(text="Добавить из базы", callback_data="add_from_templates_list"),
+        InlineKeyboardButton(text="⚡Создать новую⚡", callback_data="noop")
+    )
+    builder.row(
+        InlineKeyboardButton(text="❌ Отмена", callback_data="add_tmpl_cancel")
+    )
     await call.message.edit_text(
         "Пиши название задачи 📝:",
-        reply_markup=None,
+        reply_markup=builder.as_markup(),
         parse_mode=None
     )
 
@@ -1095,9 +1151,26 @@ async def handle_add_tmpl_title(message: types.Message, state: FSMContext):
         
     await state.update_data(title=title)
     await state.set_state(AddTemplateState.waiting_for_points)
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="Home", callback_data="home_view"),
+        InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
+        InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
+    )
+    builder.row(
+        InlineKeyboardButton(text="➕ Добавить", callback_data="chores_add_menu"),
+        InlineKeyboardButton(text="⚙️ Настройки", callback_data="chores_settings")
+    )
+    builder.row(
+        InlineKeyboardButton(text="Добавить из базы", callback_data="add_from_templates_list"),
+        InlineKeyboardButton(text="⚡Создать новую⚡", callback_data="noop")
+    )
+    builder.row(
+        InlineKeyboardButton(text="❌ Отмена", callback_data="add_tmpl_cancel")
+    )
     await message.answer(
         "Сколько печенек 🍪 за нее дадим?",
-        reply_markup=None,
+        reply_markup=builder.as_markup(),
         parse_mode=None
     )
 
@@ -1118,7 +1191,7 @@ async def handle_add_tmpl_points(message: types.Message, state: FSMContext):
     builder = InlineKeyboardBuilder()
     # Row 1 (Main Tabs)
     builder.row(
-        InlineKeyboardButton(text="⚡🏠 Home⚡", callback_data="noop"),
+        InlineKeyboardButton(text="⚡🏠 Home⚡", callback_data="home_view"),
         InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
         InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
     )
