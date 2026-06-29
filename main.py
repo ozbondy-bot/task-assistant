@@ -93,25 +93,44 @@ async def migrate_reward_prices_to_days():
     from db.models import AsyncSessionLocal, Reward
     from sqlalchemy import select
     
-    logger.info("Starting reward price to days migration...")
+    # Default rewards per TZ with correct base_days:
+    # price = number of 'average days' a person needs to earn this reward
+    # average day = total_cookies_30days / 30 / num_users
+    DEFAULT_REWARDS = [
+        # (partial_title_match, correct_base_days)
+        ("фильм",           2),
+        ("массаж спины",    3),
+        ("массаж шеи",      3),
+        ("ванна",           4),
+        ("завтрак",         5),
+        ("массаж всего",    6),
+        ("ничего не делаю 1", 7),
+        ("спа",             10),
+        ("ничего не делаю 2", 14),
+        ("ничего не делаю неделю", 30),
+        ("ничего не делаю 7", 30),
+    ]
+    
+    logger.info("Starting reward base_days migration (TZ defaults)...")
     async with AsyncSessionLocal() as session:
         result = await session.execute(select(Reward))
         rewards = result.scalars().all()
         
         updated_count = 0
         for r in rewards:
-            if r.price > 14:
-                old_price = r.price
-                new_price = max(1, int(round(old_price / 15.0)))
-                r.price = new_price
-                updated_count += 1
-                logger.info(f"Converted reward '{r.title}' price from {old_price} cookies to {new_price} days.")
-                
+            title_lower = r.title.lower()
+            for keyword, correct_days in DEFAULT_REWARDS:
+                if keyword in title_lower and r.price != correct_days:
+                    logger.info(f"Fixing reward '{r.title}': {r.price} -> {correct_days} days")
+                    r.price = correct_days
+                    updated_count += 1
+                    break
+                    
         if updated_count > 0:
             await session.commit()
-            logger.info(f"Successfully converted {updated_count} reward prices to days.")
+            logger.info(f"Fixed {updated_count} reward base_days to match TZ.")
         else:
-            logger.info("No rewards needed price migration.")
+            logger.info("Reward base_days already correct.")
 
 
 async def main():

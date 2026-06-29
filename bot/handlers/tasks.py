@@ -73,12 +73,6 @@ async def handle_my_add_text(message: types.Message, state: FSMContext, db_user:
     is_urgent = "срочно" in text.lower()
     clean_text = re.sub(r'срочно', '', text, flags=re.IGNORECASE).strip().capitalize()
     
-    # Resolve AI emoji
-    from bot.parser import get_ai_emoji
-    ai_emoji = await get_ai_emoji(clean_text)
-    if ai_emoji:
-        clean_text = f"{ai_emoji} {clean_text}"
-    
     db_text = f"🔴 {clean_text}" if is_urgent else clean_text
     
     await state.update_data(text=db_text)
@@ -92,6 +86,12 @@ async def handle_my_add_text(message: types.Message, state: FSMContext, db_user:
     d_tomorrow = today + timedelta(days=1)
 
     builder = InlineKeyboardBuilder()
+    # Nav Row 1
+    builder.row(
+        InlineKeyboardButton(text="🏠 Home", callback_data="home_view"),
+        InlineKeyboardButton(text="⚡📋 My⚡", callback_data="noop"),
+        InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
+    )
     builder.row(
         InlineKeyboardButton(text=f"{d_today.strftime('%d.%m')} ({days_ru[d_today.weekday()]})", callback_data="addpt_date:today"),
         InlineKeyboardButton(text=f"{d_tomorrow.strftime('%d.%m')} ({days_ru[d_tomorrow.weekday()]})", callback_data="addpt_date:tomorrow"),
@@ -154,6 +154,12 @@ async def ask_for_recurrence(message: types.Message, state: FSMContext):
     page = state_data.get("page", 0)
     
     builder = InlineKeyboardBuilder()
+    # Nav Row 1
+    builder.row(
+        InlineKeyboardButton(text="🏠 Home", callback_data="home_view"),
+        InlineKeyboardButton(text="⚡📋 My⚡", callback_data="noop"),
+        InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
+    )
     builder.row(
         InlineKeyboardButton(text="Единоразово", callback_data="addpt_period:once"),
         InlineKeyboardButton(text="Каждые X дней", callback_data="addpt_period:every_x_days")
@@ -330,14 +336,18 @@ async def handle_shift_pt_menu(call: types.CallbackQuery, db_user: User = None):
     d1 = today + timedelta(days=1)
     d2 = today + timedelta(days=2)
     
-    keyboard = [
-        [
-            InlineKeyboardButton(text=f"{d1.strftime('%d.%m')} ({days_ru[d1.weekday()]})", callback_data=f"shift_pt:{page}:{t_id}:{d1.strftime('%Y-%m-%d')}"),
-            InlineKeyboardButton(text=f"{d2.strftime('%d.%m')} ({days_ru[d2.weekday()]})", callback_data=f"shift_pt:{page}:{t_id}:{d2.strftime('%Y-%m-%d')}"),
-            InlineKeyboardButton(text="Другая дата", callback_data=f"rc_months_pt:{t_id}:{page}")
-        ]
-    ]
-    await call.message.edit_text("На какой день перенести задачу?", reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
+    nav_builder = InlineKeyboardBuilder()
+    nav_builder.row(
+        InlineKeyboardButton(text="🏠 Home", callback_data="home_view"),
+        InlineKeyboardButton(text="⚡📋 My⚡", callback_data="noop"),
+        InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
+    )
+    nav_builder.row(
+        InlineKeyboardButton(text=f"{d1.strftime('%d.%m')} ({days_ru[d1.weekday()]})", callback_data=f"shift_pt:{page}:{t_id}:{d1.strftime('%Y-%m-%d')}"),
+        InlineKeyboardButton(text=f"{d2.strftime('%d.%m')} ({days_ru[d2.weekday()]})", callback_data=f"shift_pt:{page}:{t_id}:{d2.strftime('%Y-%m-%d')}"),
+        InlineKeyboardButton(text="Другая дата", callback_data=f"rc_months_pt:{t_id}:{page}")
+    )
+    await call.message.edit_text("На какой день перенести задачу?", reply_markup=nav_builder.as_markup())
 
 
 @dp.callback_query(F.data.startswith("shift_chore_menu:"))
@@ -353,14 +363,18 @@ async def handle_shift_chore_menu(call: types.CallbackQuery, db_user: User = Non
     d1 = today + timedelta(days=1)
     d2 = today + timedelta(days=2)
     
-    keyboard = [
-        [
-            InlineKeyboardButton(text=f"{d1.strftime('%d.%m')} ({days_ru[d1.weekday()]})", callback_data=f"shift_chore:{page}:{inst_id}:{d1.strftime('%Y-%m-%d')}"),
-            InlineKeyboardButton(text=f"{d2.strftime('%d.%m')} ({days_ru[d2.weekday()]})", callback_data=f"shift_chore:{page}:{inst_id}:{d2.strftime('%Y-%m-%d')}"),
-            InlineKeyboardButton(text="Другая дата", callback_data=f"rc_months_chore:{inst_id}:{page}")
-        ]
-    ]
-    await call.message.edit_text("На какой день перенести задачу?", reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
+    nav_builder = InlineKeyboardBuilder()
+    nav_builder.row(
+        InlineKeyboardButton(text="🏠 Home", callback_data="home_view"),
+        InlineKeyboardButton(text="⚡📋 My⚡", callback_data="noop"),
+        InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
+    )
+    nav_builder.row(
+        InlineKeyboardButton(text=f"{d1.strftime('%d.%m')} ({days_ru[d1.weekday()]})", callback_data=f"shift_chore:{page}:{inst_id}:{d1.strftime('%Y-%m-%d')}"),
+        InlineKeyboardButton(text=f"{d2.strftime('%d.%m')} ({days_ru[d2.weekday()]})", callback_data=f"shift_chore:{page}:{inst_id}:{d2.strftime('%Y-%m-%d')}"),
+        InlineKeyboardButton(text="Другая дата", callback_data=f"rc_months_chore:{inst_id}:{page}")
+    )
+    await call.message.edit_text("На какой день перенести задачу?", reply_markup=nav_builder.as_markup())
 
 
 # Calendar navigation & shift execution callbacks
