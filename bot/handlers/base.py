@@ -680,12 +680,12 @@ async def render_today(message: types.Message, db_user: User, is_callback=False,
     if page == 0:
         personal_tasks = [pt for pt in personal_tasks_all if pt.date_execution <= today]
         my_chores = [(inst, tmpl) for inst, tmpl in my_chores_all if inst.date <= today]
-        info_title = "📋 Мои дела на сегодня:"
+        info_title = "Мои дела на сегодня"
     else:
         target_date = future_dates[page - 1]
         personal_tasks = [pt for pt in personal_tasks_all if is_pt_occurring_on(pt, target_date)]
         my_chores = [(inst, tmpl) for inst, tmpl in my_chores_all if inst.date == target_date]
-        info_title = "📋 Мои дела:"
+        info_title = "Мои дела"
 
     text = "\u2800"
 
@@ -698,12 +698,9 @@ async def render_today(message: types.Message, db_user: User, is_callback=False,
         InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
     )
     
-    # Row 2 (Info headers)
+    # Row 2 (Info header with 💈)
     builder.row(
-        InlineKeyboardButton(text=info_title, callback_data="noop")
-    )
-    builder.row(
-        InlineKeyboardButton(text="👉 Нажми на дело для выполнения:", callback_data="noop")
+        InlineKeyboardButton(text=f"💈 {info_title} (жми для выполнения) 💈", callback_data="noop")
     )
 
     # Personal tasks rendering

@@ -119,9 +119,9 @@ async def render_shop_and_purchases(message: types.Message, db_user: User, is_ca
         InlineKeyboardButton(text="📜 Архив", callback_data="stat_arch:0")
     )
 
-    # Row 3 (Balance header)
+    # Row 3 (Balance header with 💈)
     builder.row(
-        InlineKeyboardButton(text="🏆 Баланс героев:", callback_data="noop")
+        InlineKeyboardButton(text="💈 Баланс героев 💈", callback_data="noop")
     )
 
     # Row 4+ (Leaderboard items)
@@ -234,11 +234,16 @@ async def handle_stat_arch(call: types.CallbackQuery, state: FSMContext = None, 
         nav.append(InlineKeyboardButton(text=" ", callback_data="noop"))
     builder.row(*nav)
     
-    # Row 4 (Info banner if empty)
+    # Row 4 (Info header with 💈)
+    builder.row(
+        InlineKeyboardButton(text=f"💈 Архив за {date_lbl} ({weekday_lbl}) 💈", callback_data="noop")
+    )
+    
+    # Row 5 (Info banner if empty)
     if not day_entries:
         builder.row(InlineKeyboardButton(text="📭 В этот день никто ничего не выполнял", callback_data="noop"))
     
-    # Row 5+ (Completed chores/tasks matching My layout)
+    # Row 6+ (Completed chores/tasks matching My layout)
     for e in day_entries:
         pts_str = str(e["points"])
         pts_suffix = f" (+{pts_str}🍪)" if e["points"] > 0 else ""
@@ -350,9 +355,9 @@ async def render_rewards_settings(message: types.Message, db_user: User, is_call
         InlineKeyboardButton(text="➕ Добавить награду", callback_data="add_reward_start")
     )
     
-    # Row 4 (Info header)
+    # Row 4 (Info header with 💈)
     builder.row(
-        InlineKeyboardButton(text="❌ Нажмите на награду, чтобы удалить её:", callback_data="noop")
+        InlineKeyboardButton(text="💈 Нажмите на награду для удаления 💈", callback_data="noop")
     )
     
     if rewards:
@@ -414,12 +419,12 @@ async def handle_rewards_shop_view(call: types.CallbackQuery, state: FSMContext 
         InlineKeyboardButton(text="⚙️ Управление наградами", callback_data="rewards_settings")
     )
     
-    # Row 4 (Calculation Info)
+    # Row 4 (Info headers with 💈)
     builder.row(
-        InlineKeyboardButton(text=f"ℹ️{stat_line}", callback_data="noop")
+        InlineKeyboardButton(text=f"💈 Нажми на награду для покупки 💈", callback_data="noop")
     )
     builder.row(
-        InlineKeyboardButton(text="👉 Нажми на награду для покупки:", callback_data="noop")
+        InlineKeyboardButton(text=f"💈{stat_line} 💈", callback_data="noop")
     )
     
     if rewards:

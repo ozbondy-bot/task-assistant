@@ -450,7 +450,10 @@ async def handle_te_title_start(call: types.CallbackQuery, state: FSMContext):
         InlineKeyboardButton(text="➕ Добавить", callback_data="chores_add_menu"),
         InlineKeyboardButton(text="⚡⚙️ Настройки⚡", callback_data="chores_settings")
     )
-    sent_msg = await call.message.edit_text("Введите новое название для шаблона:", reply_markup=builder.as_markup())
+    builder.row(
+        InlineKeyboardButton(text="💈 Пиши новое название 💈", callback_data="noop")
+    )
+    sent_msg = await call.message.edit_text("\u2800", reply_markup=builder.as_markup())
     await state.update_data(last_msg_id=sent_msg.message_id)
 
 
@@ -548,7 +551,10 @@ async def handle_te_points_start(call: types.CallbackQuery, state: FSMContext):
         InlineKeyboardButton(text="➕ Добавить", callback_data="chores_add_menu"),
         InlineKeyboardButton(text="⚙️ Настройки", callback_data="chores_settings")
     )
-    sent_msg = await call.message.edit_text("Введите новое количество баллов (печенек):", reply_markup=builder.as_markup())
+    builder.row(
+        InlineKeyboardButton(text="💈 Сколько печенек дадим? 💈", callback_data="noop")
+    )
+    sent_msg = await call.message.edit_text("\u2800", reply_markup=builder.as_markup())
     await state.update_data(last_msg_id=sent_msg.message_id)
 
 
@@ -649,11 +655,14 @@ async def handle_te_period_start(call: types.CallbackQuery, state: FSMContext):
         InlineKeyboardButton(text="⚙️ Настройки", callback_data="chores_settings")
     )
     builder.row(
+        InlineKeyboardButton(text="💈 Выберите цикл задачи 💈", callback_data="noop")
+    )
+    builder.row(
         InlineKeyboardButton(text="1 Раз", callback_data="te_period_sel:once"),
         InlineKeyboardButton(text="Каждый день", callback_data="te_period_sel:daily"),
         InlineKeyboardButton(text="Каждые X дней", callback_data="te_period_sel:every_x_days")
     )
-    sent_msg = await call.message.edit_text("Выберите периодичность для шаблона:", reply_markup=builder.as_markup())
+    sent_msg = await call.message.edit_text("\u2800", reply_markup=builder.as_markup())
     await state.update_data(last_msg_id=sent_msg.message_id)
 
 
@@ -723,7 +732,10 @@ async def handle_te_period_selected(call: types.CallbackQuery, state: FSMContext
             InlineKeyboardButton(text="➕ Добавить", callback_data="chores_add_menu"),
             InlineKeyboardButton(text="⚙️ Настройки", callback_data="chores_settings")
         )
-        sent_msg = await call.message.edit_text("Укажите число дней, с каким интервалом повторять задачу (например, 5):", reply_markup=builder.as_markup())
+        builder.row(
+            InlineKeyboardButton(text="💈 Укажите интервал в днях 💈", callback_data="noop")
+        )
+        sent_msg = await call.message.edit_text("\u2800", reply_markup=builder.as_markup())
         await state.update_data(last_msg_id=sent_msg.message_id)
 
 

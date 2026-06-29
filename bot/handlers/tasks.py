@@ -51,13 +51,10 @@ async def handle_my_add(call: types.CallbackQuery, state: FSMContext, db_user: U
         InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
     )
     builder.row(
-        InlineKeyboardButton(text="📝 Введите текст задачи (например: Купить хлеб)", callback_data="noop")
-    )
-    builder.row(
-        InlineKeyboardButton(text="💡 (Если задача срочная, напишите «срочно»)", callback_data="noop")
+        InlineKeyboardButton(text="💈 Пиши текст задачи 💈", callback_data="noop")
     )
     sent_msg = await call.message.edit_text(
-        "✍️ *Добавление личной задачи:*",
+        "\u2800",
         reply_markup=builder.as_markup(),
         parse_mode="Markdown"
     )
@@ -111,7 +108,7 @@ async def handle_my_add_text(message: types.Message, state: FSMContext, db_user:
         InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
     )
     builder.row(
-        InlineKeyboardButton(text=f"📅 Выберите дату для задачи «{clean_txt}»:", callback_data="noop")
+        InlineKeyboardButton(text="💈 Выберите дату для задачи 💈", callback_data="noop")
     )
     days_ru = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
     builder.row(
@@ -124,13 +121,13 @@ async def handle_my_add_text(message: types.Message, state: FSMContext, db_user:
         await message.bot.edit_message_text(
             chat_id=message.chat.id,
             message_id=last_msg_id,
-            text="📅 *Выбор даты:*",
+            text="\u2800",
             reply_markup=builder.as_markup(),
             parse_mode="Markdown"
         )
     else:
         sent_msg = await message.answer(
-            "📅 *Выбор даты:*",
+            "\u2800",
             reply_markup=builder.as_markup(),
             parse_mode="Markdown"
         )
@@ -248,10 +245,10 @@ async def handle_addpt_period(call: types.CallbackQuery, state: FSMContext, db_u
             InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
         )
         builder.row(
-            InlineKeyboardButton(text="Укажите число дней, с каким интервалом повторять задачу (например, 5):", callback_data="noop")
+            InlineKeyboardButton(text="💈 Укажите интервал в днях 💈", callback_data="noop")
         )
         sent_msg = await call.message.edit_text(
-            "📅 *Интервал повторения:*",
+            "\u2800",
             reply_markup=builder.as_markup(),
             parse_mode="Markdown"
         )
