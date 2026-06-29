@@ -226,10 +226,10 @@ async def handle_stat_arch(call: types.CallbackQuery, state: FSMContext = None, 
     
     # Row 3 (Pagination)
     nav = []
-    nav.append(InlineKeyboardButton(text="◀️", callback_data=f"stat_arch:{page+1}"))
+    nav.append(InlineKeyboardButton(text="⏪", callback_data=f"stat_arch:{page+1}"))
     nav.append(InlineKeyboardButton(text=f"{date_lbl} ({weekday_lbl})", callback_data="noop"))
     if page > 0:
-        nav.append(InlineKeyboardButton(text="▶️", callback_data=f"stat_arch:{page-1}"))
+        nav.append(InlineKeyboardButton(text="⏩", callback_data=f"stat_arch:{page-1}"))
     else:
         nav.append(InlineKeyboardButton(text=" ", callback_data="noop"))
     builder.row(*nav)
@@ -532,7 +532,7 @@ async def handle_rewards_purchases(call: types.CallbackQuery, db_user: User = No
     nav = []
     # Left arrow
     if page > 0:
-        nav.append(InlineKeyboardButton(text="◀️", callback_data=f"rewards_purchases:{page-1}"))
+        nav.append(InlineKeyboardButton(text="⏪", callback_data=f"rewards_purchases:{page-1}"))
     else:
         nav.append(InlineKeyboardButton(text=" ", callback_data="noop"))
         
@@ -547,7 +547,7 @@ async def handle_rewards_purchases(call: types.CallbackQuery, db_user: User = No
     
     # Right arrow
     if len(rows) == 5:
-        nav.append(InlineKeyboardButton(text="▶️", callback_data=f"rewards_purchases:{page+1}"))
+        nav.append(InlineKeyboardButton(text="⏩", callback_data=f"rewards_purchases:{page+1}"))
     else:
         nav.append(InlineKeyboardButton(text=" ", callback_data="noop"))
         
