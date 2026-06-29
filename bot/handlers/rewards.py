@@ -101,10 +101,7 @@ async def render_shop_and_purchases(message: types.Message, db_user: User, is_ca
         for c in weekly_comps:
             weekly_map[c.user_id] = weekly_map.get(c.user_id, 0) + (c.points or 0)
 
-    text = "🏆 Баланс героев:\n"
-    for usr in leaderboard:
-        weekly = weekly_map.get(usr.id, 0)
-        text += f"🦸\u200d♂️ {usr.display_name}: {usr.points or 0} 🍪 (+{weekly} 🍪)\n"
+    text = "📊 *Статистика и Магазин:*"
 
     builder = InlineKeyboardBuilder()
     
@@ -121,11 +118,23 @@ async def render_shop_and_purchases(message: types.Message, db_user: User, is_ca
         InlineKeyboardButton(text="🛒 Покупки", callback_data="shop_view_items"),
         InlineKeyboardButton(text="📜 Архив", callback_data="stat_arch:0")
     )
+
+    # Row 3 (Balance header)
+    builder.row(
+        InlineKeyboardButton(text="🏆 Баланс героев:", callback_data="noop")
+    )
+
+    # Row 4+ (Leaderboard items)
+    for usr in leaderboard:
+        weekly = weekly_map.get(usr.id, 0)
+        lbl = f"🦸‍♂️ {usr.display_name}: {usr.points or 0} 🍪 (+{weekly} 🍪)"
+        builder.row(InlineKeyboardButton(text=lbl, callback_data="noop"))
+
     markup = builder.as_markup()
     if is_callback:
-        await message.edit_text(text, reply_markup=markup)
+        await message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
     else:
-        await message.answer(text, reply_markup=markup)
+        await message.answer(text, reply_markup=markup, parse_mode="Markdown")
 
 
 @dp.message(F.text.in_({"📊 Stat", "🛍 Магазин и Покупки"}))
@@ -138,14 +147,14 @@ async def handle_shop_and_purchases_back(call: types.CallbackQuery, db_user: Use
     await render_shop_and_purchases(call.message, db_user, is_callback=True)
 
 
-@dp.callback_query(F.data == "stats_view")
+@dp.callback_query(F.data == "stats_view", StateFilter("*"))
 async def handle_stats_view(call: types.CallbackQuery, state: FSMContext = None, db_user: User = None):
     if state:
         await state.clear()
     await render_shop_and_purchases(call.message, db_user, is_callback=True)
 
 
-@dp.callback_query(F.data.startswith("stat_arch:"))
+@dp.callback_query(F.data.startswith("stat_arch:"), StateFilter("*"))
 async def handle_stat_arch(call: types.CallbackQuery, state: FSMContext = None, db_user: User = None, _page: int = None):
     if state:
         await state.clear()
@@ -153,65 +162,44 @@ async def handle_stat_arch(call: types.CallbackQuery, state: FSMContext = None, 
         page = _page
     else:
         parts = call.data.split(":")
-        page = int(parts[1])
-    
+        page = int(parts[1]) if len(parts) > 1 else 0
+        
     async with AsyncSessionLocal() as session:
         today = await get_house_today_date(session)
         target_date = today - timedelta(days=page)
         
-        # 1. House chores completed on target_date
-        chores_result = await session.execute(
-            select(Completion, TaskInstance, TaskTemplate, User)
-            .join(TaskInstance, Completion.task_instance_id == TaskInstance.id)
-            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
-            .join(User, Completion.user_id == User.id)
-            .where(
-                and_(
-                    TaskTemplate.house_id == ACTIVE_HOUSE_ID,
-                    func.date(Completion.created_at) == target_date
-                )
-            )
+        # Completions for this date
+        start_dt = datetime.combine(target_date, datetime.min.time())
+        end_dt = datetime.combine(target_date, datetime.max.time())
+        
+        comps_result = await session.execute(
+            select(Completion, User).join(User, Completion.user_id == User.id)
+            .where(and_(Completion.created_at >= start_dt, Completion.created_at <= end_dt))
         )
-        chores_rows = chores_result.all()
+        comps = comps_result.all()
         
-        # 2. Personal tasks completed on target_date
-        users_result = await session.execute(select(User.id).where(User.house_id == ACTIVE_HOUSE_ID))
-        house_user_ids = [u[0] for u in users_result.all()]
-        
-        pts_result = await session.execute(
-            select(PersonalTask, User)
-            .join(User, PersonalTask.user_id == User.id)
-            .where(
-                and_(
-                    PersonalTask.user_id.in_(house_user_ids),
-                    PersonalTask.is_completed == True,
-                    func.date(PersonalTask.completed_at) == target_date
-                )
-            )
-        )
-        pts_rows = pts_result.all()
-    # Combine
-    day_entries = []
-    for comp, inst, tmpl, usr in chores_rows:
-        day_entries.append({
-            "type": "chore",
-            "id": comp.id,
-            "title": tmpl.title,
-            "points": comp.points,
-            "user": usr.display_name,
-            "time": comp.created_at.strftime("%H:%M")
-        })
-    for pt, usr in pts_rows:
-        day_entries.append({
-            "type": "personal",
-            "id": pt.id,
-            "title": clean_task_text(pt.text),
-            "points": 0,
-            "user": usr.display_name,
-            "time": pt.completed_at.strftime("%H:%M")
-        })
-        
-    day_entries.sort(key=lambda x: x["time"], reverse=True)
+        # Map completions to daily entries
+        day_entries = []
+        for comp, usr in comps:
+            # Try to get template name
+            title = "Кастомное дело"
+            c_type = "personal"
+            if comp.task_instance_id:
+                inst = await session.get(TaskInstance, comp.task_instance_id)
+                if inst:
+                    tmpl = await session.get(TaskTemplate, inst.template_id)
+                    if tmpl:
+                        title = tmpl.title
+                        c_type = "chore"
+            day_entries.append({
+                "id": comp.id,
+                "user": usr.display_name or usr.username or "Участник",
+                "title": title,
+                "points": comp.points or 0,
+                "time": comp.created_at.strftime("%H:%M"),
+                "type": c_type
+            })
+            
     # Header date label
     date_lbl = target_date.strftime("%d.%m")
     def get_ru_weekday_abbr_local(d) -> str:
@@ -219,9 +207,8 @@ async def handle_stat_arch(call: types.CallbackQuery, state: FSMContext = None, 
         return abbrs[d.weekday()]
     weekday_lbl = get_ru_weekday_abbr_local(target_date)
     
-    text = f"📜 *Архив выполненных задач* — {date_lbl} ({weekday_lbl}):"
-    if not day_entries:
-        text += "\n\nВ этот день никто ничего не выполнял."
+    text = "📜 *Архив выполненных задач:*"
+    
     builder = InlineKeyboardBuilder()
     
     # Row 1 (Main Tabs)
@@ -247,7 +234,11 @@ async def handle_stat_arch(call: types.CallbackQuery, state: FSMContext = None, 
         nav.append(InlineKeyboardButton(text=" ", callback_data="noop"))
     builder.row(*nav)
     
-    # Row 4+ (Completed chores/tasks matching My layout)
+    # Row 4 (Info banner if empty)
+    if not day_entries:
+        builder.row(InlineKeyboardButton(text="📭 В этот день никто ничего не выполнял", callback_data="noop"))
+    
+    # Row 5+ (Completed chores/tasks matching My layout)
     for e in day_entries:
         pts_str = str(e["points"])
         pts_suffix = f" (+{pts_str}🍪)" if e["points"] > 0 else ""
@@ -264,7 +255,8 @@ async def handle_stat_arch(call: types.CallbackQuery, state: FSMContext = None, 
             InlineKeyboardButton(text=right_text, callback_data="noop")
         )
         
-    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+    markup = builder.as_markup()
+    await call.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
 
 
 @dp.callback_query(F.data.startswith("rollback_task:"))
@@ -335,19 +327,7 @@ async def render_rewards_settings(message: types.Message, db_user: User, is_call
         )
         rewards = result.scalars().all()
 
-    text = "⚙️ *Управление наградами:*\n\n"
-    
-    rewards_builder = InlineKeyboardBuilder()
-    if rewards:
-        for r in rewards:
-            adj = await get_adjusted_price(session, r.price)
-            text += f"• *{r.title}* — `{adj} 🍪` (цена: `{r.price}` дн.)\n"
-            rewards_builder.button(text=f"❌ {r.title}", callback_data=f"del_reward:{r.id}")
-        text += "\n_Нажмите на кнопку с наградой, чтобы удалить её._"
-    else:
-        text += "Наград пока нет."
-
-    rewards_builder.adjust(1)
+    text = "⚙️ *Управление наградами:*"
     
     builder = InlineKeyboardBuilder()
     
@@ -361,16 +341,28 @@ async def render_rewards_settings(message: types.Message, db_user: User, is_call
     # Row 2 (Sub-tabs)
     builder.row(
         InlineKeyboardButton(text="🛍 Магазин", callback_data="rewards_shop_view"),
-        InlineKeyboardButton(text="⚡🛒 Покупки⚡", callback_data="noop"),
+        InlineKeyboardButton(text="🛒 Покупки", callback_data="shop_view_items"),
         InlineKeyboardButton(text="📜 Архив", callback_data="stat_arch:0")
     )
     
-    builder.attach(rewards_builder)
-    
+    # Row 3 (Add button)
     builder.row(
         InlineKeyboardButton(text="➕ Добавить награду", callback_data="add_reward_start")
     )
     
+    # Row 4 (Info header)
+    builder.row(
+        InlineKeyboardButton(text="❌ Нажмите на награду, чтобы удалить её:", callback_data="noop")
+    )
+    
+    if rewards:
+        for r in rewards:
+            adj = await get_adjusted_price(session, r.price)
+            lbl = f"❌ {r.title} — {adj}🍪 ({r.price} дн.)"
+            builder.row(InlineKeyboardButton(text=lbl, callback_data=f"del_reward:{r.id}"))
+    else:
+        builder.row(InlineKeyboardButton(text="Наград пока нет.", callback_data="noop"))
+        
     markup = builder.as_markup()
     if is_callback:
         await message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
@@ -378,7 +370,7 @@ async def render_rewards_settings(message: types.Message, db_user: User, is_call
         await message.answer(text, reply_markup=markup, parse_mode="Markdown")
 
 
-@dp.callback_query(F.data == "rewards_shop_view")
+@dp.callback_query(F.data == "rewards_shop_view", StateFilter("*"))
 async def handle_rewards_shop_view(call: types.CallbackQuery, state: FSMContext = None, db_user: User = None):
     if state:
         await state.clear()
@@ -393,19 +385,13 @@ async def handle_rewards_shop_view(call: types.CallbackQuery, state: FSMContext 
     # Format stats line
     if points_per_day > 0:
         stat_line = (
-            f"ℹ️ <b>Расчёт цен:</b> за 30 дней заработано <code>{total_points}🍪</code>, "
-            f"участников: <code>{num_users}</code>, "
-            f"в день на человека: <code>{points_per_day:.1f}🍪</code>"
+            f" за 30дн заработано {total_points}🍪, "
+            f"в день на чел: {points_per_day:.1f}🍪"
         )
     else:
-        stat_line = "ℹ️ Истории выполнения за 30 дней нет — цены в днях."
+        stat_line = " Истории выполнения за 30 дней нет — цены в днях."
 
-    text = (
-        "🎁 <b>Магазин наград</b>\n\n"
-        f"{stat_line}\n"
-        "Формула: <code>Цена = Базовые дни × Среднее в день</code>\n\n"
-        "👉 <b>Нажми на награду для покупки:</b>"
-    )
+    text = "🎁 *Магазин наград:*"
 
     builder = InlineKeyboardBuilder()
     
@@ -423,9 +409,17 @@ async def handle_rewards_shop_view(call: types.CallbackQuery, state: FSMContext 
         InlineKeyboardButton(text="📜 Архив", callback_data="stat_arch:0")
     )
     
-    # Row 3 (Rewards management — only visible in shop)
+    # Row 3 (Rewards management)
     builder.row(
         InlineKeyboardButton(text="⚙️ Управление наградами", callback_data="rewards_settings")
+    )
+    
+    # Row 4 (Calculation Info)
+    builder.row(
+        InlineKeyboardButton(text=f"ℹ️{stat_line}", callback_data="noop")
+    )
+    builder.row(
+        InlineKeyboardButton(text="👉 Нажми на награду для покупки:", callback_data="noop")
     )
     
     if rewards:
@@ -434,18 +428,18 @@ async def handle_rewards_shop_view(call: types.CallbackQuery, state: FSMContext 
                 price_cookies = r.price * points_per_day
                 adj = max(1, int(round(price_cookies)))
                 builder.row(InlineKeyboardButton(
-                    text=f"{r.title}  ({r.price} дн. = {adj}🍪)",
+                    text=f"🎁 {r.title}  ({r.price} дн. = {adj}🍪)",
                     callback_data=f"buy_reward:{r.id}"
                 ))
             else:
                 builder.row(InlineKeyboardButton(
-                    text=f"{r.title}  ({r.price} дн.)",
+                    text=f"🎁 {r.title}  ({r.price} дн.)",
                     callback_data=f"buy_reward:{r.id}"
                 ))
     else:
-        text += "\nНаград пока нет."
+        builder.row(InlineKeyboardButton(text="Наград пока нет.", callback_data="noop"))
 
-    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
 
 
 @dp.callback_query(F.data == "rewards_back")

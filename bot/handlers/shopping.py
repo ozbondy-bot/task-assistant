@@ -54,32 +54,15 @@ async def render_shop(message: types.Message, db_user: User, is_callback=False):
         random.setstate(state)
         return e
 
-    items_builder = InlineKeyboardBuilder()
-    
-    # 1. Render grocery items
-    for item in items:
-        prefix = "🔴 " if item.priority == "high" else ""
-        price_str = f"{item.price}₽ " if item.price > 0 else ""
-        emoji = get_emoji(item.id)
-        items_builder.button(text=f"{price_str}{emoji} {prefix}{item.item_name}", callback_data=f"done_shop:{item.id}")
-        
-    # 2. Render reward purchases
-    for purchase in purchases:
-        buyer_name = user_name_map.get(purchase.user_id, "?")
-        if purchase.status == "pending_use":
-            items_builder.button(text=f"⏳ 🎁 {purchase.reward_title} ({buyer_name})", callback_data="noop")
-        else:
-            items_builder.button(text=f"🎁 {purchase.reward_title} ({buyer_name})", callback_data=f"fulfill_rew:{purchase.id}")
-            
-    items_builder.adjust(1)
-    
+    text = "🛒 *Список покупок:*"
+
     builder = InlineKeyboardBuilder()
     
     # Row 1 (Main Tabs)
     builder.row(
         InlineKeyboardButton(text="🏠 Home", callback_data="home_view"),
         InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
-        InlineKeyboardButton(text="⚡📊 Stat⚡", callback_data="noop")
+        InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
     )
     
     # Row 2 (Sub-tabs)
@@ -89,19 +72,43 @@ async def render_shop(message: types.Message, db_user: User, is_callback=False):
         InlineKeyboardButton(text="📜 Архив", callback_data="stat_arch:0")
     )
     
-    builder.attach(items_builder)
-    
-    # Bottom actions row (WITHOUT Back button)
+    # Row 3 (Info headers)
     if items or purchases:
         total = sum(i.price for i in items)
-        text = f"🛒 *Покупки — {total} ₽*\n👉 _Тапни на товар для вычеркивания, или на награду для погашения:_"
+        builder.row(
+            InlineKeyboardButton(text=f"🛒 Покупки — {total} ₽", callback_data="noop")
+        )
+        builder.row(
+            InlineKeyboardButton(text="👉 Нажми на товар, чтобы вычеркнуть:", callback_data="noop")
+        )
+    else:
+        builder.row(
+            InlineKeyboardButton(text="🍏 Список покупок пуст!", callback_data="noop")
+        )
+
+    # Grocery items list
+    for item in items:
+        prefix = "🔴 " if item.priority == "high" else ""
+        price_str = f"{item.price}₽ " if item.price > 0 else ""
+        emoji = get_emoji(item.id)
+        builder.row(InlineKeyboardButton(text=f"{price_str}{emoji} {prefix}{item.item_name}", callback_data=f"done_shop:{item.id}"))
+        
+    # Reward purchases list
+    for purchase in purchases:
+        buyer_name = user_name_map.get(purchase.user_id, "?")
+        if purchase.status == "pending_use":
+            builder.row(InlineKeyboardButton(text=f"⏳ 🎁 {purchase.reward_title} ({buyer_name})", callback_data="noop"))
+        else:
+            builder.row(InlineKeyboardButton(text=f"🎁 {purchase.reward_title} ({buyer_name})", callback_data=f"fulfill_rew:{purchase.id}"))
+            
+    # Bottom actions row
+    if items or purchases:
         builder.row(
             InlineKeyboardButton(text="✏️ Изм.", callback_data="s_edit"),
             InlineKeyboardButton(text="❌ Удал.", callback_data="s_del"),
             InlineKeyboardButton(text="📜 Архив", callback_data="s_arch:0"),
         )
     else:
-        text = "🍏 *Список покупок пуст!*"
         builder.row(InlineKeyboardButton(text="📜 Архив покупок", callback_data="s_arch:0"))
 
     markup = builder.as_markup()
@@ -227,11 +234,11 @@ async def handle_reject_reward(call: types.CallbackQuery, db_user: User = None):
     await render_shop(call.message, db_user, True)
 
 
-@dp.callback_query(F.data == "shop_view_items")
+@dp.callback_query(F.data == "shop_view_items", StateFilter("*"))
 async def shop_view_items_handler(call: types.CallbackQuery, state: FSMContext = None, db_user: User = None):
     if state:
         await state.clear()
-    await render_shop(call.message, db_user, True)
+    await render_shop(call.message, db_user, is_callback=True)
 
 
 @dp.callback_query(F.data == "s_cancel")

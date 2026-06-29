@@ -709,24 +709,25 @@ async def render_today(message: types.Message, db_user: User, is_callback=False,
         )
         personal_tasks_all = result.scalars().all()
 
-        # 2. Fetch ALL user's claimed chores in progress
-        chores_result = await session.execute(
-            select(TaskInstance, TaskTemplate)
-            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
-            .where(
+        # 2. Fetch ALL active household tasks claimed by user
+        result_chores = await session.execute(
+            select(TaskInstance, TaskTemplate).join(
+                TaskTemplate, TaskInstance.template_id == TaskTemplate.id
+            ).where(
                 and_(
                     TaskInstance.done_by_user_id == db_user.id,
-                    TaskInstance.status == "in_progress"
+                    TaskInstance.status == "in_progress",
                 )
-            )
-            .order_by(TaskInstance.date, TaskInstance.id)
+            ).order_by(TaskInstance.date, TaskInstance.id)
         )
-        my_chores_all = chores_result.all()
+        my_chores_all = result_chores.all()
 
-    # 3. Find unique dates and upcoming recurring task dates
+    # Build unique future dates set from database
     all_dates = set()
+    all_dates.add(today)
     for pt in personal_tasks_all:
-        all_dates.add(pt.date_execution)
+        if pt.date_execution > today:
+            all_dates.add(pt.date_execution)
         if pt.recurrence:
             delta = get_recurrence_delta(pt.recurrence)
             # Add next 4 occurrences (limit to 30 days ahead)
@@ -766,12 +767,14 @@ async def render_today(message: types.Message, db_user: User, is_callback=False,
     if page == 0:
         personal_tasks = [pt for pt in personal_tasks_all if pt.date_execution <= today]
         my_chores = [(inst, tmpl) for inst, tmpl in my_chores_all if inst.date <= today]
-        text = "📋 <b>Мои дела на сегодня</b>:\n👉 <i>Нажми на дело для выполнения:</i>"
+        info_title = "📋 Мои дела на сегодня:"
     else:
         target_date = future_dates[page - 1]
         personal_tasks = [pt for pt in personal_tasks_all if is_pt_occurring_on(pt, target_date)]
         my_chores = [(inst, tmpl) for inst, tmpl in my_chores_all if inst.date == target_date]
-        text = "📋 <b>Мои дела</b>:\n👉 <i>Нажми на дело для выполнения:</i>"
+        info_title = "📋 Мои дела:"
+
+    text = "📋 *Список моих дел:*"
 
     builder = InlineKeyboardBuilder()
     
@@ -782,9 +785,15 @@ async def render_today(message: types.Message, db_user: User, is_callback=False,
         InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
     )
     
-    # Row 2 (Sub-tabs) — no separate Добавить row, it's in pagination
+    # Row 2 (Info headers)
+    builder.row(
+        InlineKeyboardButton(text=info_title, callback_data="noop")
+    )
+    builder.row(
+        InlineKeyboardButton(text="👉 Нажми на дело для выполнения:", callback_data="noop")
+    )
 
-    # Personal tasks rendering    # Personal tasks rendering
+    # Personal tasks rendering
     for t in personal_tasks:
         clean = clean_task_text(t.text)
         is_urgent = "🔴" in t.text
@@ -792,12 +801,8 @@ async def render_today(message: types.Message, db_user: User, is_callback=False,
         t_date = target_date if page > 0 else t.date_execution
         date_str = t_date.strftime('%d.%m.')
         
-        # Emoji: 🔴 for urgent, 🔁 for recurring, otherwise 👤
         emoji = "🔴" if is_urgent else ("🔁" if t.recurrence else "👤")
-        
-        # Circle if overdue/shifted (disabled as per request)
         circle = ""
-        
         right_text = f"{date_str} {emoji} ℹ️"
             
         builder.row(
@@ -810,10 +815,7 @@ async def render_today(message: types.Message, db_user: User, is_callback=False,
         pts_str = "2-8" if tmpl.title == "Готовка" else str(tmpl.points)
         c_date = inst.date
         date_str = c_date.strftime('%d.%m.')
-        
-        # Circle if overdue (disabled as per request)
         circle = ""
-        
         right_text = f"🏠 {date_str} {pts_str}🍪 ℹ️"
             
         builder.row(
@@ -825,14 +827,11 @@ async def render_today(message: types.Message, db_user: User, is_callback=False,
     target_d = future_dates[page - 1] if page > 0 else today
     date_lbl = f"{target_d.strftime('%d.%m')} ({get_ru_weekday_abbr(target_d)})"
     nav = []
-    # Left: Добавить on page 0, back arrow on pages 1+
     if page == 0:
         nav.append(InlineKeyboardButton(text="➕ Добавить", callback_data=f"my_add:{page}"))
     else:
         nav.append(InlineKeyboardButton(text="⏪", callback_data=f"my_page:{page-1}"))
-    # Middle: always date + weekday
     nav.append(InlineKeyboardButton(text=date_lbl, callback_data="noop"))
-    # Right: forward arrow if more pages, else empty
     if page < total_pages - 1:
         nav.append(InlineKeyboardButton(text="⏩", callback_data=f"my_page:{page+1}"))
     else:
@@ -841,9 +840,9 @@ async def render_today(message: types.Message, db_user: User, is_callback=False,
 
     markup = builder.as_markup()
     if is_callback:
-        await message.edit_text(text, reply_markup=markup, parse_mode="HTML")
+        await message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
     else:
-        await message.answer(text, reply_markup=markup, parse_mode="HTML")
+        await message.answer(text, reply_markup=markup, parse_mode="Markdown")
 
 
 @dp.callback_query(F.data.startswith("pt_info:"))

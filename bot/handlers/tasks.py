@@ -23,7 +23,7 @@ async def today_handler(m: types.Message, db_user: User = None):
     await render_today(m, db_user, page=0)
 
 
-@dp.callback_query(F.data.startswith("my_page:"))
+@dp.callback_query(F.data.startswith("my_page:"), StateFilter("*"))
 async def handle_my_page(call: types.CallbackQuery, state: FSMContext = None, db_user: User = None):
     page = int(call.data.split(":")[1])
     if state:
@@ -36,7 +36,7 @@ async def t_cancel(call: types.CallbackQuery, db_user: User = None):
     await render_today(call.message, db_user, True, page=0)
 
 
-@dp.callback_query(F.data.startswith("my_add"))
+@dp.callback_query(F.data.startswith("my_add"), StateFilter("*"))
 async def handle_my_add(call: types.CallbackQuery, state: FSMContext, db_user: User = None):
     parts = call.data.split(":")
     page = int(parts[1]) if len(parts) > 1 else 0
@@ -50,12 +50,16 @@ async def handle_my_add(call: types.CallbackQuery, state: FSMContext, db_user: U
         InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
         InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
     )
+    builder.row(
+        InlineKeyboardButton(text="📝 Введите текст задачи (например: Купить хлеб)", callback_data="noop")
+    )
+    builder.row(
+        InlineKeyboardButton(text="💡 (Если задача срочная, напишите «срочно»)", callback_data="noop")
+    )
     sent_msg = await call.message.edit_text(
-        "✍️ <b>Новая личная задача</b>:\n\n"
-        "Введите текст задачи (например: Купить хлеб).\n"
-        "Если задача срочная, напишите слово <b>«срочно»</b>.",
+        "✍️ *Добавление личной задачи:*",
         reply_markup=builder.as_markup(),
-        parse_mode="HTML"
+        parse_mode="Markdown"
     )
     await state.update_data(last_msg_id=sent_msg.message_id)
 
@@ -106,6 +110,9 @@ async def handle_my_add_text(message: types.Message, state: FSMContext, db_user:
         InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
         InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
     )
+    builder.row(
+        InlineKeyboardButton(text=f"📅 Выберите дату для задачи «{clean_txt}»:", callback_data="noop")
+    )
     days_ru = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
     builder.row(
         InlineKeyboardButton(text=f"{d_today.strftime('%d.%m')} ({days_ru[d_today.weekday()]})", callback_data="addpt_date:today"),
@@ -113,21 +120,19 @@ async def handle_my_add_text(message: types.Message, state: FSMContext, db_user:
         InlineKeyboardButton(text="Другая дата", callback_data="addpt_date:calendar")
     )
     
-    text_label = f"📅 <b>Выберите дату выполнения</b> для задачи «{clean_txt}»:"
-    
     if last_msg_id:
         await message.bot.edit_message_text(
             chat_id=message.chat.id,
             message_id=last_msg_id,
-            text=text_label,
+            text="📅 *Выбор даты:*",
             reply_markup=builder.as_markup(),
-            parse_mode="HTML"
+            parse_mode="Markdown"
         )
     else:
         sent_msg = await message.answer(
-            text_label,
+            "📅 *Выбор даты:*",
             reply_markup=builder.as_markup(),
-            parse_mode="HTML"
+            parse_mode="Markdown"
         )
         await state.update_data(last_msg_id=sent_msg.message_id)
 
@@ -215,6 +220,7 @@ async def handle_addpt_period(call: types.CallbackQuery, state: FSMContext, db_u
     if period == "once":
         text = state_data.get("text")
         date_str = state_data.get("date")
+        from datetime import datetime
         exec_date = datetime.strptime(date_str, "%Y-%m-%d").date()
         
         async with AsyncSessionLocal() as session:
@@ -241,9 +247,13 @@ async def handle_addpt_period(call: types.CallbackQuery, state: FSMContext, db_u
             InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
             InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
         )
+        builder.row(
+            InlineKeyboardButton(text="Укажите число дней, с каким интервалом повторять задачу (например, 5):", callback_data="noop")
+        )
         sent_msg = await call.message.edit_text(
-            "Укажите число дней, с каким интервалом повторять задачу (например, 5):",
-            reply_markup=builder.as_markup()
+            "📅 *Интервал повторения:*",
+            reply_markup=builder.as_markup(),
+            parse_mode="Markdown"
         )
         await state.update_data(last_msg_id=sent_msg.message_id)
 
