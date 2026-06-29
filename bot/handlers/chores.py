@@ -442,28 +442,34 @@ async def handle_te_title_start(call: types.CallbackQuery, state: FSMContext):
         InlineKeyboardButton(text="➕ Добавить", callback_data="chores_add_menu"),
         InlineKeyboardButton(text="⚡⚙️ Настройки⚡", callback_data="chores_settings")
     )
-    builder.row(
-        InlineKeyboardButton(text="❌ Отмена", callback_data=f"te_cancel:{tid}:{src}")
-    )
-    await call.message.edit_text("Введите новое название для шаблона:", reply_markup=builder.as_markup())
+    sent_msg = await call.message.edit_text("Введите новое название для шаблона:", reply_markup=builder.as_markup())
+    await state.update_data(last_msg_id=sent_msg.message_id)
 
 
 @dp.message(StateFilter(EditTemplateState.waiting_for_title))
 async def handle_te_title_input(message: types.Message, state: FSMContext, db_user: User = None):
     title = message.text.strip()
     if not title:
-        await message.answer("Название не может быть пустым. Попробуйте еще раз:")
+        try:
+            await message.delete()
+        except Exception:
+            pass
         return
         
     data = await state.get_data()
     tid = data["edit_tid"]
     src = data["edit_src"]
+    last_msg_id = data.get("last_msg_id")
     
+    try:
+        await message.delete()
+    except Exception:
+        pass
+        
     import json
     async with AsyncSessionLocal() as session:
         tmpl = await session.get(TaskTemplate, tid)
         if not tmpl:
-            await message.answer("Шаблон не найден")
             await state.clear()
             return
             
@@ -483,11 +489,11 @@ async def handle_te_title_input(message: types.Message, state: FSMContext, db_us
             await session.commit()
             
             partner_text = (
-                f"🔔 *Согласование изменения задачи!*\n\n"
-                f"Жилец *{db_user.display_name or db_user.username or 'Партнёр'}* хочет изменить название домашней задачи:\n"
-                f"❌ *Было:* {tmpl.title}\n"
-                f"✅ *Станет:* {title}\n\n"
-                f"Одобряете изменение?"
+                "🔔 *Согласование изменения задачи!*\\n\\n"
+                f"Жилец *{db_user.display_name or db_user.username or 'Партнёр'}* хочет изменить название домашней задачи:\\n"
+                f"❌ *Было:* {tmpl.title}\\n"
+                f"✅ *Станет:* {title}\\n\\n"
+                "Одобряете изменение?"
             )
             builder = InlineKeyboardBuilder()
             builder.row(
@@ -499,13 +505,21 @@ async def handle_te_title_input(message: types.Message, state: FSMContext, db_us
             except Exception as e:
                 logger.error(f"Failed to send approval message to partner: {e}")
             await state.clear()
-            await message.answer(f"⏳ Запрос на переименование задачи в «{title}» отправлен партнёру.")
+            
+            if last_msg_id:
+                message.message_id = last_msg_id
+                await redirect_to_template_settings(message, tid, src, db_user, is_callback=True)
+            else:
+                await redirect_to_template_settings(message, tid, src, db_user, is_callback=False)
         else:
             tmpl.title = title
             await session.commit()
-            await message.answer(f"✅ Название успешно обновлено на: *{title}*", parse_mode="Markdown")
             await state.clear()
-            await redirect_to_template_settings(message, tid, src, db_user, is_callback=False)
+            if last_msg_id:
+                message.message_id = last_msg_id
+                await redirect_to_template_settings(message, tid, src, db_user, is_callback=True)
+            else:
+                await redirect_to_template_settings(message, tid, src, db_user, is_callback=False)
 
 
 @dp.callback_query(F.data.startswith("te_f:points:"))
@@ -524,12 +538,10 @@ async def handle_te_points_start(call: types.CallbackQuery, state: FSMContext):
     )
     builder.row(
         InlineKeyboardButton(text="➕ Добавить", callback_data="chores_add_menu"),
-        InlineKeyboardButton(text="⚡⚙️ Настройки⚡", callback_data="chores_settings")
+        InlineKeyboardButton(text="⚙️ Настройки", callback_data="chores_settings")
     )
-    builder.row(
-        InlineKeyboardButton(text="❌ Отмена", callback_data=f"te_cancel:{tid}:{src}")
-    )
-    await call.message.edit_text("Введите новое количество баллов (печенек):", reply_markup=builder.as_markup())
+    sent_msg = await call.message.edit_text("Введите новое количество баллов (печенек):", reply_markup=builder.as_markup())
+    await state.update_data(last_msg_id=sent_msg.message_id)
 
 
 @dp.message(StateFilter(EditTemplateState.waiting_for_points))
@@ -539,18 +551,26 @@ async def handle_te_points_input(message: types.Message, state: FSMContext, db_u
         if pts < 0:
             raise ValueError()
     except ValueError:
-        await message.answer("Пожалуйста, введите неотрицательное целое число:")
+        try:
+            await message.delete()
+        except Exception:
+            pass
         return
         
     data = await state.get_data()
     tid = data["edit_tid"]
     src = data["edit_src"]
+    last_msg_id = data.get("last_msg_id")
     
+    try:
+        await message.delete()
+    except Exception:
+        pass
+        
     import json
     async with AsyncSessionLocal() as session:
         tmpl = await session.get(TaskTemplate, tid)
         if not tmpl:
-            await message.answer("Шаблон не найден")
             await state.clear()
             return
             
@@ -570,11 +590,11 @@ async def handle_te_points_input(message: types.Message, state: FSMContext, db_u
             await session.commit()
             
             partner_text = (
-                f"🔔 *Согласование изменения задачи!*\n\n"
-                f"Жилец *{db_user.display_name or db_user.username or 'Партнёр'}* хочет изменить награду для задачи «{tmpl.title}»:\n"
-                f"❌ *Было:* {tmpl.points}🍪\n"
-                f"✅ *Станет:* {pts}🍪\n\n"
-                f"Одобряете изменение?"
+                "🔔 *Согласование изменения задачи!*\\n\\n"
+                f"Жилец *{db_user.display_name or db_user.username or 'Партнёр'}* хочет изменить количество печенек:\\n"
+                f"❌ *Было:* {tmpl.points}\\n"
+                f"✅ *Станет:* {pts}\\n\\n"
+                "Одобряете изменение?"
             )
             builder = InlineKeyboardBuilder()
             builder.row(
@@ -586,13 +606,20 @@ async def handle_te_points_input(message: types.Message, state: FSMContext, db_u
             except Exception as e:
                 logger.error(f"Failed to send approval message to partner: {e}")
             await state.clear()
-            await message.answer(f"⏳ Запрос на изменение баллов задачи «{tmpl.title}» отправлен партнёру.")
+            if last_msg_id:
+                message.message_id = last_msg_id
+                await redirect_to_template_settings(message, tid, src, db_user, is_callback=True)
+            else:
+                await redirect_to_template_settings(message, tid, src, db_user, is_callback=False)
         else:
             tmpl.points = pts
             await session.commit()
-            await message.answer(f"✅ Баллы успешно обновлены на: *{pts}*", parse_mode="Markdown")
             await state.clear()
-            await redirect_to_template_settings(message, tid, src, db_user, is_callback=False)
+            if last_msg_id:
+                message.message_id = last_msg_id
+                await redirect_to_template_settings(message, tid, src, db_user, is_callback=True)
+            else:
+                await redirect_to_template_settings(message, tid, src, db_user, is_callback=False)
 
 
 @dp.callback_query(F.data.startswith("te_f:period:"))
@@ -605,12 +632,21 @@ async def handle_te_period_start(call: types.CallbackQuery, state: FSMContext):
     
     builder = InlineKeyboardBuilder()
     builder.row(
+        InlineKeyboardButton(text="Home", callback_data="home_view"),
+        InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
+        InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
+    )
+    builder.row(
+        InlineKeyboardButton(text="➕ Добавить", callback_data="chores_add_menu"),
+        InlineKeyboardButton(text="⚙️ Настройки", callback_data="chores_settings")
+    )
+    builder.row(
         InlineKeyboardButton(text="1 Раз", callback_data="te_period_sel:once"),
         InlineKeyboardButton(text="Каждый день", callback_data="te_period_sel:daily"),
         InlineKeyboardButton(text="Каждые X дней", callback_data="te_period_sel:every_x_days")
     )
-
-    await call.message.edit_text("Выберите периодичность для шаблона:", reply_markup=builder.as_markup())
+    sent_msg = await call.message.edit_text("Выберите периодичность для шаблона:", reply_markup=builder.as_markup())
+    await state.update_data(last_msg_id=sent_msg.message_id)
 
 
 @dp.callback_query(StateFilter(EditTemplateState.waiting_for_periodicity), F.data.startswith("te_period_sel:"))
@@ -644,12 +680,10 @@ async def handle_te_period_selected(call: types.CallbackQuery, state: FSMContext
                 session.add(pending)
                 await session.commit()
                 
-                p_desc = "daily (каждый день)" if p == "daily" else "once (1 раз)"
                 partner_text = (
-                    f"🔔 *Согласование изменения цикла!*\n\n"
-                    f"Жилец *{db_user.display_name or db_user.username or 'Партнёр'}* хочет изменить цикл задачи «{tmpl.title}»:\n"
-                    f"✅ *Новый цикл:* {p_desc}\n\n"
-                    f"Одобряете изменение?"
+                    "🔔 *Согласование изменения задачи!*\\n\\n"
+                    f"Жилец *{db_user.display_name or db_user.username or 'Партнёр'}* хочет изменить цикл задачи.\\n\\n"
+                    "Одобряете изменение?"
                 )
                 builder = InlineKeyboardBuilder()
                 builder.row(
@@ -679,12 +713,10 @@ async def handle_te_period_selected(call: types.CallbackQuery, state: FSMContext
         )
         builder.row(
             InlineKeyboardButton(text="➕ Добавить", callback_data="chores_add_menu"),
-            InlineKeyboardButton(text="⚡⚙️ Настройки⚡", callback_data="chores_settings")
+            InlineKeyboardButton(text="⚙️ Настройки", callback_data="chores_settings")
         )
-        builder.row(
-            InlineKeyboardButton(text="❌ Отмена", callback_data=f"te_cancel:{tid}:{src}")
-        )
-        await call.message.edit_text("Укажите число дней, с каким интервалом повторять задачу (например, 5):", reply_markup=builder.as_markup())
+        sent_msg = await call.message.edit_text("Укажите число дней, с каким интервалом повторять задачу (например, 5):", reply_markup=builder.as_markup())
+        await state.update_data(last_msg_id=sent_msg.message_id)
 
 
 @dp.message(StateFilter(EditTemplateState.waiting_for_period_days))
@@ -694,18 +726,26 @@ async def handle_te_period_days_input(message: types.Message, state: FSMContext,
         if days <= 0:
             raise ValueError()
     except ValueError:
-        await message.answer("Пожалуйста, введите целое положительное число:")
+        try:
+            await message.delete()
+        except Exception:
+            pass
         return
         
     data = await state.get_data()
     tid = data["edit_tid"]
     src = data["edit_src"]
+    last_msg_id = data.get("last_msg_id")
     
+    try:
+        await message.delete()
+    except Exception:
+        pass
+        
     import json
     async with AsyncSessionLocal() as session:
         tmpl = await session.get(TaskTemplate, tid)
         if not tmpl:
-            await message.answer("Шаблон не найден")
             await state.clear()
             return
             
@@ -726,10 +766,9 @@ async def handle_te_period_days_input(message: types.Message, state: FSMContext,
             await session.commit()
             
             partner_text = (
-                f"🔔 *Согласование изменения цикла!*\n\n"
-                f"Жилец *{db_user.display_name or db_user.username or 'Партнёр'}* хочет изменить цикл задачи «{tmpl.title}»:\n"
-                f"✅ *Новый цикл:* каждые {days} дней\n\n"
-                f"Одобряете изменение?"
+                "🔔 *Согласование изменения задачи!*\\n\\n"
+                f"Жилец *{db_user.display_name or db_user.username or 'Партнёр'}* хочет изменить цикл задачи на каждые {days} дней.\\n\\n"
+                "Одобряете изменение?"
             )
             builder = InlineKeyboardBuilder()
             builder.row(
@@ -741,14 +780,21 @@ async def handle_te_period_days_input(message: types.Message, state: FSMContext,
             except Exception as e:
                 logger.error(f"Failed to send approval message to partner: {e}")
             await state.clear()
-            await message.answer(f"⏳ Запрос на изменение цикла задачи отправлен партнёру.")
+            if last_msg_id:
+                message.message_id = last_msg_id
+                await redirect_to_template_settings(message, tid, src, db_user, is_callback=True)
+            else:
+                await redirect_to_template_settings(message, tid, src, db_user, is_callback=False)
         else:
             tmpl.periodicity = "every_x_days"
             tmpl.period_days = days
             await session.commit()
-            await message.answer(f"✅ Периодичность обновлена: каждые {days} дней!")
             await state.clear()
-            await redirect_to_template_settings(message, tid, src, db_user, is_callback=False)
+            if last_msg_id:
+                message.message_id = last_msg_id
+                await redirect_to_template_settings(message, tid, src, db_user, is_callback=True)
+            else:
+                await redirect_to_template_settings(message, tid, src, db_user, is_callback=False)
 
 
 @dp.callback_query(F.data.startswith("te_del:"))
@@ -1125,14 +1171,12 @@ async def handle_add_tmpl_start(call: types.CallbackQuery, state: FSMContext):
         InlineKeyboardButton(text="Добавить из базы", callback_data="add_from_templates_list"),
         InlineKeyboardButton(text="⚡Создать новую⚡", callback_data="noop")
     )
-    builder.row(
-        InlineKeyboardButton(text="❌ Отмена", callback_data="add_tmpl_cancel")
-    )
-    await call.message.edit_text(
+    sent_msg = await call.message.edit_text(
         "Пиши название задачи 📝:",
         reply_markup=builder.as_markup(),
         parse_mode=None
     )
+    await state.update_data(last_msg_id=sent_msg.message_id)
 
 
 @dp.callback_query(F.data == "add_tmpl_cancel")
@@ -1146,11 +1190,76 @@ async def handle_add_tmpl_cancel(call: types.CallbackQuery, state: FSMContext, d
 async def handle_add_tmpl_title(message: types.Message, state: FSMContext):
     title = message.text.strip()
     if not title:
-        await message.answer("Название не может быть пустым. Попробуйте еще раз:")
+        try:
+            await message.delete()
+        except Exception:
+            pass
         return
         
     await state.update_data(title=title)
     await state.set_state(AddTemplateState.waiting_for_points)
+    data = await state.get_data()
+    last_msg_id = data.get("last_msg_id")
+    
+    try:
+        await message.delete()
+    except Exception:
+        pass
+        
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="Home", callback_data="home_view"),
+        InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
+        InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
+    )
+    builder.row(
+        InlineKeyboardButton(text="➕ Добавить", callback_data="chores_add_menu"),
+        InlineKeyboardButton(text="⚙️ Настройки", callback_data="chores_settings")
+    )
+    builder.row(
+        InlineKeyboardButton(text="Добавить из базы", callback_data="add_from_templates_list"),
+        InlineKeyboardButton(text="⚡Создать новую⚡", callback_data="noop")
+    )
+    
+    if last_msg_id:
+        await message.bot.edit_message_text(
+            chat_id=message.chat.id,
+            message_id=last_msg_id,
+            text="Сколько печенек 🍪 за нее дадим?",
+            reply_markup=builder.as_markup()
+        )
+    else:
+        sent_msg = await message.answer(
+            "Сколько печенек 🍪 за нее дадим?",
+            reply_markup=builder.as_markup(),
+            parse_mode=None
+        )
+        await state.update_data(last_msg_id=sent_msg.message_id)
+
+
+@dp.message(StateFilter(AddTemplateState.waiting_for_points))
+async def handle_add_tmpl_points(message: types.Message, state: FSMContext):
+    try:
+        pts = int(message.text.strip())
+        if pts <= 0:
+            raise ValueError()
+    except ValueError:
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        return
+        
+    await state.update_data(points=pts)
+    await state.set_state(AddTemplateState.waiting_for_periodicity)
+    data = await state.get_data()
+    last_msg_id = data.get("last_msg_id")
+    
+    try:
+        await message.delete()
+    except Exception:
+        pass
+        
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="Home", callback_data="home_view"),
@@ -1166,55 +1275,24 @@ async def handle_add_tmpl_title(message: types.Message, state: FSMContext):
         InlineKeyboardButton(text="⚡Создать новую⚡", callback_data="noop")
     )
     builder.row(
-        InlineKeyboardButton(text="❌ Отмена", callback_data="add_tmpl_cancel")
-    )
-    await message.answer(
-        "Сколько печенек 🍪 за нее дадим?",
-        reply_markup=builder.as_markup(),
-        parse_mode=None
-    )
-
-
-@dp.message(StateFilter(AddTemplateState.waiting_for_points))
-async def handle_add_tmpl_points(message: types.Message, state: FSMContext):
-    try:
-        pts = int(message.text.strip())
-        if pts <= 0:
-            raise ValueError()
-    except ValueError:
-        await message.answer("Нужно число! Попробуйте еще раз:")
-        return
-    
-    await state.update_data(points=pts)
-    await state.set_state(AddTemplateState.waiting_for_periodicity)
-    
-    builder = InlineKeyboardBuilder()
-    # Row 1 (Main Tabs)
-    builder.row(
-        InlineKeyboardButton(text="⚡🏠 Home⚡", callback_data="home_view"),
-        InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
-        InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
-    )
-    # Row 2 (Sub-tabs)
-    builder.row(
-        InlineKeyboardButton(text="➕ Добавить", callback_data="chores_add_menu"),
-        InlineKeyboardButton(text="⚙️ Настройки", callback_data="chores_settings")
-    )
-    # Row 3 (Add options — Создать новую active)
-    builder.row(
-        InlineKeyboardButton(text="Добавить из базы", callback_data="add_from_templates_list"),
-        InlineKeyboardButton(text="⚡Создать новую⚡", callback_data="noop")
-    )
-    # Row 4 (Periodicity selection)
-    builder.row(
         InlineKeyboardButton(text="Единоразово", callback_data="set_tmpl_period:once"),
         InlineKeyboardButton(text="Каждые X дней", callback_data="set_tmpl_period:every_x_days")
     )
     
-    await message.answer(
-        "Отлично! Как часто это делаем? 📅",
-        reply_markup=builder.as_markup()
-    )
+    if last_msg_id:
+        await message.bot.edit_message_text(
+            chat_id=message.chat.id,
+            message_id=last_msg_id,
+            text="Отлично! Как часто это делаем? 📅",
+            reply_markup=builder.as_markup()
+        )
+    else:
+        sent_msg = await message.answer(
+            "Отлично! Как часто это делаем? 📅",
+            reply_markup=builder.as_markup(),
+            parse_mode=None
+        )
+        await state.update_data(last_msg_id=sent_msg.message_id)
 
 
 @dp.callback_query(StateFilter(AddTemplateState.waiting_for_periodicity), F.data.startswith("set_tmpl_period:"))
@@ -1300,79 +1378,55 @@ async def handle_add_tmpl_periodicity(call: types.CallbackQuery, state: FSMConte
 @dp.message(StateFilter(AddTemplateState.waiting_for_period_days))
 async def handle_add_tmpl_period_days(message: types.Message, state: FSMContext, db_user: User = None):
     try:
-        p_days = int(message.text.strip())
-        if p_days <= 0:
+        days = int(message.text.strip())
+        if days <= 0:
             raise ValueError()
     except ValueError:
-        await message.answer("Пожалуйста, введите корректное число дней!")
+        try:
+            await message.delete()
+        except Exception:
+            pass
         return
         
     data = await state.get_data()
     title = data["title"]
-    pts = data["points"]
+    points = data["points"]
+    last_msg_id = data.get("last_msg_id")
     
-    import json
     async with AsyncSessionLocal() as session:
-        partner = await get_partner_user(session, db_user.id)
-        if partner:
-            pending = PendingAction(
-                house_id=ACTIVE_HOUSE_ID,
-                initiator_id=db_user.id,
-                action_type="create_template",
-                data_payload=json.dumps({
-                    "title": title,
-                    "points": pts,
-                    "periodicity": "every_x_days",
-                    "period_days": p_days
-                })
-            )
-            session.add(pending)
-            await session.commit()
-            
-            partner_text = (
-                f"🔔 *Согласование новой задачи!*\n\n"
-                f"Жилец *{db_user.display_name or db_user.username or 'Партнёр'}* хочет добавить домашнюю задачу:\n"
-                f"📋 *Название:* {title}\n"
-                f"🍪 *Награда:* {pts} печенек\n"
-                f"📅 *Цикл:* каждые {p_days} дней\n\n"
-                f"Одобряете добавление?"
-            )
-            builder = InlineKeyboardBuilder()
-            builder.row(
-                InlineKeyboardButton(text="✅ Одобрить", callback_data=f"approve_act:{pending.id}"),
-                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_act:{pending.id}")
-            )
-            try:
-                await bot.send_message(chat_id=partner.telegram_id, text=partner_text, reply_markup=builder.as_markup(), parse_mode="Markdown")
-            except Exception as e:
-                logger.error(f"Failed to send approval message to partner: {e}")
-            await state.clear()
-            await message.answer(f"⏳ Задача «{title}» отправлена на согласование партнёру.")
-        else:
-            tmpl = TaskTemplate(
-                house_id=ACTIVE_HOUSE_ID,
-                title=title,
-                points=pts,
-                periodicity="every_x_days",
-                period_days=p_days,
-                deleted=False
-            )
-            session.add(tmpl)
-            await session.flush()
-            
-            inst = TaskInstance(
-                template_id=tmpl.id,
-                date=await get_house_today_date(session),
-                status="free",
-                priority=0
-            )
-            session.add(inst)
-            await session.commit()
-            
-            await state.clear()
-            await message.answer(f"✅ Шаблон успешно добавлен: *{title}*!")
-            await render_chores_settings(message, db_user, is_callback=False)
-
+        tmpl = TaskTemplate(
+            house_id=ACTIVE_HOUSE_ID,
+            title=title,
+            points=points,
+            periodicity="every_x_days",
+            period_days=days,
+            start_date=await get_house_today_date(session),
+            is_active=True,
+            deleted=False
+        )
+        session.add(tmpl)
+        await session.flush()
+        
+        inst = TaskInstance(
+            template_id=tmpl.id,
+            date=await get_house_today_date(session),
+            status="free",
+            priority=0
+        )
+        session.add(inst)
+        await session.commit()
+        
+    try:
+        await message.delete()
+    except Exception:
+        pass
+        
+    await state.clear()
+    if last_msg_id:
+        message.message_id = last_msg_id
+        await render_chores_settings(message, db_user, is_callback=True)
+    else:
+        await render_chores_settings(message, db_user, is_callback=False)
 
 
 @dp.callback_query(F.data.startswith("done_chore_inst:"))

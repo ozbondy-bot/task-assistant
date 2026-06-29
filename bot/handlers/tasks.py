@@ -36,32 +36,23 @@ async def t_cancel(call: types.CallbackQuery, db_user: User = None):
     await render_today(call.message, db_user, True, page=0)
 
 
-@dp.callback_query(F.data.startswith("my_add"))
-async def handle_my_add(call: types.CallbackQuery, state: FSMContext, db_user: User = None):
-    parts = call.data.split(":")
-    page = int(parts[1]) if len(parts) > 1 else 0
-    await state.clear()
+@dp.callback_query(F.data == "add_personal_task")
+async def handle_my_add(call: types.CallbackQuery, state: FSMContext):
     await state.set_state(AddPersonalTaskState.waiting_for_text)
-    await state.update_data(page=page)
-    
     builder = InlineKeyboardBuilder()
-    # Row 1 (Main Tabs)
     builder.row(
         InlineKeyboardButton(text="🏠 Home", callback_data="home_view"),
-        InlineKeyboardButton(text="⚡📋 My⚡", callback_data="noop"),
+        InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
         InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
     )
-    # Row 2 (Cancel)
-    builder.row(
-        InlineKeyboardButton(text="❌ Отмена", callback_data=f"my_add_cancel:{page}")
-    )
-    await call.message.edit_text(
-        "✏️ <b>Новая личная задача</b>:\n\n"
+    sent_msg = await call.message.edit_text(
+        "✍️ <b>Новая личная задача</b>:\n\n"
         "Введите текст задачи (например: Купить хлеб).\n"
         "Если задача срочная, напишите слово <b>«срочно»</b>.",
         reply_markup=builder.as_markup(),
         parse_mode="HTML"
     )
+    await state.update_data(last_msg_id=sent_msg.message_id)
 
 
 @dp.callback_query(F.data.startswith("my_add_cancel"))
@@ -76,47 +67,64 @@ async def handle_my_add_cancel(call: types.CallbackQuery, state: FSMContext, db_
 async def handle_my_add_text(message: types.Message, state: FSMContext, db_user: User = None):
     text = message.text.strip()
     if not text:
-        await message.answer("Название не может быть пустым. Попробуйте еще раз:")
+        try:
+            await message.delete()
+        except Exception:
+            pass
         return
         
-    state_data = await state.get_data()
-    page = state_data.get("page", 0)
-    
     import re
     is_urgent = "срочно" in text.lower()
-    clean_text = re.sub(r'срочно', '', text, flags=re.IGNORECASE).strip().capitalize()
-    
-    db_text = f"🔴 {clean_text}" if is_urgent else clean_text
-    
-    await state.update_data(text=db_text)
+    clean_txt = text
+    if is_urgent:
+        clean_txt = re.sub(r'(?i)\s*\bсрочно\b\s*', ' ', text).strip()
+        clean_txt = f"🔴 {clean_txt}"
+        
+    await state.update_data(text=clean_txt)
     await state.set_state(AddPersonalTaskState.waiting_for_date)
     
-    async with AsyncSessionLocal() as session:
-        today = await get_house_today_date(session)
+    data = await state.get_data()
+    last_msg_id = data.get("last_msg_id")
+    
+    try:
+        await message.delete()
+    except Exception:
+        pass
         
-    days_ru = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
-    d_today = today
-    d_tomorrow = today + timedelta(days=1)
-
+    from datetime import datetime, timedelta
+    d_today = datetime.now().date()
+    d_tomorrow = d_today + timedelta(days=1)
+    
     builder = InlineKeyboardBuilder()
-    # Nav Row 1
     builder.row(
         InlineKeyboardButton(text="🏠 Home", callback_data="home_view"),
-        InlineKeyboardButton(text="⚡📋 My⚡", callback_data="noop"),
+        InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
         InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
     )
+    days_ru = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
     builder.row(
         InlineKeyboardButton(text=f"{d_today.strftime('%d.%m')} ({days_ru[d_today.weekday()]})", callback_data="addpt_date:today"),
         InlineKeyboardButton(text=f"{d_tomorrow.strftime('%d.%m')} ({days_ru[d_tomorrow.weekday()]})", callback_data="addpt_date:tomorrow"),
         InlineKeyboardButton(text="Другая дата", callback_data="addpt_date:calendar")
     )
-
     
-    await message.answer(
-        f"📅 <b>Выберите дату выполнения</b> для задачи «{db_text}»:",
-        reply_markup=builder.as_markup(),
-        parse_mode="HTML"
-    )
+    text_label = f"📅 <b>Выберите дату выполнения</b> для задачи «{clean_txt}»:"
+    
+    if last_msg_id:
+        await message.bot.edit_message_text(
+            chat_id=message.chat.id,
+            message_id=last_msg_id,
+            text=text_label,
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML"
+        )
+    else:
+        sent_msg = await message.answer(
+            text_label,
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML"
+        )
+        await state.update_data(last_msg_id=sent_msg.message_id)
 
 
 @dp.callback_query(StateFilter(AddPersonalTaskState.waiting_for_date), F.data.startswith("addpt_date:"))
@@ -223,20 +231,16 @@ async def handle_addpt_period(call: types.CallbackQuery, state: FSMContext, db_u
     else:
         await state.set_state(AddPersonalTaskState.waiting_for_recurrence_days)
         builder = InlineKeyboardBuilder()
-        # Row 1 (Main Tabs)
         builder.row(
             InlineKeyboardButton(text="🏠 Home", callback_data="home_view"),
-            InlineKeyboardButton(text="⚡📋 My⚡", callback_data="noop"),
+            InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
             InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
         )
-        # Row 2 (Cancel)
-        builder.row(
-            InlineKeyboardButton(text="❌ Отмена", callback_data=f"my_add_cancel:{page}")
-        )
-        await call.message.edit_text(
+        sent_msg = await call.message.edit_text(
             "Укажите число дней, с каким интервалом повторять задачу (например, 5):",
             reply_markup=builder.as_markup()
         )
+        await state.update_data(last_msg_id=sent_msg.message_id)
 
 
 @dp.message(StateFilter(AddPersonalTaskState.waiting_for_recurrence_days))
@@ -247,13 +251,18 @@ async def handle_addpt_recurrence_days(message: types.Message, state: FSMContext
         if days <= 0:
             raise ValueError()
     except ValueError:
-        await message.answer("Нужно положительное число дней! Попробуйте еще раз:")
+        try:
+            await message.delete()
+        except Exception:
+            pass
         return
         
     state_data = await state.get_data()
     page = state_data.get("page", 0)
     text = state_data.get("text")
     date_str = state_data.get("date")
+    last_msg_id = state_data.get("last_msg_id")
+    from datetime import datetime
     exec_date = datetime.strptime(date_str, "%Y-%m-%d").date()
     
     async with AsyncSessionLocal() as session:
@@ -269,13 +278,20 @@ async def handle_addpt_recurrence_days(message: types.Message, state: FSMContext
         session.add(task)
         await session.commit()
         
+    try:
+        await message.delete()
+    except Exception:
+        pass
+        
     await state.clear()
-    await message.answer(f"✅ Добавил повторяющуюся задачу: *{text}* (каждые {days} дн.)", parse_mode="Markdown")
-    await render_today(message, db_user, is_callback=False, page=page)
+    
+    if last_msg_id:
+        message.message_id = last_msg_id
+        await render_today(message, db_user, is_callback=True, page=page)
+    else:
+        await render_today(message, db_user, is_callback=False, page=page)
 
 
-
-# Reschedule select menu
 @dp.callback_query(F.data.startswith("my_shift_select"))
 async def handle_my_shift_select(call: types.CallbackQuery, db_user: User = None):
     parts = call.data.split(":")
