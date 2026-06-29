@@ -269,6 +269,9 @@ async def handle_rollback_task(call: types.CallbackQuery, db_user: User = None):
     parts = call.data.split(":")
     pt_id = int(parts[1])
     page = int(parts[2])
+    if page > 0:
+        await call.answer("⚠️ Отмена прошлых задач недоступна. Возврат возможен только для сегодняшних задач.", show_alert=True)
+        return
     async with AsyncSessionLocal() as session:
         pt = await session.get(PersonalTask, pt_id)
         if pt:
@@ -289,39 +292,9 @@ async def handle_rollback_chore(call: types.CallbackQuery, db_user: User = None)
     parts = call.data.split(":")
     comp_id = int(parts[1])
     page = int(parts[2])
-    async with AsyncSessionLocal() as session:
-        comp = await session.get(Completion, comp_id)
-        if comp:
-            user = await session.get(User, comp.user_id)
-            inst = await session.get(TaskInstance, comp.task_instance_id)
-            tmpl = await session.get(TaskTemplate, inst.template_id) if inst else None
-            
-            # Revert points
-            if user:
-                user.points = max(0, (user.points or 0) - comp.points)
-                
-            # Revert chore status to in_progress assigned to the user
-            if inst:
-                inst.status = "in_progress"
-                inst.done_by_user_id = comp.user_id
-                inst.done_at = None
-                
-            await session.delete(comp)
-            await session.commit()
-            
-            title = tmpl.title if tmpl else "Домашнее дело"
-            await call.answer(f"🔄 Восстановлено в Мои дела: {title}. Списано {comp.points} 🍪", show_alert=False)
-        else:
-            await call.answer("⚠️ Выполнение не найдено!", show_alert=False)
-            
-    await handle_stat_arch(call, db_user)
-
-
-@dp.callback_query(F.data.startswith("rollback_chore:"))
-async def handle_rollback_chore(call: types.CallbackQuery, db_user: User = None):
-    parts = call.data.split(":")
-    comp_id = int(parts[1])
-    page = int(parts[2])
+    if page > 0:
+        await call.answer("⚠️ Отмена прошлых задач недоступна. Возврат возможен только для сегодняшних задач.", show_alert=True)
+        return
     async with AsyncSessionLocal() as session:
         comp = await session.get(Completion, comp_id)
         if comp:

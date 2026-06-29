@@ -457,10 +457,19 @@ async def restore_shop(call: types.CallbackQuery, db_user: User = None):
 # ── Text/Voice input ──────────────────────────────────────────────────────────
 @dp.message(StateFilter(None), F.text)
 async def handle_any_text(message: types.Message, db_user: User = None, text_override: str = None):
+    # Ignore command starts and main menu buttons
+    text = message.text.strip()
+    menu_buttons = {
+        "🏠 Home", "🏠 Домашние дела",
+        "📋 My", "👤 My", "👤 Мои дела",
+        "📊 Stat", "🛍 Магазин и Покупки"
+    }
+    if text.startswith('/') or text in menu_buttons:
+        return
     await message.answer(
         "⚠️ Добавление покупок и задач обычным текстом отключено.\n\n"
-        "• Чтобы добавить покупку: перейдите в раздел *📊 Stat* $\rightarrow$ кнопка *Покупки* $\rightarrow$ кнопка *[ Добавить ]*.\n"
-        "• Чтобы добавить личную задачу: перейдите в раздел *📋 My* $\rightarrow$ кнопка *[ Добавить ]*.",
+        "• Чтобы добавить покупку: перейдите в раздел *📊 Stat* → кнопка *Покупки* → кнопка *[ Добавить ]*.\n"
+        "• Чтобы добавить личную задачу: перейдите в раздел *📋 My* → кнопка *[ Добавить ]*.",
         parse_mode="Markdown"
     )
 

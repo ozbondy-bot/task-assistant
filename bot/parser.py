@@ -211,7 +211,7 @@ async def get_ai_emoji(text: str) -> str:
 
 
 def clean_task_text(text: str) -> str:
-    """Remove status icons from task text and add custom category emoji if matching."""
+    """Remove status icons from task text (keeping urgency indicator if present)."""
     is_urgent = text.startswith("🔴")
     
     # Strip any status icons first
@@ -220,49 +220,6 @@ def clean_task_text(text: str) -> str:
         clean_text = clean_text.replace(marker, "")
     clean_text = clean_text.strip()
 
-    # If already starts with an emoji (excluding 🔴), do not prepend a new one
-    if re.match(r'^[\u2600-\u27BF\U0001f000-\U0001f9ff]', clean_text):
-        if is_urgent:
-            clean_text = f"🔴 {clean_text}"
-        return clean_text
-    
-    # Add custom category emoji
-    text_lower = clean_text.lower()
-    emoji = None
-    if "релокац" in text_lower or "самолет" in text_lower or "переезд" in text_lower:
-        emoji = "✈️"
-    elif "проектор" in text_lower or "фильм" in text_lower or "камер" in text_lower or "кино" in text_lower or "видео" in text_lower:
-        emoji = "📹"
-    elif "бабушк" in text_lower or "дедушк" in text_lower or "семь" in text_lower or "родствен" in text_lower or "маме" in text_lower or "папе" in text_lower or "сестре" in text_lower or "брату" in text_lower:
-        emoji = "👪"
-    elif "звон" in text_lower or "позвон" in text_lower or "созвон" in text_lower:
-        emoji = "📞"
-    elif "покуп" in text_lower or "купи" in text_lower or "шопинг" in text_lower or "магазин" in text_lower:
-        emoji = "🛒"
-    elif "врач" in text_lower or "доктор" in text_lower or "больниц" in text_lower or "клиник" in text_lower or "аптек" in text_lower or "лекарств" in text_lower or "здоров" in text_lower:
-        emoji = "🩺"
-    elif "спорт" in text_lower or "зал" in text_lower or "тренир" in text_lower or "фитнес" in text_lower or "бег" in text_lower or "йога" in text_lower:
-        emoji = "💪"
-    elif "уборк" in text_lower or "помыть" in text_lower or "чистк" in text_lower or "постир" in text_lower or "мыть" in text_lower or "протереть" in text_lower:
-        emoji = "🧹"
-    elif "цвет" in text_lower or "полив" in text_lower or "растен" in text_lower:
-        emoji = "🌱"
-    elif "кош" in text_lower or "кот" in text_lower:
-        emoji = "🐈"
-    elif "собак" in text_lower or "пес" in text_lower or "пёс" in text_lower or "гулять" in text_lower:
-        emoji = "🐕"
-    elif "работ" in text_lower or "офис" in text_lower or "комп" in text_lower or "програм" in text_lower or "код" in text_lower or "митинг" in text_lower:
-        emoji = "💻"
-    elif "деньг" in text_lower or "оплат" in text_lower or "счет" in text_lower or "кредит" in text_lower or "налог" in text_lower or "карт" in text_lower:
-        emoji = "💳"
-    elif "учеб" in text_lower or "курс" in text_lower or "книг" in text_lower or "лекци" in text_lower or "экзамен" in text_lower or "читать" in text_lower:
-        emoji = "📚"
-    elif "еда" in text_lower or "обед" in text_lower or "ужин" in text_lower or "завтр" in text_lower or "приготов" in text_lower or "готовка" in text_lower or "кушать" in text_lower:
-        emoji = "🍳"
-
-    if emoji:
-        clean_text = f"{emoji} {clean_text}"
-        
     if is_urgent:
         clean_text = f"🔴 {clean_text}"
         

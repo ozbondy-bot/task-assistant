@@ -61,32 +61,51 @@ def has_leading_emoji(text: str) -> bool:
 
 
 async def migrate_template_emojis():
-    """Strip leading emojis from all task template titles in DB."""
-    from db.models import AsyncSessionLocal, TaskTemplate
+    """Clean up and remove emojis from existing task templates and personal tasks in DB."""
+    from db.models import AsyncSessionLocal, TaskTemplate, PersonalTask
     from sqlalchemy import select
     import re
     
-    logger.info("Stripping emojis from template titles...")
+    logger.info("Cleaning up emojis from templates and personal tasks...")
+    
+    emoji_pattern = re.compile(
+        r'[🀀-\U0001fbfb\U0001fa00-\U0001faff\u2600-\u27bf\u2300-\u23ff\u2b50\u2b06\u2b55\u2b1b\u2b1c\u2934\u2935\u3297\u3299\ufe0f\u200d\u200e\u200f]+',
+        re.UNICODE
+    )
+    
     async with AsyncSessionLocal() as session:
+        # 1. Clean TaskTemplate titles
         result = await session.execute(select(TaskTemplate))
         templates = result.scalars().all()
-        updated_count = 0
-        emoji_pat = re.compile(
-            r'^[\U0001f000-\U0001f9ff\U00002600-\U000027BF\ufe0f\u200d]+[\s]*',
-            re.UNICODE
-        )
+        t_updated = 0
         for tmpl in templates:
-            stripped = emoji_pat.sub('', tmpl.title).strip()
-            if stripped != tmpl.title:
-                logger.info(f"Stripping emoji: '{tmpl.title}' -> '{stripped}'")
-                tmpl.title = stripped
-                updated_count += 1
-        if updated_count > 0:
+            cleaned = emoji_pattern.sub('', tmpl.title)
+            cleaned = re.compile(r'\s+').sub(' ', cleaned).strip()
+            if cleaned != tmpl.title:
+                logger.info(f"Stripping emoji template: '{tmpl.title}' -> '{cleaned}'")
+                tmpl.title = cleaned
+                t_updated += 1
+                
+        # 2. Clean PersonalTask texts (keep 🔴 if present)
+        pt_result = await session.execute(select(PersonalTask))
+        personal_tasks = pt_result.scalars().all()
+        pt_updated = 0
+        for pt in personal_tasks:
+            has_urgent = pt.text.startswith("🔴")
+            cleaned = emoji_pattern.sub('', pt.text)
+            cleaned = re.compile(r'\s+').sub(' ', cleaned).strip()
+            if has_urgent:
+                cleaned = f"🔴 {cleaned}"
+            if cleaned != pt.text:
+                logger.info(f"Stripping emoji personal task: '{pt.text}' -> '{cleaned}'")
+                pt.text = cleaned
+                pt_updated += 1
+                
+        if t_updated > 0 or pt_updated > 0:
             await session.commit()
-            logger.info(f"Stripped emojis from {updated_count} templates.")
+            logger.info(f"Successfully cleaned database: {t_updated} templates, {pt_updated} personal tasks.")
         else:
-            logger.info("No emoji stripping needed.")
-
+            logger.info("Database templates and tasks are already clean of emojis.")
 
 
 async def migrate_reward_prices_to_days():
