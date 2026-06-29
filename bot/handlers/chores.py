@@ -505,12 +505,19 @@ async def handle_te_title_input(message: types.Message, state: FSMContext, db_us
             except Exception as e:
                 logger.error(f"Failed to send approval message to partner: {e}")
             await state.clear()
-            
+            builder_nav = InlineKeyboardBuilder()
+            builder_nav.row(
+                InlineKeyboardButton(text="Home", callback_data="home_view"),
+                InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
+                InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
+            )
             if last_msg_id:
-                message.message_id = last_msg_id
-                await redirect_to_template_settings(message, tid, src, db_user, is_callback=True)
-            else:
-                await redirect_to_template_settings(message, tid, src, db_user, is_callback=False)
+                await message.bot.edit_message_text(
+                    chat_id=message.chat.id,
+                    message_id=last_msg_id,
+                    text=f"⏳ Запрос на переименование задачи в «{title}» отправлен партнёру.",
+                    reply_markup=builder_nav.as_markup()
+                )
         else:
             tmpl.title = title
             await session.commit()
@@ -606,11 +613,19 @@ async def handle_te_points_input(message: types.Message, state: FSMContext, db_u
             except Exception as e:
                 logger.error(f"Failed to send approval message to partner: {e}")
             await state.clear()
+            builder_nav = InlineKeyboardBuilder()
+            builder_nav.row(
+                InlineKeyboardButton(text="Home", callback_data="home_view"),
+                InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
+                InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
+            )
             if last_msg_id:
-                message.message_id = last_msg_id
-                await redirect_to_template_settings(message, tid, src, db_user, is_callback=True)
-            else:
-                await redirect_to_template_settings(message, tid, src, db_user, is_callback=False)
+                await message.bot.edit_message_text(
+                    chat_id=message.chat.id,
+                    message_id=last_msg_id,
+                    text=f"⏳ Запрос на изменение печенек задачи отправлен партнёру.",
+                    reply_markup=builder_nav.as_markup()
+                )
         else:
             tmpl.points = pts
             await session.commit()
@@ -695,7 +710,13 @@ async def handle_te_period_selected(call: types.CallbackQuery, state: FSMContext
                 except Exception as e:
                     logger.error(f"Failed to send approval message to partner: {e}")
                 await state.clear()
-                await call.message.edit_text(f"⏳ Запрос на изменение цикла задачи отправлен партнёру.")
+                builder_nav = InlineKeyboardBuilder()
+                builder_nav.row(
+                    InlineKeyboardButton(text="Home", callback_data="home_view"),
+                    InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
+                    InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
+                )
+                await call.message.edit_text(f"⏳ Запрос на изменение цикла задачи отправлен партнёру.", reply_markup=builder_nav.as_markup())
             else:
                 tmpl.periodicity = p
                 tmpl.period_days = 0 if p == "once" else 1
@@ -780,11 +801,19 @@ async def handle_te_period_days_input(message: types.Message, state: FSMContext,
             except Exception as e:
                 logger.error(f"Failed to send approval message to partner: {e}")
             await state.clear()
+            builder_nav = InlineKeyboardBuilder()
+            builder_nav.row(
+                InlineKeyboardButton(text="Home", callback_data="home_view"),
+                InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
+                InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
+            )
             if last_msg_id:
-                message.message_id = last_msg_id
-                await redirect_to_template_settings(message, tid, src, db_user, is_callback=True)
-            else:
-                await redirect_to_template_settings(message, tid, src, db_user, is_callback=False)
+                await message.bot.edit_message_text(
+                    chat_id=message.chat.id,
+                    message_id=last_msg_id,
+                    text=f"⏳ Запрос на изменение печенек задачи отправлен партнёру.",
+                    reply_markup=builder_nav.as_markup()
+                )
         else:
             tmpl.periodicity = "every_x_days"
             tmpl.period_days = days
@@ -1348,7 +1377,16 @@ async def handle_add_tmpl_periodicity(call: types.CallbackQuery, state: FSMConte
                 logger.error(f"Failed to send approval message to partner: {e}")
             await state.clear()
             await call.answer("⏳ Отправлено на согласование партнёру", show_alert=False)
-            await call.message.edit_text(f"⏳ Задача «{title}» отправлена на согласование партнёру.")
+            builder_nav = InlineKeyboardBuilder()
+            builder_nav.row(
+                InlineKeyboardButton(text="Home", callback_data="home_view"),
+                InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
+                InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
+            )
+            await call.message.edit_text(
+                f"⏳ Задача «{title}» отправлена на согласование партнёру.",
+                reply_markup=builder_nav.as_markup()
+            )
         else:
             tmpl = TaskTemplate(
                 house_id=ACTIVE_HOUSE_ID,

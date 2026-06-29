@@ -36,9 +36,14 @@ async def t_cancel(call: types.CallbackQuery, db_user: User = None):
     await render_today(call.message, db_user, True, page=0)
 
 
-@dp.callback_query(F.data == "add_personal_task")
-async def handle_my_add(call: types.CallbackQuery, state: FSMContext):
+@dp.callback_query(F.data.startswith("my_add"))
+async def handle_my_add(call: types.CallbackQuery, state: FSMContext, db_user: User = None):
+    parts = call.data.split(":")
+    page = int(parts[1]) if len(parts) > 1 else 0
+    await state.clear()
     await state.set_state(AddPersonalTaskState.waiting_for_text)
+    await state.update_data(page=page)
+    
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="🏠 Home", callback_data="home_view"),

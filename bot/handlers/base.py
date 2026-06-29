@@ -604,7 +604,11 @@ async def handle_ob_page(call: types.CallbackQuery, db_user: User = None):
         builder = InlineKeyboardBuilder()
         builder.row(InlineKeyboardButton(text="Далее ➡️", callback_data="ob_page:2"))
         await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
-        
+        try:
+            await call.message.bot.pin_chat_message(chat_id=call.message.chat.id, message_id=call.message.message_id)
+        except Exception as e:
+            logger.error(f"Failed to pin onboarding page 1: {e}")
+            
     elif page == 2:
         text = (
             "📋 <b>My (Мои дела)</b>\n"
@@ -622,7 +626,11 @@ async def handle_ob_page(call: types.CallbackQuery, db_user: User = None):
             InlineKeyboardButton(text="Далее ➡️", callback_data="ob_page:3")
         )
         await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
-        
+        try:
+            await call.message.bot.pin_chat_message(chat_id=call.message.chat.id, message_id=call.message.message_id)
+        except Exception as e:
+            logger.error(f"Failed to pin onboarding page 2: {e}")
+            
     elif page == 3:
         text = (
             "📊 <b>Stat (Магазин и Покупки)</b>\n"
@@ -635,15 +643,30 @@ async def handle_ob_page(call: types.CallbackQuery, db_user: User = None):
         builder = InlineKeyboardBuilder()
         builder.row(
             InlineKeyboardButton(text="⬅️ Назад", callback_data="ob_page:2"),
-            InlineKeyboardButton(text="Перейти к задачам", callback_data="home_view")
+            InlineKeyboardButton(text="Перейти к задачам", callback_data="ob_finish")
         )
         await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
-        # Pin onboarding on transition to page 3
         try:
             await call.message.bot.pin_chat_message(chat_id=call.message.chat.id, message_id=call.message.message_id)
-            logger.info("Pinned onboarding message on page 3 transition.")
         except Exception as e:
-            logger.error(f"Failed to pin onboarding message: {e}")
+            logger.error(f"Failed to pin onboarding page 3: {e}")
+
+
+@dp.callback_query(F.data == "ob_finish")
+async def handle_ob_finish(call: types.CallbackQuery, db_user: User = None):
+    try:
+        await call.message.bot.unpin_chat_message(chat_id=call.message.chat.id, message_id=call.message.message_id)
+    except Exception as e:
+        logger.error(f"Failed to unpin onboarding message: {e}")
+        
+    try:
+        await call.message.delete()
+    except Exception as e:
+        logger.error(f"Failed to delete onboarding message: {e}")
+        
+    from bot.handlers.chores import render_household_chores
+    await render_household_chores(call.message, db_user, is_callback=False)
+
 
 @dp.message(Command("id"))
 async def cmd_id(message: types.Message):
