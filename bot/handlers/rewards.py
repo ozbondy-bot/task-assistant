@@ -139,12 +139,16 @@ async def handle_shop_and_purchases_back(call: types.CallbackQuery, db_user: Use
 
 
 @dp.callback_query(F.data == "stats_view")
-async def handle_stats_view(call: types.CallbackQuery, db_user: User = None):
+async def handle_stats_view(call: types.CallbackQuery, state: FSMContext = None, db_user: User = None):
+    if state:
+        await state.clear()
     await render_shop_and_purchases(call.message, db_user, is_callback=True)
 
 
 @dp.callback_query(F.data.startswith("stat_arch:"))
-async def handle_stat_arch(call: types.CallbackQuery, db_user: User = None, _page: int = None):
+async def handle_stat_arch(call: types.CallbackQuery, state: FSMContext = None, db_user: User = None, _page: int = None):
+    if state:
+        await state.clear()
     if _page is not None:
         page = _page
     else:
@@ -186,7 +190,6 @@ async def handle_stat_arch(call: types.CallbackQuery, db_user: User = None, _pag
             )
         )
         pts_rows = pts_result.all()
-
     # Combine
     day_entries = []
     for comp, inst, tmpl, usr in chores_rows:
@@ -209,23 +212,16 @@ async def handle_stat_arch(call: types.CallbackQuery, db_user: User = None, _pag
         })
         
     day_entries.sort(key=lambda x: x["time"], reverse=True)
-
     # Header date label
     date_lbl = target_date.strftime("%d.%m")
-    # Get weekday
     def get_ru_weekday_abbr_local(d) -> str:
         abbrs = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
         return abbrs[d.weekday()]
     weekday_lbl = get_ru_weekday_abbr_local(target_date)
     
-    text = f"📜 *Архив выполненных задач* — {date_lbl} ({weekday_lbl}):\n\n"
-    if day_entries:
-        for e in day_entries:
-            pts_str = f" (+{e['points']}🍪)" if e['points'] > 0 else ""
-            text += f"• *[{e['time']}]* {e['user']}: {e['title']}{pts_str}\n"
-    else:
-        text += "В этот день никто ничего не выполнял."
-
+    text = f"📜 *Архив выполненных задач* — {date_lbl} ({weekday_lbl}):"
+    if not day_entries:
+        text += "\n\nВ этот день никто ничего не выполнял."
     builder = InlineKeyboardBuilder()
     
     # Row 1 (Main Tabs)
@@ -234,7 +230,6 @@ async def handle_stat_arch(call: types.CallbackQuery, db_user: User = None, _pag
         InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
         InlineKeyboardButton(text="⚡📊 Stat⚡", callback_data="noop")
     )
-    
     # Row 2 (Sub-tabs)
     builder.row(
         InlineKeyboardButton(text="🛍 Магазин", callback_data="rewards_shop_view"),
@@ -242,26 +237,33 @@ async def handle_stat_arch(call: types.CallbackQuery, db_user: User = None, _pag
         InlineKeyboardButton(text="⚡📜 Архив⚡", callback_data="noop")
     )
     
-    if page == 0:
-        for e in day_entries:
-            if e["type"] == "chore":
-                builder.row(InlineKeyboardButton(text=f"🔄 Отменить: {e['title']}", callback_data=f"rollback_chore:{e['id']}:{page}"))
-            else:
-                builder.row(InlineKeyboardButton(text=f"🔄 Отменить: {e['title']}", callback_data=f"rollback_task:{e['id']}:{page}"))
-
-    # Bottom pagination (3-button layout)
+    # Row 3 (Pagination)
     nav = []
     nav.append(InlineKeyboardButton(text="⏪", callback_data=f"stat_arch:{page+1}"))
-    
-    # Middle button shows date and weekday
     nav.append(InlineKeyboardButton(text=f"{date_lbl} ({weekday_lbl})", callback_data="noop"))
-    
     if page > 0:
         nav.append(InlineKeyboardButton(text="⏩", callback_data=f"stat_arch:{page-1}"))
     else:
         nav.append(InlineKeyboardButton(text=" ", callback_data="noop"))
-        
     builder.row(*nav)
+    
+    # Row 4+ (Completed chores/tasks matching My layout)
+    for e in day_entries:
+        pts_str = "2-8" if e["title"] == "Готовка" else str(e["points"])
+        pts_suffix = f" (+{pts_str}🍪)" if e["points"] > 0 else ""
+        left_text = f"{e['user']}: {e['title']}"
+        right_text = f"{e['time']}{pts_suffix}"
+        
+        if page == 0:
+            cb_data = f"rollback_chore:{e['id']}:{page}" if e["type"] == "chore" else f"rollback_task:{e['id']}:{page}"
+        else:
+            cb_data = "noop"
+            
+        builder.row(
+            InlineKeyboardButton(text=left_text, callback_data=cb_data),
+            InlineKeyboardButton(text=right_text, callback_data="noop")
+        )
+        
     await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
 
 
@@ -358,8 +360,8 @@ async def render_rewards_settings(message: types.Message, db_user: User, is_call
     
     # Row 2 (Sub-tabs)
     builder.row(
-        InlineKeyboardButton(text="⚡🛑 Магазин⚡", callback_data="noop"),
-        InlineKeyboardButton(text="🛒 Покупки", callback_data="shop_view_items"),
+        InlineKeyboardButton(text="🛍 Магазин", callback_data="rewards_shop_view"),
+        InlineKeyboardButton(text="⚡🛒 Покупки⚡", callback_data="noop"),
         InlineKeyboardButton(text="📜 Архив", callback_data="stat_arch:0")
     )
     
@@ -377,7 +379,9 @@ async def render_rewards_settings(message: types.Message, db_user: User, is_call
 
 
 @dp.callback_query(F.data == "rewards_shop_view")
-async def handle_rewards_shop_view(call: types.CallbackQuery, db_user: User = None):
+async def handle_rewards_shop_view(call: types.CallbackQuery, state: FSMContext = None, db_user: User = None):
+    if state:
+        await state.clear()
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(Reward).where(Reward.house_id == ACTIVE_HOUSE_ID).order_by(Reward.price)

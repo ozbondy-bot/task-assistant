@@ -100,7 +100,9 @@ async def handle_household_chores_btn(message: types.Message, db_user: User = No
 
 
 @dp.callback_query(F.data == "home_view")
-async def handle_home_view(call: types.CallbackQuery, db_user: User = None):
+async def handle_home_view(call: types.CallbackQuery, state: FSMContext = None, db_user: User = None):
+    if state:
+        await state.clear()
     await render_household_chores(call.message, db_user, is_callback=True)
 
 
@@ -125,6 +127,7 @@ async def handle_chores_add_menu(call: types.CallbackQuery, db_user: User = None
         InlineKeyboardButton(text="⚙️ Настройки", callback_data="chores_settings")
     )
     
+    # Row 3 (Add options — always persisted)
     builder.row(
         InlineKeyboardButton(text="Добавить из базы", callback_data="add_from_templates_list"),
         InlineKeyboardButton(text="Создать новую", callback_data="add_tmpl_start")
@@ -181,6 +184,11 @@ async def handle_add_from_templates_list(call: types.CallbackQuery, db_user: Use
         builder.row(
             InlineKeyboardButton(text="⚡➕ Добавить⚡", callback_data="noop"),
             InlineKeyboardButton(text="⚙️ Настройки", callback_data="chores_settings")
+        )
+        # Row 3 (Add options — Добавить из базы active)
+        builder.row(
+            InlineKeyboardButton(text="⚡Добавить из базы⚡", callback_data="noop"),
+            InlineKeyboardButton(text="Создать новую", callback_data="add_tmpl_start")
         )
         if tmpl_with_dates:
             text = "📋 *Выберите задачу для добавления на сегодня:*"
@@ -1119,6 +1127,12 @@ async def handle_add_tmpl_points(message: types.Message, state: FSMContext):
         InlineKeyboardButton(text="➕ Добавить", callback_data="chores_add_menu"),
         InlineKeyboardButton(text="⚙️ Настройки", callback_data="chores_settings")
     )
+    # Row 3 (Add options — Создать новую active)
+    builder.row(
+        InlineKeyboardButton(text="Добавить из базы", callback_data="add_from_templates_list"),
+        InlineKeyboardButton(text="⚡Создать новую⚡", callback_data="noop")
+    )
+    # Row 4 (Periodicity selection)
     builder.row(
         InlineKeyboardButton(text="Единоразово", callback_data="set_tmpl_period:once"),
         InlineKeyboardButton(text="Каждые X дней", callback_data="set_tmpl_period:every_x_days")

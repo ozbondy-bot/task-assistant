@@ -594,14 +594,12 @@ async def handle_ob_page(call: types.CallbackQuery, db_user: User = None):
     if page == 1:
         text = (
             f"👋 Привет, <b>{name}</b>!\n\n"
-            "Я — твой семейный помощник для управления делами и покупками. 🍪🏠\n\n"
-            "Вот как устроен наш функционал:\n\n"
+            "Я помогу навести порядок в домашних и личных делах. 🍪🏠\n\n"
+            "Вот как всё устроено:\n\n"
             "🏠 <b>Home (Домашние дела)</b>\n"
-            "• Здесь собраны все общие дела по дому на сегодня.\n"
-            "• Любой жилец может нажать на задачу, чтобы взять её в работу (она перейдет во вкладку 📋 My).\n"
-            "• Внизу есть кнопки:\n"
-            "  - <code>➕ Добавить</code> — чтобы внести новую задачу или добавить из базы.\n"
-            "  - <code>⚙️ Настройки</code> — управление шаблонами и баллами задач.\n"
+            "• Это список общих домашних дел на сегодня.\n"
+            "• Любой жилец может нажать на задачу и взять её себе. Она перенесётся во вкладку 📋 My.\n"
+            "• Кнопка <code>➕ Добавить</code> позволяет быстро создать новое дело или выбрать задачу из готовой базы.\n"
         )
         builder = InlineKeyboardBuilder()
         builder.row(InlineKeyboardButton(text="Далее ➡️", callback_data="ob_page:2"))
@@ -610,15 +608,13 @@ async def handle_ob_page(call: types.CallbackQuery, db_user: User = None):
     elif page == 2:
         text = (
             "📋 <b>My (Мои дела)</b>\n"
-            "• Твоя рабочая зона. Здесь находятся:\n"
+            "• Твой личный рабочий список на день.\n"
+            "• Сюда попадают:\n"
             "  - Взятые тобой домашние дела (со смайликом 🏠).\n"
-            "  - Твои личные задачи 👤.\n"
+            "  - Твои личные задачи 👤 (создаются по кнопке <code>➕ Добавить</code> прямо в этой вкладке).\n"
             "  - Список покупок 🛒.\n"
-            "• Нажми на взятое домашнее дело или личную задачу здесь, чтобы отметить их как выполненные (за общие дела начисляются печеньки 🍪!).\n"
-            "• 🟡 Желтый кружок означает просроченные дела с прошлых дней.\n"
-            "• 🔴 Красный кружок — срочные задачи.\n"
-            "• Кнопка управления:\n"
-            "  - <code>Добавить</code> — создать новую личную задачу.\n"
+            "• Нажми на выполненное дело здесь, чтобы закрыть его и получить печеньки 🍪!\n"
+            "• Просроченные задачи отмечены желтым кружком 🟡, а срочные — красным 🔴.\n"
         )
         builder = InlineKeyboardBuilder()
         builder.row(
@@ -630,16 +626,11 @@ async def handle_ob_page(call: types.CallbackQuery, db_user: User = None):
     elif page == 3:
         text = (
             "📊 <b>Stat (Магазин и Покупки)</b>\n"
-            "• Показывает баланс печенек участников дома.\n"
-            "• Кнопки:\n"
-            "  - <code>Магазин</code> — трать заработанные печеньки 🍪 на награды!\n"
-            "  - <code>Покупки</code> — твой список покупок (продукты, вещи).\n"
-            "  - <code>Архив</code> — история выполненных дел по дням.\n\n"
-            "🛍 <b>Магазин наград</b>\n"
-            "• Стоимость наград рассчитывается автоматически в днях!\n"
-            "• Бот берет количество заработанных печенек 🍪 домом за последние 30 дней и делит их на количество участников и дней.\n"
-            "• Например, если зарабатывать в среднем 15 🍪 в день, награда «Фильм на вечер» (ценой в 2 дня) будет стоить 30 🍪.\n\n"
-            "Зарабатывайте печеньки и радуйте друг друга наградами! 🎉"
+            "• Твой баланс печенек и статистика дома.\n"
+            "• 🛍 <b>Магазин:</b> обменивай заработанные печеньки 🍪 на награды! Цены наград рассчитываются автоматически в днях, исходя из вашей активности за последние 30 дней.\n"
+            "• 🛒 <b>Покупки:</b> общий список покупок (продукты, бытовая химия и т.д.).\n"
+            "• 📜 <b>Архив:</b> история всех выполненных дел по дням.\n\n"
+            "Давайте делать дом уютнее вместе! 🎉"
         )
         builder = InlineKeyboardBuilder()
         builder.row(
@@ -771,10 +762,10 @@ async def render_today(message: types.Message, db_user: User, is_callback=False,
         # Emoji: 🔴 for urgent, 🔁 for recurring, otherwise 👤
         emoji = "🔴" if is_urgent else ("🔁" if t.recurrence else "👤")
         
-        # Circle if overdue/shifted
-        circle = "🟡 " if t_date < today else ""
+        # Circle if overdue/shifted (disabled as per request)
+        circle = ""
         
-        right_text = f"{circle}{date_str} {emoji} ℹ️"
+        right_text = f"{date_str} {emoji} ℹ️"
             
         builder.row(
             InlineKeyboardButton(text=clean, callback_data=f"done_task:{t.id}:{page}"),
@@ -787,13 +778,13 @@ async def render_today(message: types.Message, db_user: User, is_callback=False,
         c_date = inst.date
         date_str = c_date.strftime('%d.%m.')
         
-        # Circle if overdue
-        circle = "🟡 " if c_date < today else ""
+        # Circle if overdue (disabled as per request)
+        circle = ""
         
-        right_text = f"{circle}{date_str} 🏠 {pts_str}🍪 ℹ️"
+        right_text = f"🏠 {date_str} {pts_str}🍪 ℹ️"
             
         builder.row(
-            InlineKeyboardButton(text=f"🏠 {tmpl.title}", callback_data=f"done_chore_inst:{inst.id}:{page}"),
+            InlineKeyboardButton(text=tmpl.title, callback_data=f"done_chore_inst:{inst.id}:{page}"),
             InlineKeyboardButton(text=right_text, callback_data=f"my_chore_info:{inst.id}:{page}")
         )
 

@@ -228,7 +228,9 @@ async def handle_reject_reward(call: types.CallbackQuery, db_user: User = None):
 
 
 @dp.callback_query(F.data == "shop_view_items")
-async def shop_view_items_handler(call: types.CallbackQuery, db_user: User = None):
+async def shop_view_items_handler(call: types.CallbackQuery, state: FSMContext = None, db_user: User = None):
+    if state:
+        await state.clear()
     await render_shop(call.message, db_user, True)
 
 

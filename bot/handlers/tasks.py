@@ -24,8 +24,10 @@ async def today_handler(m: types.Message, db_user: User = None):
 
 
 @dp.callback_query(F.data.startswith("my_page:"))
-async def handle_my_page(call: types.CallbackQuery, db_user: User = None):
+async def handle_my_page(call: types.CallbackQuery, state: FSMContext = None, db_user: User = None):
     page = int(call.data.split(":")[1])
+    if state:
+        await state.clear()
     await render_today(call.message, db_user, is_callback=True, page=page)
 
 
@@ -42,11 +44,22 @@ async def handle_my_add(call: types.CallbackQuery, state: FSMContext, db_user: U
     await state.set_state(AddPersonalTaskState.waiting_for_text)
     await state.update_data(page=page)
     
+    builder = InlineKeyboardBuilder()
+    # Row 1 (Main Tabs)
+    builder.row(
+        InlineKeyboardButton(text="🏠 Home", callback_data="home_view"),
+        InlineKeyboardButton(text="⚡📋 My⚡", callback_data="noop"),
+        InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
+    )
+    # Row 2 (Cancel)
+    builder.row(
+        InlineKeyboardButton(text="❌ Отмена", callback_data=f"my_add_cancel:{page}")
+    )
     await call.message.edit_text(
         "✏️ <b>Новая личная задача</b>:\n\n"
         "Введите текст задачи (например: Купить хлеб).\n"
         "Если задача срочная, напишите слово <b>«срочно»</b>.",
-        reply_markup=None,
+        reply_markup=builder.as_markup(),
         parse_mode="HTML"
     )
 
@@ -209,9 +222,20 @@ async def handle_addpt_period(call: types.CallbackQuery, state: FSMContext, db_u
         await render_today(call.message, db_user, is_callback=True, page=page)
     else:
         await state.set_state(AddPersonalTaskState.waiting_for_recurrence_days)
+        builder = InlineKeyboardBuilder()
+        # Row 1 (Main Tabs)
+        builder.row(
+            InlineKeyboardButton(text="🏠 Home", callback_data="home_view"),
+            InlineKeyboardButton(text="⚡📋 My⚡", callback_data="noop"),
+            InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
+        )
+        # Row 2 (Cancel)
+        builder.row(
+            InlineKeyboardButton(text="❌ Отмена", callback_data=f"my_add_cancel:{page}")
+        )
         await call.message.edit_text(
             "Укажите число дней, с каким интервалом повторять задачу (например, 5):",
-            reply_markup=None
+            reply_markup=builder.as_markup()
         )
 
 
