@@ -561,71 +561,32 @@ async def cmd_start(message: types.Message, db_user: User = None):
         "👋 Привет!\n\n"
         "Вот как у нас всё устроено:\n\n"
         "1. 🏠 <b>Home (Домашние дела)</b>\n"
-        "Бери дела в работу нажатием на задачу, создавай совершенно новые задачи или добавляй их из готовой базы.\n\n"
+        "Бери дела в работу нажатием на задачу, создавай новые задачи или добавляй их из готовой базы.\n\n"
         "2. 📋 <b>My (Мои дела)</b>\n"
-        "Твой личный список дел на сегодня. Выполняй взятые домашние дела, веди свои личные задачи и просматривай список покупок. Нажми на дело, чтобы закрыть его и заработать печеньки 🍪!"
+        "Твой личный список дел на сегодня. Выполняй взятые домашние дела, веди свои личные задачи и список покупок. Выполнил — жми на задачу, чтобы получить печеньки 🍪!\n\n"
+        "3. 📊 <b>Stat (Магазин и Покупки)</b>\n"
+        "Копи печеньки и обменивай их в Магазине 🛍 на награды, веди список покупок 🛒 и смотри историю дел в Архиве 📜."
     )
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="Далее ➡️", callback_data="ob_page:2"))
+    builder.row(InlineKeyboardButton(text="К задачам", callback_data="ob_finish"))
     sent_msg = await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
     try:
         await message.bot.pin_chat_message(chat_id=message.chat.id, message_id=sent_msg.message_id)
-        logger.info("Pinned initial onboarding page 1 message.")
+        logger.info("Pinned onboarding message.")
     except Exception as e:
-        logger.error(f"Failed to pin initial onboarding page 1: {e}")
+        logger.error(f"Failed to pin onboarding: {e}")
 
 
 @dp.callback_query(F.data.startswith("ob_page:"))
 async def handle_ob_page(call: types.CallbackQuery, db_user: User = None):
-    page = int(call.data.split(":")[1])
-    
-    if page == 1:
-        text = (
-            "👋 Привет!\n\n"
-            "Вот как у нас всё устроено:\n\n"
-            "1. 🏠 <b>Home (Домашние дела)</b>\n"
-            "Бери дела в работу нажатием на задачу, создавай совершенно новые задачи или добавляй их из готовой базы.\n\n"
-            "2. 📋 <b>My (Мои дела)</b>\n"
-            "Твой личный список дел на сегодня. Выполняй взятые домашние дела, веди свои личные задачи и просматривай список покупок. Нажми на дело, чтобы закрыть его и заработать печеньки 🍪!"
-        )
-        builder = InlineKeyboardBuilder()
-        builder.row(InlineKeyboardButton(text="Далее ➡️", callback_data="ob_page:2"))
-        await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
-        try:
-            await call.message.bot.pin_chat_message(chat_id=call.message.chat.id, message_id=call.message.message_id)
-        except Exception as e:
-            logger.error(f"Failed to pin onboarding page 1: {e}")
-            
-    elif page == 2:
-        text = (
-            "3. 📊 <b>Stat (Магазин и Покупки)</b>\n"
-            "Копи печеньки и обменивай их в Магазине 🛍 на классные награды, веди список покупок 🛒 и просматривай историю выполненных дел в Архиве 📜.\n\n"
-            "Давайте делать дом уютнее вместе! 🎉"
-        )
-        builder = InlineKeyboardBuilder()
-        builder.row(
-            InlineKeyboardButton(text="⬅️ Назад", callback_data="ob_page:1"),
-            InlineKeyboardButton(text="К задачам", callback_data="ob_finish")
-        )
-        await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
-        try:
-            await call.message.bot.pin_chat_message(chat_id=call.message.chat.id, message_id=call.message.message_id)
-        except Exception as e:
-            logger.error(f"Failed to pin onboarding page 2: {e}")
+    # No-op as we now have single page onboarding
+    await call.answer()
 
 
 @dp.callback_query(F.data == "ob_finish")
 async def handle_ob_finish(call: types.CallbackQuery, db_user: User = None):
-    try:
-        await call.message.bot.unpin_chat_message(chat_id=call.message.chat.id, message_id=call.message.message_id)
-    except Exception as e:
-        logger.error(f"Failed to unpin onboarding message: {e}")
-        
-    try:
-        await call.message.delete()
-    except Exception as e:
-        logger.error(f"Failed to delete onboarding message: {e}")
-        
+    # We do NOT unpin or delete the onboarding message now (it persists).
+    # We just send a new message with the tasks.
     from bot.handlers.chores import render_household_chores
     await render_household_chores(call.message, db_user, is_callback=False)
 
@@ -726,7 +687,7 @@ async def render_today(message: types.Message, db_user: User, is_callback=False,
         my_chores = [(inst, tmpl) for inst, tmpl in my_chores_all if inst.date == target_date]
         info_title = "📋 Мои дела:"
 
-    text = "📋 *Список моих дел:*"
+    text = "\u2800"
 
     builder = InlineKeyboardBuilder()
     

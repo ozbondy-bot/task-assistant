@@ -54,7 +54,7 @@ async def render_shop(message: types.Message, db_user: User, is_callback=False):
         random.setstate(state)
         return e
 
-    text = "🛒 *Список покупок:*"
+    text = "\u2800"
 
     builder = InlineKeyboardBuilder()
     
