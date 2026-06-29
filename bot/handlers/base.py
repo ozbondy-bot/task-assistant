@@ -559,31 +559,41 @@ async def cmd_start(message: types.Message, db_user: User = None):
     # Activate reply keyboard
     await message.answer("🤖 Добро пожаловать! Главное меню активировано.", reply_markup=get_main_keyboard())
     
-    # Send onboarding page 1
-    text = (
-        f"👋 Привет, <b>{name}</b>!\n\n"
-        "Я — твой семейный помощник для управления делами и покупками. 🍪🏠\n\n"
-        "Вот как устроен наш функционал:\n\n"
-        "🏠 <b>Home (Домашние дела)</b>\n"
-        "• Здесь собраны все общие дела по дому на сегодня.\n"
-        "• Любой жилец может нажать на задачу, чтобы взять её в работу (она перейдет во вкладку 📋 My).\n"
-        "• Внизу есть кнопки:\n"
-        "  - <code>➕ Добавить</code> — чтобы внести новую задачу или добавить из базы.\n"
-        "  - <code>⚙️ Настройки</code> — управление шаблонами и баллами задач.\n\n"
-        "📋 <b>My (Мои дела)</b>\n"
-        "• Твоя рабочая зона. Здесь находятся:\n"
-        "  - Взятые тобой домашние дела (со смайликом 🏠).\n"
-        "  - Твои личные задачи 👤.\n"
-        "  - Список покупок 🛒.\n"
-        "• Нажми на взятое домашнее дело или личную задачу здесь, чтобы отметить их как выполненные (за общие дела начисляются печеньки 🍪!).\n"
-        "• 🟡 Желтый кружок означает просроченные дела с прошлых дней.\n"
-        "• 🔴 Красный кружок — срочные задачи.\n"
-        "• Кнопка управления:\n"
-        "  - <code>Добавить</code> — создать новую личную задачу.\n"
-    )
-    builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="Далее ➡️", callback_data="ob_page:2"))
-    await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    if db_user and db_user.house_id is not None:
+        # User already belongs to a house — open Home (chores list) by default
+        from bot.handlers.chores import render_household_chores
+        await render_household_chores(message, db_user, is_callback=False)
+    else:
+        # New user — pin and show page 1 of onboarding
+        text = (
+            f"👋 Привет, <b>{name}</b>!\n\n"
+            "Я — твой семейный помощник для управления делами и покупками. 🍪🏠\n\n"
+            "Вот как устроен наш функционал:\n\n"
+            "🏠 <b>Home (Домашние дела)</b>\n"
+            "• Здесь собраны все общие дела по дому на сегодня.\n"
+            "• Любой жилец может нажать на задачу, чтобы взять её в работу (она перейдет во вкладку 📋 My).\n"
+            "• Внизу есть кнопки:\n"
+            "  - <code>➕ Добавить</code> — чтобы внести новую задачу или добавить из базы.\n"
+            "  - <code>⚙️ Настройки</code> — управление шаблонами и баллами задач.\n\n"
+            "📋 <b>My (Мои дела)</b>\n"
+            "• Твоя рабочая зона. Здесь находятся:\n"
+            "  - Взятые тобой домашние дела (со смайликом 🏠).\n"
+            "  - Твои личные задачи 👤.\n"
+            "  - Список покупок 🛒.\n"
+            "• Нажми на взятое домашнее дело или личную задачу здесь, чтобы отметить их как выполненные (за общие дела начисляются печеньки 🍪!).\n"
+            "• 🟡 Желтый кружок означает просроченные дела с прошлых дней.\n"
+            "• 🔴 Красный кружок — срочные задачи.\n"
+            "• Кнопка управления:\n"
+            "  - <code>Добавить</code> — создать новую личную задачу.\n"
+        )
+        builder = InlineKeyboardBuilder()
+        builder.row(InlineKeyboardButton(text="Далее ➡️", callback_data="ob_page:2"))
+        sent_msg = await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+        try:
+            await message.bot.pin_chat_message(chat_id=message.chat.id, message_id=sent_msg.message_id)
+            logger.info("Pinned initial onboarding page 1 message.")
+        except Exception as e:
+            logger.error(f"Failed to pin initial onboarding page 1: {e}")
 
 
 @dp.callback_query(F.data.startswith("ob_page:"))
