@@ -554,62 +554,39 @@ def get_main_keyboard() -> types.ReplyKeyboardMarkup:
 # ── /start ─────────────────────────────────────────────────────────────────────
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message, db_user: User = None):
-    name = db_user.display_name if db_user else message.from_user.first_name
-    
     # Activate reply keyboard
     await message.answer("🤖 Добро пожаловать! Главное меню активировано.", reply_markup=get_main_keyboard())
     
-    if db_user and db_user.house_id is not None:
-        # User already belongs to a house — open Home (chores list) by default
-        from bot.handlers.chores import render_household_chores
-        await render_household_chores(message, db_user, is_callback=False)
-    else:
-        # New user — pin and show page 1 of onboarding
-        text = (
-            f"👋 Привет, <b>{name}</b>!\n\n"
-            "Я — твой семейный помощник для управления делами и покупками. 🍪🏠\n\n"
-            "Вот как устроен наш функционал:\n\n"
-            "🏠 <b>Home (Домашние дела)</b>\n"
-            "• Здесь собраны все общие дела по дому на сегодня.\n"
-            "• Любой жилец может нажать на задачу, чтобы взять её в работу (она перейдет во вкладку 📋 My).\n"
-            "• Внизу есть кнопки:\n"
-            "  - <code>➕ Добавить</code> — чтобы внести новую задачу или добавить из базы.\n"
-            "  - <code>⚙️ Настройки</code> — управление шаблонами и баллами задач.\n\n"
-            "📋 <b>My (Мои дела)</b>\n"
-            "• Твоя рабочая зона. Здесь находятся:\n"
-            "  - Взятые тобой домашние дела (со смайликом 🏠).\n"
-            "  - Твои личные задачи 👤.\n"
-            "  - Список покупок 🛒.\n"
-            "• Нажми на взятое домашнее дело или личную задачу здесь, чтобы отметить их как выполненные (за общие дела начисляются печеньки 🍪!).\n"
-            "• 🟡 Желтый кружок означает просроченные дела с прошлых дней.\n"
-            "• 🔴 Красный кружок — срочные задачи.\n"
-            "• Кнопка управления:\n"
-            "  - <code>Добавить</code> — создать новую личную задачу.\n"
-        )
-        builder = InlineKeyboardBuilder()
-        builder.row(InlineKeyboardButton(text="Далее ➡️", callback_data="ob_page:2"))
-        sent_msg = await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
-        try:
-            await message.bot.pin_chat_message(chat_id=message.chat.id, message_id=sent_msg.message_id)
-            logger.info("Pinned initial onboarding page 1 message.")
-        except Exception as e:
-            logger.error(f"Failed to pin initial onboarding page 1: {e}")
+    text = (
+        "👋 Привет!\n\n"
+        "Вот как у нас всё устроено:\n\n"
+        "1. 🏠 <b>Home (Домашние дела)</b>\n"
+        "Бери дела в работу нажатием на задачу, создавай совершенно новые задачи или добавляй их из готовой базы.\n\n"
+        "2. 📋 <b>My (Мои дела)</b>\n"
+        "Твой личный список дел на сегодня. Выполняй взятые домашние дела, веди свои личные задачи и просматривай список покупок. Нажми на дело, чтобы закрыть его и заработать печеньки 🍪!"
+    )
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="Далее ➡️", callback_data="ob_page:2"))
+    sent_msg = await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    try:
+        await message.bot.pin_chat_message(chat_id=message.chat.id, message_id=sent_msg.message_id)
+        logger.info("Pinned initial onboarding page 1 message.")
+    except Exception as e:
+        logger.error(f"Failed to pin initial onboarding page 1: {e}")
 
 
 @dp.callback_query(F.data.startswith("ob_page:"))
 async def handle_ob_page(call: types.CallbackQuery, db_user: User = None):
     page = int(call.data.split(":")[1])
-    name = db_user.display_name if db_user else call.from_user.first_name
     
     if page == 1:
         text = (
-            f"👋 Привет, <b>{name}</b>!\n\n"
-            "Я помогу навести порядок в домашних и личных делах. 🍪🏠\n\n"
-            "Вот как всё устроено:\n\n"
-            "🏠 <b>Home (Домашние дела)</b>\n"
-            "• Это список общих домашних дел на сегодня.\n"
-            "• Любой жилец может нажать на задачу и взять её себе. Она перенесётся во вкладку 📋 My.\n"
-            "• Кнопка <code>➕ Добавить</code> позволяет быстро создать новое дело или выбрать задачу из готовой базы.\n"
+            "👋 Привет!\n\n"
+            "Вот как у нас всё устроено:\n\n"
+            "1. 🏠 <b>Home (Домашние дела)</b>\n"
+            "Бери дела в работу нажатием на задачу, создавай совершенно новые задачи или добавляй их из готовой базы.\n\n"
+            "2. 📋 <b>My (Мои дела)</b>\n"
+            "Твой личный список дел на сегодня. Выполняй взятые домашние дела, веди свои личные задачи и просматривай список покупок. Нажми на дело, чтобы закрыть его и заработать печеньки 🍪!"
         )
         builder = InlineKeyboardBuilder()
         builder.row(InlineKeyboardButton(text="Далее ➡️", callback_data="ob_page:2"))
@@ -621,45 +598,20 @@ async def handle_ob_page(call: types.CallbackQuery, db_user: User = None):
             
     elif page == 2:
         text = (
-            "📋 <b>My (Мои дела)</b>\n"
-            "• Твой личный рабочий список на день.\n"
-            "• Сюда попадают:\n"
-            "  - Взятые тобой домашние дела (со смайликом 🏠).\n"
-            "  - Твои личные задачи 👤 (создаются по кнопке <code>➕ Добавить</code> прямо в этой вкладке).\n"
-            "  - Список покупок 🛒.\n"
-            "• Нажми на выполненное дело здесь, чтобы закрыть его и получить печеньки 🍪!\n"
-            "• Просроченные задачи отмечены желтым кружком 🟡, а срочные — красным 🔴.\n"
+            "3. 📊 <b>Stat (Магазин и Покупки)</b>\n"
+            "Копи печеньки и обменивай их в Магазине 🛍 на классные награды, веди список покупок 🛒 и просматривай историю выполненных дел в Архиве 📜.\n\n"
+            "Давайте делать дом уютнее вместе! 🎉"
         )
         builder = InlineKeyboardBuilder()
         builder.row(
             InlineKeyboardButton(text="⬅️ Назад", callback_data="ob_page:1"),
-            InlineKeyboardButton(text="Далее ➡️", callback_data="ob_page:3")
+            InlineKeyboardButton(text="К задачам", callback_data="ob_finish")
         )
         await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
         try:
             await call.message.bot.pin_chat_message(chat_id=call.message.chat.id, message_id=call.message.message_id)
         except Exception as e:
             logger.error(f"Failed to pin onboarding page 2: {e}")
-            
-    elif page == 3:
-        text = (
-            "📊 <b>Stat (Магазин и Покупки)</b>\n"
-            "• Твой баланс печенек и статистика дома.\n"
-            "• 🛍 <b>Магазин:</b> обменивай заработанные печеньки 🍪 на награды! Цены наград рассчитываются автоматически в днях, исходя из вашей активности за последние 30 дней.\n"
-            "• 🛒 <b>Покупки:</b> общий список покупок (продукты, бытовая химия и т.д.).\n"
-            "• 📜 <b>Архив:</b> история всех выполненных дел по дням.\n\n"
-            "Давайте делать дом уютнее вместе! 🎉"
-        )
-        builder = InlineKeyboardBuilder()
-        builder.row(
-            InlineKeyboardButton(text="⬅️ Назад", callback_data="ob_page:2"),
-            InlineKeyboardButton(text="Перейти к задачам", callback_data="ob_finish")
-        )
-        await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
-        try:
-            await call.message.bot.pin_chat_message(chat_id=call.message.chat.id, message_id=call.message.message_id)
-        except Exception as e:
-            logger.error(f"Failed to pin onboarding page 3: {e}")
 
 
 @dp.callback_query(F.data == "ob_finish")
