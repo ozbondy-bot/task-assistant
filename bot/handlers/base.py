@@ -583,10 +583,11 @@ async def handle_ob_page(call: types.CallbackQuery, db_user: User = None):
     await call.answer()
 
 
-@dp.callback_query(F.data == "ob_finish")
-async def handle_ob_finish(call: types.CallbackQuery, db_user: User = None):
-    # We do NOT unpin or delete the onboarding message now (it persists).
-    # We just send a new message with the tasks.
+@dp.callback_query(F.data == "ob_finish", StateFilter("*"))
+async def handle_ob_finish(call: types.CallbackQuery, state: FSMContext = None, db_user: User = None):
+    await call.answer()
+    if state:
+        await state.clear()
     from bot.handlers.chores import render_household_chores
     await render_household_chores(call.message, db_user, is_callback=False)
 
