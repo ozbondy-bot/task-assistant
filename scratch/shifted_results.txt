@@ -1,0 +1,8 @@
+.\bot\handlers\base.py:901: TaskInstance.status.in_(["free", "in_progress", "shifted"])
+.\bot\handlers\chores.py:118: TaskInstance.status.in_(["free", "in_progress", "shifted"])
+.\bot\handlers\chores.py:318: TaskInstance.status.in_(["free", "shifted", "in_progress"])
+.\bot\handlers\chores.py:764: inst.status = "shifted"
+.\bot\handlers\chores.py:771: TaskInstance.status.in_(["free", "shifted"])
+.\bot\handlers\chores.py:1350: TaskInstance.status.in_(["free", "in_progress", "shifted"])
+.\bot\handlers\tasks.py:475: inst.status = "shifted"
+.\bot\handlers\tasks.py:482: TaskInstance.status.in_(["free", "shifted"])

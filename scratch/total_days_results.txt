@@ -1,0 +1,9 @@
+.\bot\handlers\rewards.py:41: if page < total_days - 1:
+.\bot\handlers\rewards.py:150: total_days = len(unique_dates)
+.\bot\handlers\rewards.py:152: if total_days == 0:
+.\bot\handlers\rewards.py:158: if page >= total_days:
+.\bot\handlers\rewards.py:159: page = total_days - 1
+.\bot\handlers\rewards.py:168: if page < total_days - 1:
+.\bot\handlers\rewards.py:208: if page < total_days - 1:
+.\bot\handlers\rewards.py:245: if page < total_days - 1:
+.\bot\handlers\rewards.py:340: if page < total_days - 1:

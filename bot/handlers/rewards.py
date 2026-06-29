@@ -77,6 +77,8 @@ async def get_shop_calculation_stats(session):
 
 async def get_adjusted_price(session, base_days: int) -> int:
     total_points, num_users, points_per_day = await get_shop_calculation_stats(session)
+    if points_per_day <= 0:
+        return max(1, base_days)  # fallback if no 30-day history
     price_cookies = base_days * points_per_day
     return max(1, int(round(price_cookies)))
 
@@ -379,7 +381,7 @@ async def render_rewards_settings(message: types.Message, db_user: User, is_call
     
     # Row 2 (Sub-tabs)
     builder.row(
-        InlineKeyboardButton(text="⚡🛍 Магазин⚡", callback_data="noop"),
+        InlineKeyboardButton(text="⚡🛑 Магазин⚡", callback_data="noop"),
         InlineKeyboardButton(text="🛒 Покупки", callback_data="shop_view_items"),
         InlineKeyboardButton(text="📜 Архив", callback_data="stat_arch:0")
     )
@@ -407,15 +409,21 @@ async def handle_rewards_shop_view(call: types.CallbackQuery, db_user: User = No
         
         total_points, num_users, points_per_day = await get_shop_calculation_stats(session)
 
+    # Format stats line
+    if points_per_day > 0:
+        stat_line = (
+            f"ℹ️ <b>Расчёт цен:</b> за 30 дней заработано <code>{total_points}🍪</code>, "
+            f"участников: <code>{num_users}</code>, "
+            f"в день на человека: <code>{points_per_day:.1f}🍪</code>"
+        )
+    else:
+        stat_line = "ℹ️ Истории выполнения за 30 дней нет — цены в днях."
+
     text = (
         "🎁 <b>Магазин наград</b>\n\n"
-        "ℹ️ <b>Как рассчитываются цены (без минималок):</b>\n"
-        f"• За последние 30 дней в доме заработано: <code>{total_points} 🍪</code>\n"
-        f"• Активных участников: <code>{num_users}</code>\n"
-        f"• Печенек в день на человека: <code>{points_per_day:.2f} 🍪</code>\n"
-        "• Формула: <code>Цена = Дни × Печенек в день</code>\n\n"
-        "🛒 <b>Награды для покупки:</b>\n"
-        "Для покупки нажми на выбранную награду:"
+        f"{stat_line}\n"
+        "Формула: <code>Цена = Базовые дни × Среднее в день</code>\n\n"
+        "👉 <b>Нажми на награду для покупки:</b>"
     )
 
     builder = InlineKeyboardBuilder()
@@ -429,23 +437,32 @@ async def handle_rewards_shop_view(call: types.CallbackQuery, db_user: User = No
     
     # Row 2 (Sub-tabs)
     builder.row(
-        InlineKeyboardButton(text="⚡🛍 Магазин⚡", callback_data="noop"),
+        InlineKeyboardButton(text="⚡🛑 Магазин⚡", callback_data="noop"),
         InlineKeyboardButton(text="🛒 Покупки", callback_data="shop_view_items"),
         InlineKeyboardButton(text="📜 Архив", callback_data="stat_arch:0")
     )
     
+    # Row 3 (Rewards management — only visible in shop)
+    builder.row(
+        InlineKeyboardButton(text="⚙️ Управление наградами", callback_data="rewards_settings")
+    )
+    
     if rewards:
         for r in rewards:
-            price_cookies = r.price * points_per_day
-            adj = max(1, int(round(price_cookies)))
-            builder.row(InlineKeyboardButton(text=f"{r.title} ({adj}🍪)", callback_data=f"buy_reward:{r.id}"))
+            if points_per_day > 0:
+                price_cookies = r.price * points_per_day
+                adj = max(1, int(round(price_cookies)))
+                builder.row(InlineKeyboardButton(
+                    text=f"{r.title}  ({r.price} дн. = {adj}🍪)",
+                    callback_data=f"buy_reward:{r.id}"
+                ))
+            else:
+                builder.row(InlineKeyboardButton(
+                    text=f"{r.title}  ({r.price} дн.)",
+                    callback_data=f"buy_reward:{r.id}"
+                ))
     else:
         text += "\nНаград пока нет."
-
-    builder.row(
-        InlineKeyboardButton(text="⚙️ Управление наградами", callback_data="rewards_settings"),
-        InlineKeyboardButton(text="📜 Мои покупки", callback_data="rewards_purchases:0")
-    )
 
     await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
 

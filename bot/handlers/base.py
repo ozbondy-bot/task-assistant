@@ -748,10 +748,7 @@ async def render_today(message: types.Message, db_user: User, is_callback=False,
         InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
     )
     
-    # Row 2 (Sub-tabs)
-    builder.row(
-        InlineKeyboardButton(text="➕ Добавить", callback_data=f"my_add:{page}")
-    )
+    # Row 2 (Sub-tabs) — no separate Добавить row, it's in pagination
 
     # Personal tasks rendering    # Personal tasks rendering
     for t in personal_tasks:
@@ -790,7 +787,7 @@ async def render_today(message: types.Message, db_user: User, is_callback=False,
             InlineKeyboardButton(text=right_text, callback_data=f"my_chore_info:{inst.id}:{page}")
         )
 
-    # Pagination row at the bottom (3-button layout)
+    # Pagination row (3-button): ⏪ | Добавить or Date | ⏩
     nav = []
     # Left arrow
     if page > 0:
@@ -798,10 +795,8 @@ async def render_today(message: types.Message, db_user: User, is_callback=False,
     else:
         nav.append(InlineKeyboardButton(text=" ", callback_data="noop"))
         
-    # Middle label: date and weekday (e.g. 29.06 (пн))
-    target_d = future_dates[page - 1] if page > 0 else today
-    date_lbl = f"{target_d.strftime('%d.%m')} ({get_ru_weekday_abbr(target_d)})"
-    nav.append(InlineKeyboardButton(text=date_lbl, callback_data="noop"))
+    # Middle: always "+Добавить" button
+    nav.append(InlineKeyboardButton(text="➕ Добавить", callback_data=f"my_add:{page}"))
     
     # Right arrow
     if page < total_pages - 1:
@@ -810,8 +805,11 @@ async def render_today(message: types.Message, db_user: User, is_callback=False,
         nav.append(InlineKeyboardButton(text=" ", callback_data="noop"))
         
     builder.row(*nav)
-
-    # Bottom Add button moved to Row 2
+    
+    # Date label row below pagination
+    target_d = future_dates[page - 1] if page > 0 else today
+    date_lbl = f"{target_d.strftime('%d.%m')} ({get_ru_weekday_abbr(target_d)})"
+    builder.row(InlineKeyboardButton(text=date_lbl, callback_data="noop"))
 
     markup = builder.as_markup()
     if is_callback:

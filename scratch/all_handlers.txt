@@ -1,0 +1,110 @@
+base.py:46: @dp.callback_query(F.data.startswith("approve_act:")) -> async def handle_approve_action(call: types.CallbackQuery, db_user: User = None):
+base.py:135: @dp.callback_query(F.data.startswith("reject_act:")) -> async def handle_reject_action(call: types.CallbackQuery, db_user: User = None):
+base.py:563: @dp.message(CommandStart()) -> async def cmd_start(message: types.Message, db_user: User = None):
+base.py:603: @dp.message(Command("id")) -> async def cmd_id(message: types.Message):
+chores.py:87: @dp.message(F.text.in_({"🏠 Home", "🏠 Домашние дела"})) -> async def handle_household_chores_btn(message: types.Message, db_user: User = None):
+chores.py:92: @dp.callback_query(F.data == "chores_back") -> async def handle_chores_back(call: types.CallbackQuery, db_user: User = None):
+chores.py:97: @dp.callback_query(F.data == "chores_add_menu") -> async def handle_chores_add_menu(call: types.CallbackQuery, db_user: User = None):
+chores.py:111: @dp.callback_query(F.data == "add_from_templates_list") -> async def handle_add_from_templates_list(call: types.CallbackQuery, db_user: User = None):
+chores.py:167: @dp.callback_query(F.data.startswith("spawn_chore:")) -> async def handle_spawn_chore(call: types.CallbackQuery, db_user: User = None):
+chores.py:280: @dp.callback_query(F.data.startswith("tmpl_set:")) -> async def handle_tmpl_set(call: types.CallbackQuery, db_user: User = None):
+chores.py:351: @dp.callback_query(F.data.startswith("te_cancel:")) -> async def handle_te_cancel(call: types.CallbackQuery, state: FSMContext, db_user: User = None):
+chores.py:361: @dp.callback_query(F.data.startswith("te_f:title:")) -> async def handle_te_title_start(call: types.CallbackQuery, state: FSMContext):
+chores.py:372: @dp.message(StateFilter(EditTemplateState.waiting_for_title)) -> async def handle_te_title_input(message: types.Message, state: FSMContext, db_user: User = None):
+chores.py:432: @dp.callback_query(F.data.startswith("te_f:points:")) -> async def handle_te_points_start(call: types.CallbackQuery, state: FSMContext):
+chores.py:443: @dp.message(StateFilter(EditTemplateState.waiting_for_points)) -> async def handle_te_points_input(message: types.Message, state: FSMContext, db_user: User = None):
+chores.py:506: @dp.callback_query(F.data.startswith("te_f:period:")) -> async def handle_te_period_start(call: types.CallbackQuery, state: FSMContext):
+chores.py:524: @dp.callback_query(StateFilter(EditTemplateState.waiting_for_periodicity), F.data.startswith("te_period_sel:")) -> async def handle_te_period_selected(call: types.CallbackQuery, state: FSMContext, db_user: User = None):
+chores.py:585: @dp.message(StateFilter(EditTemplateState.waiting_for_period_days)) -> async def handle_te_period_days_input(message: types.Message, state: FSMContext, db_user: User = None):
+chores.py:649: @dp.callback_query(F.data.startswith("te_del:")) -> async def handle_te_del(call: types.CallbackQuery, db_user: User = None):
+chores.py:669: @dp.callback_query(F.data.startswith("te_del_confirm:")) -> async def handle_te_del_confirm(call: types.CallbackQuery, db_user: User = None):
+chores.py:684: @dp.callback_query(F.data.startswith("nudge:")) -> async def handle_nudge(call: types.CallbackQuery, db_user: User = None):
+chores.py:728: @dp.callback_query(F.data.startswith("resched_menu:")) -> async def handle_resched_menu(call: types.CallbackQuery, db_user: User = None):
+chores.py:750: @dp.callback_query(F.data.startswith("shift:once:")) -> async def handle_shift_once(call: types.CallbackQuery, db_user: User = None):
+chores.py:792: @dp.callback_query(F.data.startswith("del_inst:")) -> async def handle_del_inst(call: types.CallbackQuery, db_user: User = None):
+chores.py:810: @dp.callback_query(F.data.startswith("rc_months:")) -> async def handle_rc_months(call: types.CallbackQuery, db_user: User = None):
+chores.py:820: @dp.callback_query(F.data.startswith("cal_nav:")) -> async def handle_cal_nav(call: types.CallbackQuery, db_user: User = None):
+chores.py:833: @dp.callback_query(F.data == "chores_leaderboard") -> async def handle_chores_leaderboard(call: types.CallbackQuery, db_user: User = None):
+chores.py:852: @dp.callback_query(F.data.startswith("claim_chore:")) -> async def handle_claim_chore(call: types.CallbackQuery, db_user: User = None):
+chores.py:913: @dp.callback_query(F.data == "chores_settings") -> async def handle_chores_settings(call: types.CallbackQuery, db_user: User = None):
+chores.py:921: @dp.callback_query(F.data.startswith("chores_arch:")) -> async def handle_chores_archive(call: types.CallbackQuery, db_user: User = None):
+chores.py:992: @dp.callback_query(F.data == "add_tmpl_start") -> async def handle_add_tmpl_start(call: types.CallbackQuery, state: FSMContext):
+chores.py:1002: @dp.callback_query(F.data == "add_tmpl_cancel") -> async def handle_add_tmpl_cancel(call: types.CallbackQuery, state: FSMContext, db_user: User = None):
+chores.py:1009: @dp.message(StateFilter(AddTemplateState.waiting_for_title)) -> async def handle_add_tmpl_title(message: types.Message, state: FSMContext):
+chores.py:1024: @dp.message(StateFilter(AddTemplateState.waiting_for_points)) -> async def handle_add_tmpl_points(message: types.Message, state: FSMContext):
+chores.py:1049: @dp.callback_query(StateFilter(AddTemplateState.waiting_for_periodicity), F.data.startswith("set_tmpl_period:")) -> async def handle_add_tmpl_periodicity(call: types.CallbackQuery, state: FSMContext, db_user: User = None):
+chores.py:1129: @dp.message(StateFilter(AddTemplateState.waiting_for_period_days)) -> async def handle_add_tmpl_period_days(message: types.Message, state: FSMContext, db_user: User = None):
+chores.py:1207: @dp.callback_query(F.data.startswith("done_chore_inst:")) -> async def handle_done_chore_inst(call: types.CallbackQuery, db_user: User = None):
+chores.py:1256: @dp.callback_query(F.data.startswith("cook_time:")) -> async def handle_cook_time(call: types.CallbackQuery, db_user: User = None):
+chores.py:1286: @dp.callback_query(F.data.startswith("unclaim_chore_inst:")) -> async def handle_unclaim_chore_inst(call: types.CallbackQuery, db_user: User = None):
+chores.py:1301: @dp.callback_query(F.data.startswith("te_shift_start:")) -> async def handle_te_shift_start(call: types.CallbackQuery, db_user: User = None):
+chores.py:1316: @dp.callback_query(F.data.startswith("cal_nav_tmpl_start:")) -> async def handle_cal_nav_tmpl_start(call: types.CallbackQuery, db_user: User = None):
+chores.py:1332: @dp.callback_query(F.data.startswith("shift_tmpl_start:")) -> async def handle_shift_tmpl_start(call: types.CallbackQuery, db_user: User = None):
+rewards.py:60: @dp.message(F.text.in_({"📊 Stat", "🛍 Магазин и Покупки"})) -> async def handle_shop_and_purchases_btn(message: types.Message, db_user: User = None):
+rewards.py:65: @dp.callback_query(F.data == "shop_and_purchases_back") -> async def handle_shop_and_purchases_back(call: types.CallbackQuery, db_user: User = None):
+rewards.py:70: @dp.callback_query(F.data.startswith("stat_arch:")) -> async def handle_stat_arch(call: types.CallbackQuery, db_user: User = None):
+rewards.py:233: @dp.callback_query(F.data == "rewards_shop_view") -> async def handle_rewards_shop_view(call: types.CallbackQuery, db_user: User = None):
+rewards.py:264: @dp.callback_query(F.data == "rewards_back") -> async def handle_rewards_back(call: types.CallbackQuery, db_user: User = None):
+rewards.py:269: @dp.callback_query(F.data.startswith("buy_reward:")) -> async def handle_buy_reward(call: types.CallbackQuery, db_user: User = None):
+rewards.py:297: @dp.callback_query(F.data == "rewards_settings") -> async def handle_rewards_settings_btn(call: types.CallbackQuery, db_user: User = None):
+rewards.py:302: @dp.callback_query(F.data.startswith("del_reward:")) -> async def handle_del_reward(call: types.CallbackQuery, db_user: User = None):
+rewards.py:316: @dp.callback_query(F.data.startswith("rewards_purchases:")) -> async def handle_rewards_purchases(call: types.CallbackQuery, db_user: User = None):
+rewards.py:357: @dp.callback_query(F.data == "add_reward_start") -> async def handle_add_reward_start(call: types.CallbackQuery, state: FSMContext):
+rewards.py:367: @dp.callback_query(F.data == "add_reward_cancel") -> async def handle_add_reward_cancel(call: types.CallbackQuery, state: FSMContext, db_user: User = None):
+rewards.py:374: @dp.message(StateFilter(AddRewardState.waiting_for_title)) -> async def handle_add_reward_title(message: types.Message, state: FSMContext):
+rewards.py:389: @dp.message(StateFilter(AddRewardState.waiting_for_price)) -> async def handle_add_reward_price(message: types.Message, state: FSMContext, db_user: User = None):
+shopping.py:96: @dp.callback_query(F.data.startswith("fulfill_rew:")) -> async def handle_fulfill_reward(call: types.CallbackQuery, db_user: User = None):
+shopping.py:143: @dp.callback_query(F.data.startswith("conf_rew:")) -> async def handle_confirm_reward(call: types.CallbackQuery, db_user: User = None):
+shopping.py:178: @dp.callback_query(F.data.startswith("rej_rew:")) -> async def handle_reject_reward(call: types.CallbackQuery, db_user: User = None):
+shopping.py:212: @dp.callback_query(F.data == "shop_view_items") -> async def shop_view_items_handler(call: types.CallbackQuery, db_user: User = None):
+shopping.py:217: @dp.callback_query(F.data == "s_cancel") -> async def s_cancel(call: types.CallbackQuery, db_user: User = None):
+shopping.py:222: @dp.callback_query(F.data.startswith("done_shop:")) -> async def done_shop(call: types.CallbackQuery, db_user: User = None):
+shopping.py:234: @dp.callback_query(F.data == "s_del") -> async def s_del_menu(call: types.CallbackQuery):
+shopping.py:250: @dp.callback_query(F.data.startswith("del_shop:")) -> async def del_shop(call: types.CallbackQuery, db_user: User = None):
+shopping.py:262: @dp.callback_query(F.data == "s_edit") -> async def s_edit_menu(call: types.CallbackQuery):
+shopping.py:278: @dp.callback_query(F.data.startswith("ed_shop:")) -> async def ed_shop_start(call: types.CallbackQuery, state: FSMContext):
+shopping.py:286: @dp.message(EditShop.waiting_for_input) -> async def ed_shop_process(message: types.Message, state: FSMContext, db_user: User = None):
+shopping.py:301: @dp.callback_query(F.data.startswith("s_arch:")) -> async def s_archive(call: types.CallbackQuery):
+shopping.py:332: @dp.callback_query(F.data.startswith("restore_shop:")) -> async def restore_shop(call: types.CallbackQuery, db_user: User = None):
+shopping.py:356: @dp.message(StateFilter(None), F.text) -> async def handle_any_text(message: types.Message, db_user: User = None, text_override: str = None):
+shopping.py:366: @dp.message(StateFilter(None), F.voice) -> async def handle_voice(message: types.Message, db_user: User = None):
+shopping.py:373: @dp.callback_query(F.data == "ignore") -> async def noop(call: types.CallbackQuery):
+shopping.py:378: @dp.callback_query(F.data == "noop") -> async def handle_noop(call: types.CallbackQuery):
+shopping.py:383: @dp.callback_query(F.data == "settings_del_menu") -> async def handle_settings_del_menu(call: types.CallbackQuery, db_user: User = None):
+shopping.py:403: @dp.callback_query(F.data.startswith("rc_months_plan:")) -> async def handle_rc_months_plan(call: types.CallbackQuery, db_user: User = None):
+shopping.py:413: @dp.callback_query(F.data.startswith("cal_nav_plan:")) -> async def handle_cal_nav_plan(call: types.CallbackQuery, db_user: User = None):
+shopping.py:426: @dp.callback_query(F.data.startswith("shift_plan:")) -> async def handle_shift_plan(call: types.CallbackQuery, db_user: User = None):
+shopping.py:446: @dp.callback_query(F.data.startswith("shift_plan_menu:")) -> async def handle_shift_plan_menu(call: types.CallbackQuery, db_user: User = None):
+shopping.py:454: @dp.callback_query(F.data.startswith("set_dt:")) -> async def exe_set_dt(call: types.CallbackQuery, db_user: User = None):
+tasks.py:21: @dp.message(F.text.in_({"📋 My", "👤 My", "👤 Мои дела"})) -> async def today_handler(m: types.Message, db_user: User = None):
+tasks.py:26: @dp.callback_query(F.data.startswith("my_page:")) -> async def handle_my_page(call: types.CallbackQuery, db_user: User = None):
+tasks.py:32: @dp.callback_query(F.data == "t_cancel") -> async def t_cancel(call: types.CallbackQuery, db_user: User = None):
+tasks.py:37: @dp.callback_query(F.data.startswith("my_add")) -> async def handle_my_add(call: types.CallbackQuery, state: FSMContext, db_user: User = None):
+tasks.py:54: @dp.callback_query(F.data.startswith("my_add_cancel")) -> async def handle_my_add_cancel(call: types.CallbackQuery, state: FSMContext, db_user: User = None):
+tasks.py:62: @dp.message(StateFilter(AddPersonalTaskState.waiting_for_text)) -> async def handle_my_add_text(message: types.Message, state: FSMContext, db_user: User = None):
+tasks.py:109: @dp.callback_query(StateFilter(AddPersonalTaskState.waiting_for_date), F.data.startswith("addpt_date:")) -> async def handle_addpt_date_btn(call: types.CallbackQuery, state: FSMContext, db_user: User = None):
+tasks.py:131: @dp.callback_query(StateFilter(AddPersonalTaskState.waiting_for_date), F.data.startswith("cal_nav_addpt:")) -> async def handle_cal_nav_addpt(call: types.CallbackQuery, db_user: User = None):
+tasks.py:143: @dp.callback_query(StateFilter(AddPersonalTaskState.waiting_for_date), F.data.startswith("shift_addpt:")) -> async def handle_shift_addpt(call: types.CallbackQuery, state: FSMContext, db_user: User = None):
+tasks.py:177: @dp.callback_query(StateFilter(AddPersonalTaskState.waiting_for_recurrence), F.data.startswith("addpt_period:")) -> async def handle_addpt_period(call: types.CallbackQuery, state: FSMContext, db_user: User = None):
+tasks.py:212: @dp.message(StateFilter(AddPersonalTaskState.waiting_for_recurrence_days)) -> async def handle_addpt_recurrence_days(message: types.Message, state: FSMContext, db_user: User = None):
+tasks.py:249: @dp.callback_query(F.data.startswith("my_shift_select")) -> async def handle_my_shift_select(call: types.CallbackQuery, db_user: User = None):
+tasks.py:320: @dp.callback_query(F.data.startswith("shift_pt_menu:")) -> async def handle_shift_pt_menu(call: types.CallbackQuery, db_user: User = None):
+tasks.py:343: @dp.callback_query(F.data.startswith("shift_chore_menu:")) -> async def handle_shift_chore_menu(call: types.CallbackQuery, db_user: User = None):
+tasks.py:367: @dp.callback_query(F.data.startswith("rc_months_pt:")) -> async def handle_rc_months_pt(call: types.CallbackQuery, db_user: User = None):
+tasks.py:379: @dp.callback_query(F.data.startswith("cal_nav_pt:")) -> async def handle_cal_nav_pt(call: types.CallbackQuery, db_user: User = None):
+tasks.py:399: @dp.callback_query(F.data.startswith("shift_pt:")) -> async def handle_shift_pt(call: types.CallbackQuery, db_user: User = None):
+tasks.py:426: @dp.callback_query(F.data.startswith("rc_months_chore:")) -> async def handle_rc_months_chore(call: types.CallbackQuery, db_user: User = None):
+tasks.py:438: @dp.callback_query(F.data.startswith("cal_nav_chore:")) -> async def handle_cal_nav_chore(call: types.CallbackQuery, db_user: User = None):
+tasks.py:458: @dp.callback_query(F.data.startswith("shift_chore:")) -> async def handle_shift_chore(call: types.CallbackQuery, db_user: User = None):
+tasks.py:506: @dp.callback_query(F.data.startswith("my_delete_select")) -> async def handle_my_delete_select(call: types.CallbackQuery, db_user: User = None):
+tasks.py:576: @dp.callback_query(F.data.startswith("del_pt:")) -> async def handle_del_pt(call: types.CallbackQuery, db_user: User = None):
+tasks.py:595: @dp.callback_query(F.data.startswith("del_chore_inst:")) -> async def handle_del_chore_inst(call: types.CallbackQuery, db_user: User = None):
+tasks.py:616: @dp.callback_query(F.data.startswith("done_task:")) -> async def handle_done_task(call: types.CallbackQuery, db_user: User = None):
+tasks.py:688: @dp.message(F.text == "📅 Планы") -> async def plans_handler(m: types.Message, db_user: User = None):
+tasks.py:693: @dp.callback_query(F.data == "p_cancel") -> async def p_cancel(call: types.CallbackQuery, db_user: User = None):
+tasks.py:698: @dp.callback_query(F.data == "p_menu_move") -> async def p_move_menu(call: types.CallbackQuery, db_user: User = None):
+tasks.py:720: @dp.callback_query(F.data.startswith("mov_p:")) -> async def mov_p_select(call: types.CallbackQuery):
+tasks.py:739: @dp.callback_query(F.data == "p_menu_del") -> async def p_del_menu(call: types.CallbackQuery, db_user: User = None):
+tasks.py:756: @dp.callback_query(F.data.startswith("del_p:")) -> async def exe_del_p(call: types.CallbackQuery, db_user: User = None):
+tasks.py:769: @dp.callback_query(F.data.startswith("t_arch:")) -> async def t_archive(call: types.CallbackQuery, db_user: User = None):
+tasks.py:801: @dp.callback_query(F.data.startswith("restore_t:")) -> async def restore_task(call: types.CallbackQuery, db_user: User = None):

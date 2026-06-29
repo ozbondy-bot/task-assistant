@@ -1,0 +1,36 @@
+7: from aiogram.filters import CommandStart, Command, StateFilter
+10: from aiogram.fsm.state import State, StatesGroup
+79: status="free",
+181: TaskInstance.status == "free",
+222: TaskInstance.status.in_(["in_progress", "done"])
+247: TaskInstance.status == "free",
+456: status="free",
+467: TaskInstance.status.notin_(["done", "skipped"])
+478: # ── FSM States ────────────────────────────────────────────────────────────────
+479: class EditShop(StatesGroup):
+480: waiting_for_input = State()
+481: item_id = State()
+484: class AddTemplateState(StatesGroup):
+485: waiting_for_title = State()
+486: waiting_for_points = State()
+487: waiting_for_periodicity = State()
+488: waiting_for_period_days = State()
+491: class AddRewardState(StatesGroup):
+492: waiting_for_title = State()
+493: waiting_for_price = State()
+496: class AddPersonalTaskState(StatesGroup):
+497: waiting_for_text = State()
+498: waiting_for_date = State()
+499: waiting_for_recurrence = State()
+500: waiting_for_recurrence_days = State()
+504: class EditTemplateState(StatesGroup):
+505: waiting_for_title = State()
+506: waiting_for_points = State()
+507: waiting_for_periodicity = State()
+508: waiting_for_period_days = State()
+557: KeyboardButton(text="📊 Stat"),
+588: "📊 *Stat (Магазин и Покупки)*\n"
+641: TaskInstance.status == "in_progress"
+883: .where(and_(TaskInstance.template_id == t.id, TaskInstance.status == "done"))
+890: .where(and_(TaskInstance.template_id == t.id, TaskInstance.status.in_(["done", "skipped"])))
+900: TaskInstance.status.in_(["free", "in_progress", "shifted"])

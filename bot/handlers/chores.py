@@ -71,7 +71,10 @@ async def render_household_chores(message: types.Message, db_user: User, is_call
     )
     
     # Row 2 (Sub-tabs)
-    # Bottom buttons moved to Row 2
+    builder.row(
+        InlineKeyboardButton(text="➕ Добавить", callback_data="chores_add_menu"),
+        InlineKeyboardButton(text="⚙️ Настройки", callback_data="chores_settings")
+    )
 
     if chores:
         for inst, tmpl in chores:
@@ -397,12 +400,6 @@ async def handle_te_title_input(message: types.Message, state: FSMContext, db_us
     if not title:
         await message.answer("Название не может быть пустым. Попробуйте еще раз:")
         return
-        
-    # Resolve AI emoji for edit title
-    from bot.parser import get_ai_emoji
-    ai_emoji = await get_ai_emoji(title)
-    if ai_emoji:
-        title = f"{ai_emoji} {title}"
         
     data = await state.get_data()
     tid = data["edit_tid"]
@@ -1054,12 +1051,6 @@ async def handle_add_tmpl_title(message: types.Message, state: FSMContext):
     if not title:
         await message.answer("Название не может быть пустым. Попробуйте еще раз:")
         return
-        
-    # Resolve AI emoji for chores template
-    from bot.parser import get_ai_emoji
-    ai_emoji = await get_ai_emoji(title)
-    if ai_emoji:
-        title = f"{ai_emoji} {title}"
         
     await state.update_data(title=title)
     await state.set_state(AddTemplateState.waiting_for_points)

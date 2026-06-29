@@ -1,0 +1,4 @@
+46: @dp.callback_query(F.data.startswith("approve_act:")) -> async def handle_approve_action(call: types.CallbackQuery, db_user: User = None):
+135: @dp.callback_query(F.data.startswith("reject_act:")) -> async def handle_reject_action(call: types.CallbackQuery, db_user: User = None):
+563: @dp.message(CommandStart()) -> async def cmd_start(message: types.Message, db_user: User = None):
+603: @dp.message(Command("id")) -> async def cmd_id(message: types.Message):

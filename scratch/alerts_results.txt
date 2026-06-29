@@ -1,0 +1,5 @@
+.\bot\handlers\chores.py:1356: await call.answer(f"✅ Дата отсчета перенесена на {new_date.strftime('%d.%m')}!", show_alert=True)
+.\bot\handlers\shopping.py:106: await call.answer("Эту награду должен выполнить твой партнёр! 😉", show_alert=True)
+.\bot\handlers\shopping.py:139: await call.answer("Запрос на подтверждение отправлен партнёру! ⏳", show_alert=True)
+.\bot\handlers\shopping.py:153: await call.answer("Только покупатель может подтвердить выполнение!", show_alert=True)
+.\bot\handlers\shopping.py:188: await call.answer("Только покупатель может отклонить выполнение!", show_alert=True)
