@@ -436,6 +436,7 @@ if os.path.exists(frontend_dir):
 
 
 @app.get("/")
+@app.head("/")
 async def root():
     index = os.path.join(frontend_dir, "index.html")
     if os.path.exists(index):
