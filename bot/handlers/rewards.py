@@ -226,18 +226,15 @@ async def handle_stat_arch(call: types.CallbackQuery, state: FSMContext = None, 
     
     # Row 3 (Pagination)
     nav = []
-    nav.append(InlineKeyboardButton(text="⏪", callback_data=f"stat_arch:{page+1}"))
+    nav.append(InlineKeyboardButton(text="◀️", callback_data=f"stat_arch:{page+1}"))
     nav.append(InlineKeyboardButton(text=f"{date_lbl} ({weekday_lbl})", callback_data="noop"))
     if page > 0:
-        nav.append(InlineKeyboardButton(text="⏩", callback_data=f"stat_arch:{page-1}"))
+        nav.append(InlineKeyboardButton(text="▶️", callback_data=f"stat_arch:{page-1}"))
     else:
         nav.append(InlineKeyboardButton(text=" ", callback_data="noop"))
     builder.row(*nav)
     
-    # Row 4 (Info header with 💈)
-    builder.row(
-        InlineKeyboardButton(text=f"💈 Архив за {date_lbl} ({weekday_lbl}) 💈", callback_data="noop")
-    )
+    # Row 4 removed by request
     
     # Row 5 (Info banner if empty)
     if not day_entries:
@@ -389,12 +386,9 @@ async def handle_rewards_shop_view(call: types.CallbackQuery, state: FSMContext 
 
     # Format stats line
     if points_per_day > 0:
-        stat_line = (
-            f" за 30дн заработано {total_points}🍪, "
-            f"в день на чел: {points_per_day:.1f}🍪"
-        )
+        stat_line = f"30 дн - {points_per_day:.1f}🍪/день"
     else:
-        stat_line = " Истории выполнения за 30 дней нет — цены в днях."
+        stat_line = "30 дн - нет истории"
 
     text = "\u3164"
 
@@ -419,12 +413,9 @@ async def handle_rewards_shop_view(call: types.CallbackQuery, state: FSMContext 
         InlineKeyboardButton(text="⚙️ Управление наградами", callback_data="rewards_settings")
     )
     
-    # Row 4 (Info headers with 💈)
+    # Row 4 (Info header with 💈)
     builder.row(
-        InlineKeyboardButton(text=f"💈 Нажми на награду для покупки 💈", callback_data="noop")
-    )
-    builder.row(
-        InlineKeyboardButton(text=f"💈{stat_line} 💈", callback_data="noop")
+        InlineKeyboardButton(text=f"💈 Нажми на награду для покупки ({stat_line}) 💈", callback_data="noop")
     )
     
     if rewards:
@@ -541,7 +532,7 @@ async def handle_rewards_purchases(call: types.CallbackQuery, db_user: User = No
     nav = []
     # Left arrow
     if page > 0:
-        nav.append(InlineKeyboardButton(text="⏪", callback_data=f"rewards_purchases:{page-1}"))
+        nav.append(InlineKeyboardButton(text="◀️", callback_data=f"rewards_purchases:{page-1}"))
     else:
         nav.append(InlineKeyboardButton(text=" ", callback_data="noop"))
         
@@ -556,7 +547,7 @@ async def handle_rewards_purchases(call: types.CallbackQuery, db_user: User = No
     
     # Right arrow
     if len(rows) == 5:
-        nav.append(InlineKeyboardButton(text="⏩", callback_data=f"rewards_purchases:{page+1}"))
+        nav.append(InlineKeyboardButton(text="▶️", callback_data=f"rewards_purchases:{page+1}"))
     else:
         nav.append(InlineKeyboardButton(text=" ", callback_data="noop"))
         

@@ -741,10 +741,10 @@ async def render_today(message: types.Message, db_user: User, is_callback=False,
     if page == 0:
         nav.append(InlineKeyboardButton(text="➕ Добавить", callback_data=f"my_add:{page}"))
     else:
-        nav.append(InlineKeyboardButton(text="⏪", callback_data=f"my_page:{page-1}"))
+        nav.append(InlineKeyboardButton(text="◀️", callback_data=f"my_page:{page-1}"))
     nav.append(InlineKeyboardButton(text=date_lbl, callback_data="noop"))
     if page < total_pages - 1:
-        nav.append(InlineKeyboardButton(text="⏩", callback_data=f"my_page:{page+1}"))
+        nav.append(InlineKeyboardButton(text="▶️", callback_data=f"my_page:{page+1}"))
     else:
         nav.append(InlineKeyboardButton(text=" ", callback_data="noop"))
     builder.row(*nav)
