@@ -61,9 +61,31 @@ def has_leading_emoji(text: str) -> bool:
 
 
 async def migrate_template_emojis():
-    # AI emoji migration disabled — smart emoji temporarily turned off
-    logger.info("Template emoji migration skipped (AI emoji disabled).")
-    return
+    """Strip leading emojis from all task template titles in DB."""
+    from db.models import AsyncSessionLocal, TaskTemplate
+    from sqlalchemy import select
+    import re
+    
+    logger.info("Stripping emojis from template titles...")
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(TaskTemplate))
+        templates = result.scalars().all()
+        updated_count = 0
+        emoji_pat = re.compile(
+            r'^[\U0001f000-\U0001f9ff\U00002600-\U000027BF\ufe0f\u200d]+[\s]*',
+            re.UNICODE
+        )
+        for tmpl in templates:
+            stripped = emoji_pat.sub('', tmpl.title).strip()
+            if stripped != tmpl.title:
+                logger.info(f"Stripping emoji: '{tmpl.title}' -> '{stripped}'")
+                tmpl.title = stripped
+                updated_count += 1
+        if updated_count > 0:
+            await session.commit()
+            logger.info(f"Stripped emojis from {updated_count} templates.")
+        else:
+            logger.info("No emoji stripping needed.")
 
 
 

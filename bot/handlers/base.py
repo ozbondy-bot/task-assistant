@@ -787,29 +787,23 @@ async def render_today(message: types.Message, db_user: User, is_callback=False,
             InlineKeyboardButton(text=right_text, callback_data=f"my_chore_info:{inst.id}:{page}")
         )
 
-    # Pagination row (3-button): ⏪ | Добавить or Date | ⏩
+    # Pagination row: LEFT=➕Добавить (page 0) or ⏪, MIDDLE=date, RIGHT=⏩ or empty
+    target_d = future_dates[page - 1] if page > 0 else today
+    date_lbl = f"{target_d.strftime('%d.%m')} ({get_ru_weekday_abbr(target_d)})"
     nav = []
-    # Left arrow
-    if page > 0:
-        nav.append(InlineKeyboardButton(text="⏪", callback_data=f"my_page:{page-1}"))
+    # Left: Добавить on page 0, back arrow on pages 1+
+    if page == 0:
+        nav.append(InlineKeyboardButton(text="➕ Добавить", callback_data=f"my_add:{page}"))
     else:
-        nav.append(InlineKeyboardButton(text=" ", callback_data="noop"))
-        
-    # Middle: always "+Добавить" button
-    nav.append(InlineKeyboardButton(text="➕ Добавить", callback_data=f"my_add:{page}"))
-    
-    # Right arrow
+        nav.append(InlineKeyboardButton(text="⏪", callback_data=f"my_page:{page-1}"))
+    # Middle: always date + weekday
+    nav.append(InlineKeyboardButton(text=date_lbl, callback_data="noop"))
+    # Right: forward arrow if more pages, else empty
     if page < total_pages - 1:
         nav.append(InlineKeyboardButton(text="⏩", callback_data=f"my_page:{page+1}"))
     else:
         nav.append(InlineKeyboardButton(text=" ", callback_data="noop"))
-        
     builder.row(*nav)
-    
-    # Date label row below pagination
-    target_d = future_dates[page - 1] if page > 0 else today
-    date_lbl = f"{target_d.strftime('%d.%m')} ({get_ru_weekday_abbr(target_d)})"
-    builder.row(InlineKeyboardButton(text=date_lbl, callback_data="noop"))
 
     markup = builder.as_markup()
     if is_callback:

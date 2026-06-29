@@ -6,7 +6,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 import sqlalchemy as sa
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, func
 
 from db.models import AsyncSessionLocal, User, Reward, RewardPurchase, TaskTemplate, Completion, TaskInstance, House, PersonalTask
 from bot.parser import clean_task_text
@@ -144,9 +144,12 @@ async def handle_stats_view(call: types.CallbackQuery, db_user: User = None):
 
 
 @dp.callback_query(F.data.startswith("stat_arch:"))
-async def handle_stat_arch(call: types.CallbackQuery, db_user: User = None):
-    parts = call.data.split(":")
-    page = int(parts[1])
+async def handle_stat_arch(call: types.CallbackQuery, db_user: User = None, _page: int = None):
+    if _page is not None:
+        page = _page
+    else:
+        parts = call.data.split(":")
+        page = int(parts[1])
     
     async with AsyncSessionLocal() as session:
         today = await get_house_today_date(session)
@@ -278,7 +281,7 @@ async def handle_rollback_task(call: types.CallbackQuery, db_user: User = None):
         else:
             await call.answer("⚠️ Задача не найдена!", show_alert=False)
             
-    await handle_stat_arch(call, db_user)
+    await handle_stat_arch(call, db_user, _page=page)
 
 
 @dp.callback_query(F.data.startswith("rollback_chore:"))
@@ -344,7 +347,7 @@ async def handle_rollback_chore(call: types.CallbackQuery, db_user: User = None)
         else:
             await call.answer("⚠️ Выполнение не найдено!", show_alert=False)
             
-    await handle_stat_arch(call, db_user)
+    await handle_stat_arch(call, db_user, _page=page)
 
 
 
