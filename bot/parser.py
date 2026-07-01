@@ -172,6 +172,9 @@ async def get_ai_emoji(text: str) -> str:
                         emoji_text = emoji_text.replace(" ", "").replace("\n", "").replace("\r", "").replace("`", "").replace('"', '').replace("'", "")
                         if emoji_text:
                             return emoji_text
+                    else:
+                        resp_text = await resp.text()
+                        logger.error(f"Gemini API error: Status {resp.status}, Response: {resp_text}")
         except Exception as e:
             logger.error(f"Error fetching AI emoji from Gemini: {e}")
             

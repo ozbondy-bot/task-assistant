@@ -197,11 +197,7 @@ async def migrate_reward_prices_to_days():
 async def main():
     from bot.handlers.base import scheduler_loop
     
-    # Run database migration for chore emojis
-    try:
-        await migrate_template_emojis()
-    except Exception as e:
-        logger.error(f"Migration failed: {e}")
+
 
     # Run database migration for reward prices
     try:
