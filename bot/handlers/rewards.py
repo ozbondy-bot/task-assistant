@@ -536,9 +536,8 @@ async def handle_rewards_purchases(call: types.CallbackQuery, db_user: User = No
     else:
         nav.append(InlineKeyboardButton(text=" ", callback_data="noop"))
         
-    # Middle label
-    import datetime
-    today_d = datetime.date.today()
+    async with AsyncSessionLocal() as session:
+        today_d = await get_house_today_date(session)
     def get_ru_weekday_abbr_local(d) -> str:
         abbrs = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
         return abbrs[d.weekday()]

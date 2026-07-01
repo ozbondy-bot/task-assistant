@@ -128,6 +128,33 @@ async def handle_approve_action(call: types.CallbackQuery, db_user: User = None)
                 except Exception as e:
                     logger.error(f"Failed to notify initiator: {e}")
                     
+        elif pending.action_type == "delete_template":
+            tmpl = await session.get(TaskTemplate, payload["template_id"])
+            if not tmpl:
+                await call.answer("⚠️ Шаблон не найден!", show_alert=False)
+                await session.delete(pending)
+                await session.commit()
+                try:
+                    await call.message.delete()
+                except Exception:
+                    pass
+                return
+                
+            tmpl.deleted = True
+            title = tmpl.title
+            await session.commit()
+            
+            await call.answer("✅ Удаление одобрено!", show_alert=False)
+            await call.message.edit_text(f"✅ Вы одобрили удаление задачи «{title}»!")
+            if initiator:
+                try:
+                    await bot.send_message(
+                        chat_id=initiator.telegram_id,
+                        text=f"🔔 Партнёр одобрил удаление задачи «{title}»!"
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to notify initiator: {e}")
+                    
         await session.delete(pending)
         await session.commit()
 
@@ -157,9 +184,12 @@ async def handle_reject_action(call: types.CallbackQuery, db_user: User = None):
         await call.message.edit_text(f"❌ Вы отклонили запрос по задаче «{title}».")
         if initiator:
             try:
+                msg_text = f"🔔 Партнёр отклонил добавление/изменение задачи «{title}»!"
+                if pending.action_type == "delete_template":
+                    msg_text = f"🔔 Партнёр отклонил удаление задачи «{title}»!"
                 await bot.send_message(
                     chat_id=initiator.telegram_id,
-                    text=f"🔔 Партнёр отклонил добавление/изменение задачи «{title}»!"
+                    text=msg_text
                 )
             except Exception as e:
                 logger.error(f"Failed to notify initiator: {e}")
@@ -206,6 +236,8 @@ async def send_morning_message():
     for u in users:
         try:
             await bot.send_message(chat_id=u.telegram_id, text=text, parse_mode="Markdown")
+            from bot.handlers.chores import render_household_chores
+            await render_household_chores(message=None, db_user=u, chat_id=u.telegram_id)
         except Exception as e:
             logger.error(f"Failed to send morning message to {u.telegram_id}: {e}")
  
@@ -231,6 +263,8 @@ async def send_14_reminder():
                 )
                 try:
                     await bot.send_message(chat_id=u.telegram_id, text=text, parse_mode="Markdown")
+                    from bot.handlers.chores import render_household_chores
+                    await render_household_chores(message=None, db_user=u, chat_id=u.telegram_id)
                 except Exception as e:
                     logger.error(f"Failed to send 14:00 reminder to {u.telegram_id}: {e}")
  
@@ -260,6 +294,8 @@ async def send_17_reminder():
         for u in users:
             try:
                 await bot.send_message(chat_id=u.telegram_id, text=text, parse_mode="Markdown")
+                from bot.handlers.chores import render_household_chores
+                await render_household_chores(message=None, db_user=u, chat_id=u.telegram_id)
             except Exception as e:
                 logger.error(f"Failed to send 17:00 reminder to {u.telegram_id}: {e}")
 

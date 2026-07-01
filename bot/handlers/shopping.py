@@ -423,7 +423,8 @@ async def s_archive(call: types.CallbackQuery):
         nav.append(InlineKeyboardButton(text=" ", callback_data="noop"))
         
     # Middle button
-    today_d = datetime.now().date()
+    async with AsyncSessionLocal() as session:
+        today_d = await get_house_today_date(session)
     def get_ru_weekday_abbr_local(d) -> str:
         abbrs = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
         return abbrs[d.weekday()]

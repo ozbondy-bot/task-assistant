@@ -98,7 +98,8 @@ async def handle_my_add_text(message: types.Message, state: FSMContext, db_user:
         pass
         
     from datetime import datetime, timedelta
-    d_today = datetime.now().date()
+    async with AsyncSessionLocal() as session:
+        d_today = await get_house_today_date(session)
     d_tomorrow = d_today + timedelta(days=1)
     
     builder = InlineKeyboardBuilder()

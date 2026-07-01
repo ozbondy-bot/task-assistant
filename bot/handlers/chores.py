@@ -34,7 +34,7 @@ def period_label_ru(p: str) -> str:
     return mapping.get(p, p)
 
 
-async def render_household_chores(message: types.Message, db_user: User, is_callback=False, message_prefix: str = None):
+async def render_household_chores(message: types.Message, db_user: User, is_callback=False, message_prefix: str = None, chat_id: int = None):
     async with AsyncSessionLocal() as session:
         today = await get_house_today_date(session)
         await generate_daily_chores_if_needed(session, ACTIVE_HOUSE_ID)
@@ -89,10 +89,11 @@ async def render_household_chores(message: types.Message, db_user: User, is_call
             )
 
     markup = builder.as_markup()
-    if is_callback:
+    if is_callback and message:
         await message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
     else:
-        await message.answer(text, reply_markup=markup, parse_mode="Markdown")
+        target_chat_id = chat_id or message.chat.id
+        await bot.send_message(chat_id=target_chat_id, text=text, reply_markup=markup, parse_mode="Markdown")
 
 
 @dp.message(F.text.in_({"🏠 Home", "🏠 Домашние дела"}))
@@ -822,19 +823,52 @@ async def handle_te_del(call: types.CallbackQuery, db_user: User = None):
     parts = call.data.split(":")
     tid = int(parts[1])
     src = parts[2]
+    import json
     async with AsyncSessionLocal() as session:
         tmpl = await session.get(TaskTemplate, tid)
-        if tmpl:
+        if not tmpl:
+            await call.answer("Шаблон не найден", show_alert=False)
+            return
+            
+        partner = await get_partner_user(session, db_user.id)
+        if partner:
+            pending = PendingAction(
+                house_id=ACTIVE_HOUSE_ID,
+                initiator_id=db_user.id,
+                action_type="delete_template",
+                data_payload=json.dumps({
+                    "template_id": tid
+                })
+            )
+            session.add(pending)
+            await session.commit()
+            
+            partner_text = (
+                "🔔 *Согласование удаления задачи!*\\n\\n"
+                f"Жилец *{db_user.display_name or db_user.username or 'Партнёр'}* хочет удалить домашнюю задачу:\\n"
+                f"🗑 *{tmpl.title}*\\n\\n"
+                "Одобряете удаление?"
+            )
+            builder = InlineKeyboardBuilder()
+            builder.row(
+                InlineKeyboardButton(text="✅ Одобрить", callback_data=f"approve_act:{pending.id}"),
+                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_act:{pending.id}")
+            )
+            try:
+                await bot.send_message(chat_id=partner.telegram_id, text=partner_text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+            except Exception as e:
+                logger.error(f"Failed to send approval message to partner: {e}")
+            
+            await call.answer("⏳ Отправлено на согласование партнёру", show_alert=False)
+            await render_household_chores(call.message, db_user, is_callback=True, message_prefix=f"⏳ Запрос на удаление задачи «{tmpl.title}» отправлен партнёру.")
+        else:
             tmpl.deleted = True
             await session.commit()
             await call.answer("🗑 Шаблон удален!", show_alert=False)
-        else:
-            await call.answer("Шаблон не найден", show_alert=False)
-            
-    if src == "today_list":
-        await render_today(call.message, db_user, is_callback=True)
-    else:
-        await render_chores_settings(call.message, db_user, is_callback=True)
+            if src == "today_list":
+                await render_today(call.message, db_user, is_callback=True)
+            else:
+                await render_chores_settings(call.message, db_user, is_callback=True)
 
 
 @dp.callback_query(F.data.startswith("te_del_confirm:"))

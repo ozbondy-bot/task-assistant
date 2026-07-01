@@ -35,7 +35,8 @@ async def run_bot():
         await bot.set_my_short_description(
             "Помощник по домашним делам и личным задачам. Зарабатывайте печеньки и обменивайте их на награды! 🍪🏠"
         )
-        logger.info("Bot descriptions set successfully.")
+        await bot.delete_my_commands()
+        logger.info("Bot descriptions and commands cleared/set successfully.")
     except Exception as e:
         logger.error(f"Failed to set bot descriptions: {e}")
     await dp.start_polling(bot, allowed_updates=["message", "callback_query"])
