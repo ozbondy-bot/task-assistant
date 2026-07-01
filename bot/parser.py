@@ -151,7 +151,7 @@ logger = logging.getLogger(__name__)
 async def get_ai_emoji(text: str) -> str:
     api_key = os.getenv("GEMINI_API_KEY")
     if api_key:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={api_key}"
         headers = {"Content-Type": "application/json"}
         prompt = (
             f"Тебе дана задача: '{text}'. "
