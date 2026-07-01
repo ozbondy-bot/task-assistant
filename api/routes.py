@@ -55,8 +55,9 @@ async def health():
 # -- Personal tasks --
 @app.get("/api/tasks/today")
 async def get_today_tasks(user: User = Depends(get_current_user)):
-    today = datetime.now().date()
+    from bot.handlers.base import get_house_today_date
     async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
         result = await session.execute(
             select(PersonalTask).where(
                 and_(
@@ -153,10 +154,12 @@ async def complete_task(task_id: int, user: User = Depends(get_current_user)):
         task.is_completed = True
         if task.recurrence:
             delta = get_recurrence_delta(task.recurrence)
+            from bot.handlers.base import get_house_today_date
+            today_date = await get_house_today_date(session)
             new_task = PersonalTask(
                 user_id=user.id,
                 text=f"🟢 {clean_task_text(task.text)}",
-                date_execution=datetime.now().date() + delta,
+                date_execution=today_date + delta,
                 category="inbox",
                 recurrence=task.recurrence,
                 is_completed=False,
@@ -181,8 +184,9 @@ async def delete_task(task_id: int, user: User = Depends(get_current_user)):
 # -- Household tasks --
 @app.get("/api/house/tasks")
 async def get_house_tasks(user: User = Depends(get_current_user)):
-    today = datetime.now().date()
+    from bot.handlers.base import get_house_today_date
     async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
         result = await session.execute(
             select(TaskInstance, TaskTemplate).join(
                 TaskTemplate, TaskInstance.template_id == TaskTemplate.id

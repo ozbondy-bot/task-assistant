@@ -13,7 +13,7 @@ from db.models import AsyncSessionLocal, User, House, TaskTemplate, TaskInstance
 from bot.handlers.base import (
     bot, dp, ACTIVE_HOUSE_ID, ALLOWED_TELEGRAM_IDS, logger,
     get_partner_user, get_house_today_date, generate_daily_chores_if_needed,
-    render_today, get_main_keyboard, EditTemplateState, AddTemplateState,
+    render_today, EditTemplateState, AddTemplateState,
         format_calendar_header, find_scheduled_date_on_or_after,
     get_template_next_date, get_template_next_date_val, get_period_label,
     create_calendar_keyboard_custom
@@ -1035,23 +1035,7 @@ async def handle_cal_nav(call: types.CallbackQuery, db_user: User = None):
     await call.message.edit_text(header, reply_markup=markup, parse_mode="Markdown")
 
 
-@dp.callback_query(F.data == "chores_leaderboard")
-async def handle_chores_leaderboard(call: types.CallbackQuery, db_user: User = None):
-    async with AsyncSessionLocal() as session:
-        leaderboard_result = await session.execute(
-            select(User)
-            .where(User.house_id == ACTIVE_HOUSE_ID)
-            .order_by(User.points.desc())
-        )
-        leaderboard = leaderboard_result.scalars().all()
 
-    text = "🏆 *Рейтинг участников:*\n\n"
-    medals = ["🥇", "🥈", "🥉"]
-    for idx, usr in enumerate(leaderboard):
-        medal = medals[idx] if idx < len(medals) else "👤"
-        text += f"{medal} {usr.display_name} — `{usr.points or 0} 🍪`\n"
-
-    await call.message.edit_text(text, reply_markup=None, parse_mode="Markdown")
 
 
 @dp.callback_query(F.data.startswith("claim_chore:"))

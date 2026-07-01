@@ -5,8 +5,8 @@ import calendar
 from datetime import datetime, timedelta, date
 from aiogram import Bot, Dispatcher, types, F, BaseMiddleware
 from aiogram.filters import CommandStart, Command, StateFilter
-from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
-from aiogram.types import KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -576,15 +576,7 @@ dp.message.middleware(AutoRegisterMiddleware())
 dp.callback_query.middleware(AutoRegisterMiddleware())
 
 
-# ── Keyboards ─────────────────────────────────────────────────────────────────
-def get_main_keyboard() -> types.ReplyKeyboardMarkup:
-    builder = ReplyKeyboardBuilder()
-    builder.row(
-        KeyboardButton(text="🏠 Home"),
-        KeyboardButton(text="📋 My"),
-        KeyboardButton(text="📊 Stat"),
-    )
-    return builder.as_markup(resize_keyboard=True, is_persistent=True)
+
 
 
 # ── /start ─────────────────────────────────────────────────────────────────────
@@ -635,9 +627,7 @@ async def cmd_id(message: types.Message):
 
 
 # ── Render Today ───────────────────────────────────────────────────────────────
-async def rollover_overdue_tasks(session: AsyncSession, user_id: int):
-    """Move overdue uncompleted tasks to today (disabled date shifting to preserve original date)."""
-    pass
+
 
 
 
@@ -645,7 +635,7 @@ async def render_today(message: types.Message, db_user: User, is_callback=False,
     async with AsyncSessionLocal() as session:
         today = await get_house_today_date(session)
 
-        await rollover_overdue_tasks(session, db_user.id)
+
 
         # 1. Fetch ALL active personal tasks
         result = await session.execute(
