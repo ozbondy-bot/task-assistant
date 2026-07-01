@@ -50,11 +50,8 @@ async def handle_my_add(call: types.CallbackQuery, state: FSMContext, db_user: U
         InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
         InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
     )
-    builder.row(
-        InlineKeyboardButton(text="💈 Пиши текст задачи 💈", callback_data="noop")
-    )
     sent_msg = await call.message.edit_text(
-        "\u3164",
+        "💈 Пиши текст задачи 💈",
         reply_markup=builder.as_markup(),
         parse_mode="Markdown"
     )
@@ -108,27 +105,23 @@ async def handle_my_add_text(message: types.Message, state: FSMContext, db_user:
         InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
         InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
     )
-    builder.row(
-        InlineKeyboardButton(text="💈 Выберите дату для задачи 💈", callback_data="noop")
-    )
     days_ru = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
     builder.row(
         InlineKeyboardButton(text=f"{d_today.strftime('%d.%m')} ({days_ru[d_today.weekday()]})", callback_data="addpt_date:today"),
         InlineKeyboardButton(text=f"{d_tomorrow.strftime('%d.%m')} ({days_ru[d_tomorrow.weekday()]})", callback_data="addpt_date:tomorrow"),
         InlineKeyboardButton(text="Другая дата", callback_data="addpt_date:calendar")
     )
-    
     if last_msg_id:
         await message.bot.edit_message_text(
             chat_id=message.chat.id,
             message_id=last_msg_id,
-            text="\u3164",
+            text="💈 Выберите дату для задачи 💈",
             reply_markup=builder.as_markup(),
             parse_mode="Markdown"
         )
     else:
         sent_msg = await message.answer(
-            "\u3164",
+            "💈 Выберите дату для задачи 💈",
             reply_markup=builder.as_markup(),
             parse_mode="Markdown"
         )
@@ -245,11 +238,8 @@ async def handle_addpt_period(call: types.CallbackQuery, state: FSMContext, db_u
             InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
             InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
         )
-        builder.row(
-            InlineKeyboardButton(text="💈 Укажите интервал в днях 💈", callback_data="noop")
-        )
         sent_msg = await call.message.edit_text(
-            "\u3164",
+            "💈 Укажите интервал в днях 💈",
             reply_markup=builder.as_markup(),
             parse_mode="Markdown"
         )

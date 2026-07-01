@@ -714,7 +714,7 @@ async def render_today(message: types.Message, db_user: User, is_callback=False,
         my_chores = [(inst, tmpl) for inst, tmpl in my_chores_all if inst.date == target_date]
         info_title = "Мои дела"
 
-    text = "\u3164"
+    text = f"💈 {info_title} (жми для выполнения) 💈"
 
     builder = InlineKeyboardBuilder()
     
@@ -723,11 +723,6 @@ async def render_today(message: types.Message, db_user: User, is_callback=False,
         InlineKeyboardButton(text="🏠 Home", callback_data="home_view"),
         InlineKeyboardButton(text="⚡📋 My⚡", callback_data="my_page:0"),
         InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
-    )
-    
-    # Row 2 (Info header with 💈)
-    builder.row(
-        InlineKeyboardButton(text=f"💈 {info_title} (жми для выполнения) 💈", callback_data="noop")
     )
 
     # Personal tasks rendering

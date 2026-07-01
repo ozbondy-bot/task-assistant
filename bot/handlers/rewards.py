@@ -101,7 +101,7 @@ async def render_shop_and_purchases(message: types.Message, db_user: User, is_ca
         for c in weekly_comps:
             weekly_map[c.user_id] = weekly_map.get(c.user_id, 0) + (c.points or 0)
 
-    text = "\u3164"
+    text = "💈 Баланс героев 💈"
 
     builder = InlineKeyboardBuilder()
     
@@ -117,11 +117,6 @@ async def render_shop_and_purchases(message: types.Message, db_user: User, is_ca
         InlineKeyboardButton(text="🛍 Магазин", callback_data="rewards_shop_view"),
         InlineKeyboardButton(text="🛒 Покупки", callback_data="shop_view_items"),
         InlineKeyboardButton(text="📜 Архив", callback_data="stat_arch:0")
-    )
-
-    # Row 3 (Balance header with 💈)
-    builder.row(
-        InlineKeyboardButton(text="💈 Баланс героев 💈", callback_data="noop")
     )
 
     # Row 4+ (Leaderboard items)
@@ -329,7 +324,7 @@ async def render_rewards_settings(message: types.Message, db_user: User, is_call
         )
         rewards = result.scalars().all()
 
-    text = "\u3164"
+    text = "💈 Нажмите на награду для удаления 💈"
     
     builder = InlineKeyboardBuilder()
     
@@ -350,11 +345,6 @@ async def render_rewards_settings(message: types.Message, db_user: User, is_call
     # Row 3 (Add button)
     builder.row(
         InlineKeyboardButton(text="➕ Добавить награду", callback_data="add_reward_start")
-    )
-    
-    # Row 4 (Info header with 💈)
-    builder.row(
-        InlineKeyboardButton(text="💈 Нажмите на награду для удаления 💈", callback_data="noop")
     )
     
     if rewards:
@@ -390,7 +380,7 @@ async def handle_rewards_shop_view(call: types.CallbackQuery, state: FSMContext 
     else:
         stat_line = "30 дн - нет истории"
 
-    text = "\u3164"
+    text = f"💈 Нажми на награду для покупки ({stat_line}) 💈"
 
     builder = InlineKeyboardBuilder()
     
@@ -411,11 +401,6 @@ async def handle_rewards_shop_view(call: types.CallbackQuery, state: FSMContext 
     # Row 3 (Rewards management)
     builder.row(
         InlineKeyboardButton(text="⚙️ Управление наградами", callback_data="rewards_settings")
-    )
-    
-    # Row 4 (Info header with 💈)
-    builder.row(
-        InlineKeyboardButton(text=f"💈 Нажми на награду для покупки ({stat_line}) 💈", callback_data="noop")
     )
     
     if rewards:
