@@ -1194,11 +1194,8 @@ async def handle_add_tmpl_start(call: types.CallbackQuery, state: FSMContext):
         InlineKeyboardButton(text="Добавить из базы", callback_data="add_from_templates_list"),
         InlineKeyboardButton(text="⚡Создать новую⚡", callback_data="noop")
     )
-    builder.row(
-        InlineKeyboardButton(text="📝 Пиши название задачи:", callback_data="noop")
-    )
     sent_msg = await call.message.edit_text(
-        "\u3164",
+        "📝 Пиши название задачи:",
         reply_markup=builder.as_markup(),
         parse_mode="Markdown"
     )
@@ -1221,6 +1218,11 @@ async def handle_add_tmpl_title(message: types.Message, state: FSMContext):
         except Exception:
             pass
         return
+        
+    from bot.parser import get_ai_emoji
+    emoji = await get_ai_emoji(title)
+    if emoji:
+        title = f"{emoji} {title}"
         
     await state.update_data(title=title)
     await state.set_state(AddTemplateState.waiting_for_points)
@@ -1246,21 +1248,18 @@ async def handle_add_tmpl_title(message: types.Message, state: FSMContext):
         InlineKeyboardButton(text="Добавить из базы", callback_data="add_from_templates_list"),
         InlineKeyboardButton(text="⚡Создать новую⚡", callback_data="noop")
     )
-    builder.row(
-        InlineKeyboardButton(text="🍪 Сколько печенек за нее дадим?", callback_data="noop")
-    )
     
     if last_msg_id:
         await message.bot.edit_message_text(
             chat_id=message.chat.id,
             message_id=last_msg_id,
-            text="\u3164",
+            text="🍪 Сколько печенек за нее дадим?",
             reply_markup=builder.as_markup(),
             parse_mode="Markdown"
         )
     else:
         sent_msg = await message.answer(
-            "\u3164",
+            "🍪 Сколько печенек за нее дадим?",
             reply_markup=builder.as_markup(),
             parse_mode="Markdown"
         )
@@ -1305,9 +1304,6 @@ async def handle_add_tmpl_points(message: types.Message, state: FSMContext):
         InlineKeyboardButton(text="⚡Создать новую⚡", callback_data="noop")
     )
     builder.row(
-        InlineKeyboardButton(text="📅 Отлично! Как часто это делаем?", callback_data="noop")
-    )
-    builder.row(
         InlineKeyboardButton(text="Единоразово", callback_data="set_tmpl_period:once"),
         InlineKeyboardButton(text="Каждые X дней", callback_data="set_tmpl_period:every_x_days")
     )
@@ -1316,13 +1312,13 @@ async def handle_add_tmpl_points(message: types.Message, state: FSMContext):
         await message.bot.edit_message_text(
             chat_id=message.chat.id,
             message_id=last_msg_id,
-            text="\u3164",
+            text="📅 Отлично! Как часто это делаем?",
             reply_markup=builder.as_markup(),
             parse_mode="Markdown"
         )
     else:
         sent_msg = await message.answer(
-            "\u3164",
+            "📅 Отлично! Как часто это делаем?",
             reply_markup=builder.as_markup(),
             parse_mode="Markdown"
         )
@@ -1348,11 +1344,8 @@ async def handle_add_tmpl_periodicity(call: types.CallbackQuery, state: FSMConte
             InlineKeyboardButton(text="➕ Добавить", callback_data="chores_add_menu"),
             InlineKeyboardButton(text="⚙️ Настройки", callback_data="chores_settings")
         )
-        builder.row(
-            InlineKeyboardButton(text="Укажите число дней, с каким интервалом повторять задачу (например, 5):", callback_data="noop")
-        )
         await call.message.edit_text(
-            "\u3164",
+            "Укажите число дней, с каким интервалом повторять задачу (например, 5):",
             reply_markup=builder.as_markup(),
             parse_mode="Markdown"
         )

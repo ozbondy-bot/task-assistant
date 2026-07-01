@@ -21,10 +21,51 @@ if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL env var is required!")
 
 
+async def migrate_emojis_in_background():
+    logger.info("Starting background database records emoji migration...")
+    try:
+        from bot.parser import get_ai_emoji
+        from db.models import AsyncSessionLocal, PersonalTask, TaskTemplate
+        from sqlalchemy import select
+        import re
+        async with AsyncSessionLocal() as session:
+            # 1. Update PersonalTask records
+            tasks_res = await session.execute(select(PersonalTask))
+            tasks = tasks_res.scalars().all()
+            updated_any = False
+            for t in tasks:
+                has_emoji = re.match(r'^([\u2600-\u27BF\U0001f000-\U0001f9ff])', t.text)
+                if not has_emoji and not t.text.startswith("🔴"):
+                    emoji = await get_ai_emoji(t.text)
+                    if emoji and emoji != "📝":
+                        t.text = f"{emoji} {t.text}"
+                        updated_any = True
+            
+            # 2. Update TaskTemplate records
+            templates_res = await session.execute(select(TaskTemplate))
+            templates = templates_res.scalars().all()
+            for tmpl in templates:
+                has_emoji = re.match(r'^([\u2600-\u27BF\U0001f000-\U0001f9ff])', tmpl.title)
+                if not has_emoji:
+                    emoji = await get_ai_emoji(tmpl.title)
+                    if emoji and emoji != "📝":
+                        tmpl.title = f"{emoji} {tmpl.title}"
+                        updated_any = True
+                        
+            if updated_any:
+                await session.commit()
+                logger.info("Background database records successfully migrated with emojis.")
+            else:
+                logger.info("No database records needed emoji migration.")
+    except Exception as e:
+        logger.error(f"Failed to migrate database records with emojis in background: {e}")
+
+
 async def run_bot():
     from bot.handlers.base import bot
     from bot.handlers import dp
     logger.info("Starting bot polling...")
+    asyncio.create_task(migrate_emojis_in_background())
     try:
         await bot.set_my_description(
             "Привет! Я семейный помощник по дому и личным делам. 🏠✨\n\n"

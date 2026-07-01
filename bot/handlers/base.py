@@ -18,7 +18,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from db.models import AsyncSessionLocal, User, House, PersonalTask, ShoppingItem, TaskTemplate, TaskInstance, Completion, Reward, RewardPurchase, PendingAction
-from bot.parser import parse_input, get_recurrence_delta, clean_task_text
+from bot.parser import parse_input, get_recurrence_delta, clean_task_text, extract_emoji
 
 logger = logging.getLogger(__name__)
 
@@ -733,7 +733,8 @@ async def render_today(message: types.Message, db_user: User, is_callback=False,
         t_date = target_date if page > 0 else t.date_execution
         date_str = t_date.strftime('%d.%m.')
         
-        emoji = "🔴" if is_urgent else ("🔁" if t.recurrence else "👤")
+        task_emoji = extract_emoji(t.text) or "👤"
+        emoji = "🔴" if is_urgent else ("🔁" if t.recurrence else task_emoji)
         circle = ""
         right_text = f"{date_str} {emoji} ℹ️"
             
@@ -748,7 +749,8 @@ async def render_today(message: types.Message, db_user: User, is_callback=False,
         c_date = inst.date
         date_str = c_date.strftime('%d.%m.')
         circle = ""
-        right_text = f"🏠 {date_str} {pts_str}🍪 ℹ️"
+        chore_emoji = extract_emoji(tmpl.title) or "🏠"
+        right_text = f"{chore_emoji} {date_str} {pts_str}🍪 ℹ️"
             
         builder.row(
             InlineKeyboardButton(text=tmpl.title, callback_data=f"done_chore_inst:{inst.id}:{page}"),

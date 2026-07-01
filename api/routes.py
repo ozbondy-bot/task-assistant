@@ -128,6 +128,11 @@ async def add_task(req: AddTaskRequest, user: User = Depends(get_current_user)):
     if req.recurrence:
         recurrence = req.recurrence
 
+    from bot.parser import get_ai_emoji
+    emoji = await get_ai_emoji(clean_text)
+    if emoji:
+        clean_text = f"{emoji} {clean_text}"
+
     async with AsyncSessionLocal() as session:
         task = PersonalTask(
             user_id=user.id,

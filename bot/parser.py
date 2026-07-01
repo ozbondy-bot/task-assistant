@@ -149,9 +149,6 @@ import logging
 logger = logging.getLogger(__name__)
 
 async def get_ai_emoji(text: str) -> str:
-    text_lower = text.lower()
-    
-    # 1. Try Gemini API
     api_key = os.getenv("GEMINI_API_KEY")
     if api_key:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
@@ -167,47 +164,18 @@ async def get_ai_emoji(text: str) -> str:
             }]
         }
         try:
-            import aiohttp
-            import re
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, headers=headers, json=payload, timeout=5) as resp:
                     if resp.status == 200:
                         data = await resp.json()
                         emoji_text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
-                        emoji_text = emoji_text.replace(" ", "").replace("\n", "").replace("\r", "")
-                        match = re.match(r'^([\u2600-\u27BF\U0001f000-\U0001f9ff])', emoji_text)
-                        if match:
-                            return match.group(1)
+                        emoji_text = emoji_text.replace(" ", "").replace("\n", "").replace("\r", "").replace("`", "").replace('"', '').replace("'", "")
+                        if emoji_text:
+                            return emoji_text
         except Exception as e:
             logger.error(f"Error fetching AI emoji from Gemini: {e}")
             
-    # 2. Local fallback rules (detailed substring checks)
-    rules = [
-        (["таблет", "лекарств", "витамин", "аптек"], "💊"),
-        (["пылесос"], "🧹"),
-        (["посудомой", "посуд", "тарелк", "чашк", "ложек", "вилк"], "🍽"),
-        (["стир", "бель", "одеял", "наматрас", "постир", "сложить", "одежд"], "🧺"),
-        (["глаж", "гладить", "утюг"], "👔"),
-        (["зеркал", "окно", "окна", "стекл"], "✨"),
-        (["пыль"], "💨"),
-        (["поилк", "асю"], "🐈"),
-        (["цвет", "полив", "растен", "цветок"], "🌱"),
-        (["готовк", "готовит", "обед", "ужин", "завтр", "еда", "кухн"], "🍳"),
-        (["духовк", "плит"], "🍳"),
-        (["шкаф", "комод", "тумб"], "🗄"),
-        (["пол ", "полы"], "🧹"),
-        (["мусор", "пакет"], "🗑"),
-        (["разбор", "разобрать", "вещ", "коробк", "порядок"], "📦"),
-        (["стол"], "🧼"),
-        (["мыть", "чистк", "раковин", "кош", "корм", "кот", "животн", "ванн", "туалет", "душ", "сантех"], "🧼"),
-    ]
-    
-    for kw_list, emoji in rules:
-        for kw in kw_list:
-            if kw in text_lower:
-                return emoji
-        
-    return "🧹" # Default fallback chore emoji
+    return "📝" # Default fallback chore emoji
 
 
 def clean_task_text(text: str) -> str:
@@ -224,3 +192,14 @@ def clean_task_text(text: str) -> str:
         clean_text = f"🔴 {clean_text}"
         
     return clean_text
+
+
+def extract_emoji(text: str) -> str:
+    words = text.split()
+    for w in words:
+        if w == "🔴":
+            continue
+        if w and ord(w[0]) > 0x2000:
+            return w
+        break
+    return None

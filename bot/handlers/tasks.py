@@ -214,6 +214,11 @@ async def handle_addpt_period(call: types.CallbackQuery, state: FSMContext, db_u
         from datetime import datetime
         exec_date = datetime.strptime(date_str, "%Y-%m-%d").date()
         
+        from bot.parser import get_ai_emoji
+        emoji = await get_ai_emoji(text)
+        if emoji:
+            text = f"{emoji} {text}"
+            
         async with AsyncSessionLocal() as session:
             task = PersonalTask(
                 user_id=db_user.id,
@@ -268,6 +273,11 @@ async def handle_addpt_recurrence_days(message: types.Message, state: FSMContext
     from datetime import datetime
     exec_date = datetime.strptime(date_str, "%Y-%m-%d").date()
     
+    from bot.parser import get_ai_emoji
+    emoji = await get_ai_emoji(text)
+    if emoji:
+        text = f"{emoji} {text}"
+        
     async with AsyncSessionLocal() as session:
         task = PersonalTask(
             user_id=db_user.id,
