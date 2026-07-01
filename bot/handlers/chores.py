@@ -128,18 +128,13 @@ async def handle_chores_add_menu(call: types.CallbackQuery, state: FSMContext = 
         InlineKeyboardButton(text="⚙️ Настройки", callback_data="chores_settings")
     )
     
-    # Row 3 (Add options header)
-    builder.row(
-        InlineKeyboardButton(text="📝 Выберите способ добавления задачи:", callback_data="noop")
-    )
-    
     # Row 4 (Add options)
     builder.row(
         InlineKeyboardButton(text="Добавить из базы", callback_data="add_from_templates_list"),
         InlineKeyboardButton(text="Создать новую", callback_data="add_tmpl_start")
     )
     await call.message.edit_text(
-        "\u3164",
+        "💈 Добавить задачу: 💈",
         reply_markup=builder.as_markup(),
         parse_mode="Markdown"
     )
@@ -448,7 +443,7 @@ async def handle_te_title_start(call: types.CallbackQuery, state: FSMContext):
         InlineKeyboardButton(text="➕ Добавить", callback_data="chores_add_menu"),
         InlineKeyboardButton(text="⚡⚙️ Настройки⚡", callback_data="chores_settings")
     )
-    sent_msg = await call.message.edit_text("💈 Пиши новое название 💈", reply_markup=builder.as_markup())
+    sent_msg = await call.message.edit_text("💈 Новое название: 💈", reply_markup=builder.as_markup())
     await state.update_data(last_msg_id=sent_msg.message_id)
 
 
@@ -461,6 +456,11 @@ async def handle_te_title_input(message: types.Message, state: FSMContext, db_us
         except Exception:
             pass
         return
+        
+    from bot.parser import get_ai_emoji
+    emoji = await get_ai_emoji(title)
+    if emoji:
+        title = f"{emoji} {title}"
         
     data = await state.get_data()
     tid = data["edit_tid"]
@@ -546,7 +546,7 @@ async def handle_te_points_start(call: types.CallbackQuery, state: FSMContext):
         InlineKeyboardButton(text="➕ Добавить", callback_data="chores_add_menu"),
         InlineKeyboardButton(text="⚙️ Настройки", callback_data="chores_settings")
     )
-    sent_msg = await call.message.edit_text("💈 Сколько печенек дадим? 💈", reply_markup=builder.as_markup())
+    sent_msg = await call.message.edit_text("💈 Сколько печенек? 💈", reply_markup=builder.as_markup())
     await state.update_data(last_msg_id=sent_msg.message_id)
 
 
@@ -651,7 +651,7 @@ async def handle_te_period_start(call: types.CallbackQuery, state: FSMContext):
         InlineKeyboardButton(text="Каждый день", callback_data="te_period_sel:daily"),
         InlineKeyboardButton(text="Каждые X дней", callback_data="te_period_sel:every_x_days")
     )
-    sent_msg = await call.message.edit_text("💈 Выберите цикл задачи 💈", reply_markup=builder.as_markup())
+    sent_msg = await call.message.edit_text("💈 Периодичность: 💈", reply_markup=builder.as_markup())
     await state.update_data(last_msg_id=sent_msg.message_id)
 
 
@@ -721,7 +721,7 @@ async def handle_te_period_selected(call: types.CallbackQuery, state: FSMContext
             InlineKeyboardButton(text="➕ Добавить", callback_data="chores_add_menu"),
             InlineKeyboardButton(text="⚙️ Настройки", callback_data="chores_settings")
         )
-        sent_msg = await call.message.edit_text("💈 Укажите интервал в днях 💈", reply_markup=builder.as_markup())
+        sent_msg = await call.message.edit_text("💈 Интервал (в днях): 💈", reply_markup=builder.as_markup())
         await state.update_data(last_msg_id=sent_msg.message_id)
 
 
@@ -1195,7 +1195,7 @@ async def handle_add_tmpl_start(call: types.CallbackQuery, state: FSMContext):
         InlineKeyboardButton(text="⚡Создать новую⚡", callback_data="noop")
     )
     sent_msg = await call.message.edit_text(
-        "📝 Пиши название задачи:",
+        "💈 Название задачи: 💈",
         reply_markup=builder.as_markup(),
         parse_mode="Markdown"
     )
@@ -1253,13 +1253,13 @@ async def handle_add_tmpl_title(message: types.Message, state: FSMContext):
         await message.bot.edit_message_text(
             chat_id=message.chat.id,
             message_id=last_msg_id,
-            text="🍪 Сколько печенек за нее дадим?",
+            text="💈 Сколько печенек? 💈",
             reply_markup=builder.as_markup(),
             parse_mode="Markdown"
         )
     else:
         sent_msg = await message.answer(
-            "🍪 Сколько печенек за нее дадим?",
+            "💈 Сколько печенек? 💈",
             reply_markup=builder.as_markup(),
             parse_mode="Markdown"
         )
@@ -1312,13 +1312,13 @@ async def handle_add_tmpl_points(message: types.Message, state: FSMContext):
         await message.bot.edit_message_text(
             chat_id=message.chat.id,
             message_id=last_msg_id,
-            text="📅 Отлично! Как часто это делаем?",
+            text="💈 Периодичность: 💈",
             reply_markup=builder.as_markup(),
             parse_mode="Markdown"
         )
     else:
         sent_msg = await message.answer(
-            "📅 Отлично! Как часто это делаем?",
+            "💈 Периодичность: 💈",
             reply_markup=builder.as_markup(),
             parse_mode="Markdown"
         )
@@ -1345,7 +1345,7 @@ async def handle_add_tmpl_periodicity(call: types.CallbackQuery, state: FSMConte
             InlineKeyboardButton(text="⚙️ Настройки", callback_data="chores_settings")
         )
         await call.message.edit_text(
-            "Укажите число дней, с каким интервалом повторять задачу (например, 5):",
+            "💈 Интервал (в днях): 💈",
             reply_markup=builder.as_markup(),
             parse_mode="Markdown"
         )

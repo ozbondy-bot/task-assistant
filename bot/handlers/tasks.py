@@ -244,7 +244,7 @@ async def handle_addpt_period(call: types.CallbackQuery, state: FSMContext, db_u
             InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
         )
         sent_msg = await call.message.edit_text(
-            "💈 Укажите интервал в днях 💈",
+            "💈 Интервал (в днях): 💈",
             reply_markup=builder.as_markup(),
             parse_mode="Markdown"
         )
