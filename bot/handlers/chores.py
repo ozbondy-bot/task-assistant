@@ -502,7 +502,7 @@ async def handle_te_title_input(message: types.Message, state: FSMContext, db_us
             
             partner_text = (
                 "🔔 *Согласование изменения задачи!*\\n\\n"
-                f"Жилец *{db_user.display_name or db_user.username or 'Партнёр'}* хочет изменить название домашней задачи:\\n"
+                f"*{db_user.display_name or db_user.username or 'Партнёр'}* хочет изменить название домашней задачи:\\n"
                 f"❌ *Было:* {tmpl.title}\\n"
                 f"✅ *Станет:* {title}\\n\\n"
                 "Одобряете изменение?"
@@ -606,7 +606,7 @@ async def handle_te_points_input(message: types.Message, state: FSMContext, db_u
             
             partner_text = (
                 "🔔 *Согласование изменения задачи!*\\n\\n"
-                f"Жилец *{db_user.display_name or db_user.username or 'Партнёр'}* хочет изменить количество печенек:\\n"
+                f"*{db_user.display_name or db_user.username or 'Партнёр'}* хочет изменить количество печенек:\\n"
                 f"❌ *Было:* {tmpl.points}\\n"
                 f"✅ *Станет:* {pts}\\n\\n"
                 "Одобряете изменение?"
@@ -700,7 +700,7 @@ async def handle_te_period_selected(call: types.CallbackQuery, state: FSMContext
                 
                 partner_text = (
                     "🔔 *Согласование изменения задачи!*\\n\\n"
-                    f"Жилец *{db_user.display_name or db_user.username or 'Партнёр'}* хочет изменить цикл задачи.\\n\\n"
+                    f"*{db_user.display_name or db_user.username or 'Партнёр'}* хочет изменить цикл задачи.\\n\\n"
                     "Одобряете изменение?"
                 )
                 builder = InlineKeyboardBuilder()
@@ -788,7 +788,7 @@ async def handle_te_period_days_input(message: types.Message, state: FSMContext,
             
             partner_text = (
                 "🔔 *Согласование изменения задачи!*\\n\\n"
-                f"Жилец *{db_user.display_name or db_user.username or 'Партнёр'}* хочет изменить цикл задачи на каждые {days} дней.\\n\\n"
+                f"*{db_user.display_name or db_user.username or 'Партнёр'}* хочет изменить цикл задачи на каждые {days} дней.\\n\\n"
                 "Одобряете изменение?"
             )
             builder = InlineKeyboardBuilder()
@@ -845,7 +845,7 @@ async def handle_te_del(call: types.CallbackQuery, db_user: User = None):
             
             partner_text = (
                 "🔔 *Согласование удаления задачи!*\\n\\n"
-                f"Жилец *{db_user.display_name or db_user.username or 'Партнёр'}* хочет удалить домашнюю задачу:\\n"
+                f"*{db_user.display_name or db_user.username or 'Партнёр'}* хочет удалить домашнюю задачу:\\n"
                 f"🗑 *{tmpl.title}*\\n\\n"
                 "Одобряете удаление?"
             )
@@ -1410,7 +1410,7 @@ async def handle_add_tmpl_periodicity(call: types.CallbackQuery, state: FSMConte
             p_desc = "каждый день" if periodicity == "daily" else "1 раз"
             partner_text = (
                 f"🔔 *Согласование новой задачи!*\\n\\n"
-                f"Жилец *{db_user.display_name or db_user.username or 'Партнёр'}* хочет добавить домашнюю задачу:\\n"
+                f"*{db_user.display_name or db_user.username or 'Партнёр'}* хочет добавить домашнюю задачу:\\n"
                 f"📋 *Название:* {title}\\n"
                 f"🍪 *Награда:* {pts} печенек\\n"
                 f"📅 *Цикл:* {p_desc}\\n\\n"
@@ -1492,7 +1492,7 @@ async def handle_add_tmpl_period_days(message: types.Message, state: FSMContext,
             
             partner_text = (
                 f"🔔 *Согласование новой задачи!*\\n\\n"
-                f"Жилец *{db_user.display_name or db_user.username or 'Партнёр'}* хочет добавить домашнюю задачу:\\n"
+                f"*{db_user.display_name or db_user.username or 'Партнёр'}* хочет добавить домашнюю задачу:\\n"
                 f"📋 *Название:* {title}\\n"
                 f"🍪 *Награда:* {points} печенек\\n"
                 f"📅 *Цикл:* каждые {days} дней\\n\\n"
