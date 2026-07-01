@@ -590,8 +590,8 @@ def get_main_keyboard() -> types.ReplyKeyboardMarkup:
 # ── /start ─────────────────────────────────────────────────────────────────────
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message, db_user: User = None):
-    # Activate reply keyboard
-    await message.answer("🤖 Добро пожаловать! Главное меню активировано.", reply_markup=get_main_keyboard())
+    # Remove reply keyboard
+    await message.answer("🤖 Добро пожаловать!", reply_markup=types.ReplyKeyboardRemove())
     
     text = (
         "👋 Привет!\n\n"
