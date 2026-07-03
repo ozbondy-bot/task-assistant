@@ -962,7 +962,7 @@ async def handle_shift_once(call: types.CallbackQuery, db_user: User = None):
             
         await session.commit()
         title = tmpl.title if tmpl else "Домашнее дело"
-        await call.answer(f"🔄 Задача '{title}' перенесена на {new_date.strftime('%d.%m.%Y')}!", show_alert=True)
+        await call.answer(f"🔄 Задача '{title}' перенесена на {new_date.strftime('%d.%m.%Y')}!", show_alert=False)
         
     await render_household_chores(call.message, db_user, is_callback=True)
 
@@ -977,7 +977,7 @@ async def handle_del_inst(call: types.CallbackQuery, db_user: User = None):
             inst.status = "skipped"
             await session.commit()
             title = tmpl.title if tmpl else "Домашнее дело"
-            await call.answer(f"🗑 Копия домашнего дела '{title}' удалена на сегодня!", show_alert=True)
+            await call.answer(f"🗑 Копия домашнего дела '{title}' удалена на сегодня!", show_alert=False)
         else:
             await call.answer("⚠️ Задача не найдена!", show_alert=False)
             

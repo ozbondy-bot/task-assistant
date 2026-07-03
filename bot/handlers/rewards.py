@@ -262,7 +262,7 @@ async def handle_rollback_task(call: types.CallbackQuery, db_user: User = None):
     pt_id = int(parts[1])
     page = int(parts[2])
     if page > 0:
-        await call.answer("⚠️ Отмена прошлых задач недоступна. Возврат возможен только для сегодняшних задач.", show_alert=True)
+        await call.answer("⚠️ Отмена прошлых задач недоступна. Возврат возможен только для сегодняшних задач.", show_alert=False)
         return
     async with AsyncSessionLocal() as session:
         pt = await session.get(PersonalTask, pt_id)
@@ -285,7 +285,7 @@ async def handle_rollback_chore(call: types.CallbackQuery, db_user: User = None)
     comp_id = int(parts[1])
     page = int(parts[2])
     if page > 0:
-        await call.answer("⚠️ Отмена прошлых задач недоступна. Возврат возможен только для сегодняшних задач.", show_alert=True)
+        await call.answer("⚠️ Отмена прошлых задач недоступна. Возврат возможен только для сегодняшних задач.", show_alert=False)
         return
     async with AsyncSessionLocal() as session:
         comp = await session.get(Completion, comp_id)

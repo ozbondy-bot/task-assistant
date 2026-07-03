@@ -576,6 +576,23 @@ dp.callback_query.middleware(AutoRegisterMiddleware())
 # ── /start ─────────────────────────────────────────────────────────────────────
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message, db_user: User = None):
+    # Set chat menu button for Web App dynamically
+    import os
+    from aiogram.types import WebAppInfo, MenuButtonWebApp
+    app_url = os.getenv("MINI_APP_URL", "https://example.com")
+    if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
+        app_url = app_url.rstrip("/") + "/app"
+    try:
+        await message.bot.set_chat_menu_button(
+            chat_id=message.chat.id,
+            menu_button=MenuButtonWebApp(
+                text="📱 Открыть App",
+                web_app=WebAppInfo(url=app_url)
+            )
+        )
+    except Exception as e:
+        logger.error(f"Failed to set chat menu button: {e}")
+
     # Remove reply keyboard
     await message.answer("🤖 Добро пожаловать!", reply_markup=types.ReplyKeyboardRemove())
     

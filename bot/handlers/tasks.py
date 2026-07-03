@@ -456,7 +456,7 @@ async def handle_shift_pt(call: types.CallbackQuery, db_user: User = None):
             task.date_execution = new_date
             await session.commit()
             clean_text = clean_task_text(task.text)
-            await call.answer(f"🔄 Задача '{clean_text}' перенесена на {new_date.strftime('%d.%m.%Y')}!", show_alert=True)
+            await call.answer(f"🔄 Задача '{clean_text}' перенесена на {new_date.strftime('%d.%m.%Y')}!", show_alert=False)
         else:
             await call.answer("⚠️ Задача не найдена!", show_alert=False)
             
@@ -534,7 +534,7 @@ async def handle_shift_chore(call: types.CallbackQuery, db_user: User = None):
                 
             await session.commit()
             title = tmpl.title if tmpl else "Домашнее дело"
-            await call.answer(f"🔄 Задача '{title}' перенесена на {new_date.strftime('%d.%m.%Y')}!", show_alert=True)
+            await call.answer(f"🔄 Задача '{title}' перенесена на {new_date.strftime('%d.%m.%Y')}!", show_alert=False)
         else:
             await call.answer("⚠️ Задача не найдена!", show_alert=False)
             
@@ -623,7 +623,7 @@ async def handle_del_pt(call: types.CallbackQuery, db_user: User = None):
             clean_text = clean_task_text(task.text)
             await session.delete(task)
             await session.commit()
-            await call.answer(f"🗑 Личная задача '{clean_text}' полностью удалена!", show_alert=True)
+            await call.answer(f"🗑 Личная задача '{clean_text}' полностью удалена!", show_alert=False)
         else:
             await call.answer("⚠️ Задача не найдена!", show_alert=False)
             
@@ -642,7 +642,7 @@ async def handle_del_chore_inst(call: types.CallbackQuery, db_user: User = None)
             inst.status = "skipped"
             await session.commit()
             title = tmpl.title if tmpl else "Домашнее дело"
-            await call.answer(f"🗑 Копия домашнего дела '{title}' удалена на сегодня!", show_alert=True)
+            await call.answer(f"🗑 Копия домашнего дела '{title}' удалена на сегодня!", show_alert=False)
         else:
             await call.answer("⚠️ Задача не найдена!", show_alert=False)
             
