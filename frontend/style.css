@@ -849,3 +849,266 @@ body {
   from { opacity: 0; transform: translateX(-50%) translateY(10px); }
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
+
+/* ── Settings Tab Styles ─────────────────────────────────────────────────────── */
+.settings-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.settings-card h3 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 14px;
+}
+
+.card-header-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.card-header-action h3 {
+  margin-bottom: 0;
+}
+
+.form-group {
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-group label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text2);
+  font-weight: 600;
+}
+
+.form-group input,
+.form-group select {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.2s;
+  width: 100%;
+}
+
+.form-group input:focus,
+.form-group select:focus {
+  border-color: var(--accent);
+}
+
+.invite-code-box {
+  margin-top: 14px;
+  background: var(--surface2);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+}
+
+.invite-label {
+  color: var(--text2);
+}
+
+.invite-code {
+  font-family: monospace;
+  font-weight: 700;
+  color: var(--accent2);
+  background: rgba(94, 139, 255, 0.1);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.settings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-item {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-item-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-item-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.settings-item-meta {
+  font-size: 11px;
+  color: var(--text2);
+}
+
+.btn-delete-icon {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text3);
+  padding: 6px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.btn-delete-icon:hover {
+  background: rgba(248, 113, 113, 0.1);
+  color: var(--danger);
+}
+
+/* ── Actions Row on Cards ────────────────────────────────────────────────────── */
+.task-card.flex-col {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+
+.task-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.task-action-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.btn-xs {
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  font-family: var(--font);
+  transition: all 0.2s;
+}
+
+.btn-done.btn-xs {
+  background: var(--success);
+  color: #0d0d14;
+  border: none;
+}
+
+.btn-unclaim.btn-xs {
+  background: var(--surface2);
+  color: var(--text2);
+}
+
+.btn-unclaim.btn-xs:hover {
+  border-color: var(--accent2);
+  color: var(--text);
+}
+
+.btn-skip.btn-xs {
+  background: var(--surface2);
+  color: var(--text2);
+}
+
+.btn-skip.btn-xs:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.btn-shift.btn-xs {
+  background: var(--surface2);
+  color: var(--text2);
+}
+
+.btn-shift.btn-xs:hover {
+  border-color: var(--warning);
+  color: var(--warning);
+}
+
+/* ── Compact Actions for Personal Tasks ───────────────────────────────────────── */
+.task-actions-compact {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.btn-action-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text2);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  transition: all 0.2s;
+}
+
+.btn-action-icon:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.btn-action-icon.icon-danger:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* ── Utility Buttons ─────────────────────────────────────────────────────────── */
+.btn-xs {
+  padding: 4px 8px;
+  font-size: 10px;
+}
+
+.btn-sm {
+  padding: 8px 14px;
+  font-size: 12px;
+}
+
+.btn-secondary {
+  background: var(--surface3);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.btn-secondary:hover {
+  background: var(--accent);
+  color: white;
+}

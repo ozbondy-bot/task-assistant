@@ -438,6 +438,222 @@ async def get_stats(user: User = Depends(get_current_user)):
     }
 
 
+# -- Chores templates --
+@app.get("/api/chores/templates")
+async def get_chores_templates(user: User = Depends(get_current_user)):
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(TaskTemplate).where(
+                and_(
+                    TaskTemplate.house_id == ACTIVE_HOUSE_ID,
+                    TaskTemplate.deleted == False
+                )
+            ).order_by(TaskTemplate.id)
+        )
+        templates = result.scalars().all()
+    return [
+        {
+            "id": t.id,
+            "title": t.title,
+            "points": t.points,
+            "periodicity": t.periodicity,
+            "start_date": str(t.start_date) if t.start_date else None,
+        }
+        for t in templates
+    ]
+
+class CreateTemplateRequest(BaseModel):
+    title: str
+    points: int = 1
+    periodicity: str = "daily"
+    start_date: Optional[str] = None
+
+@app.post("/api/chores/templates")
+async def create_chore_template(req: CreateTemplateRequest, user: User = Depends(get_current_user)):
+    start_date = None
+    if req.start_date:
+        try:
+            start_date = datetime.strptime(req.start_date, "%Y-%m-%d").date()
+        except Exception:
+            pass
+            
+    from bot.parser import get_ai_emoji
+    clean_title = req.title
+    emoji = await get_ai_emoji(clean_title)
+    if emoji:
+        clean_title = f"{emoji} {clean_title}"
+        
+    async with AsyncSessionLocal() as session:
+        from bot.handlers.base import get_house_today_date
+        if not start_date:
+            start_date = await get_house_today_date(session)
+            
+        tmpl = TaskTemplate(
+            house_id=ACTIVE_HOUSE_ID,
+            title=clean_title,
+            points=req.points,
+            periodicity=req.periodicity,
+            start_date=start_date,
+            deleted=False
+        )
+        session.add(tmpl)
+        await session.commit()
+        await session.refresh(tmpl)
+    return {"ok": True, "id": tmpl.id, "title": tmpl.title}
+
+@app.delete("/api/chores/templates/{template_id}")
+async def delete_chore_template(template_id: int, user: User = Depends(get_current_user)):
+    async with AsyncSessionLocal() as session:
+        tmpl = await session.get(TaskTemplate, template_id)
+        if not tmpl or tmpl.house_id != ACTIVE_HOUSE_ID:
+            raise HTTPException(status_code=404, detail="Template not found")
+        tmpl.deleted = True
+        await session.commit()
+    return {"ok": True}
+
+
+# -- Rewards templates --
+class CreateRewardRequest(BaseModel):
+    title: str
+    price: int
+
+@app.post("/api/rewards")
+async def create_reward(req: CreateRewardRequest, user: User = Depends(get_current_user)):
+    async with AsyncSessionLocal() as session:
+        reward = Reward(
+            house_id=ACTIVE_HOUSE_ID,
+            title=req.title,
+            price=req.price
+        )
+        session.add(reward)
+        await session.commit()
+        await session.refresh(reward)
+    return {"ok": True, "id": reward.id, "title": reward.title}
+
+@app.delete("/api/rewards/{reward_id}")
+async def delete_reward(reward_id: int, user: User = Depends(get_current_user)):
+    async with AsyncSessionLocal() as session:
+        reward = await session.get(Reward, reward_id)
+        if not reward or reward.house_id != ACTIVE_HOUSE_ID:
+            raise HTTPException(status_code=404, detail="Reward not found")
+        await session.delete(reward)
+        await session.commit()
+    return {"ok": True}
+
+
+# -- House settings & Generate --
+@app.get("/api/house/settings")
+async def get_house_settings(user: User = Depends(get_current_user)):
+    async with AsyncSessionLocal() as session:
+        house = await session.get(House, ACTIVE_HOUSE_ID)
+        if not house:
+            raise HTTPException(status_code=404, detail="House not found")
+        return {
+            "name": house.name or "Уютное гнездышко",
+            "timezone": house.timezone,
+            "join_code": house.join_code
+        }
+
+class UpdateHouseSettingsRequest(BaseModel):
+    name: Optional[str] = None
+    timezone: Optional[str] = None
+
+@app.post("/api/house/settings")
+async def update_house_settings(req: UpdateHouseSettingsRequest, user: User = Depends(get_current_user)):
+    async with AsyncSessionLocal() as session:
+        house = await session.get(House, ACTIVE_HOUSE_ID)
+        if not house:
+            raise HTTPException(status_code=404, detail="House not found")
+        if req.name is not None:
+            house.name = req.name
+        if req.timezone is not None:
+            house.timezone = req.timezone
+        await session.commit()
+    return {"ok": True}
+
+@app.post("/api/house/generate")
+async def force_generate_chores(user: User = Depends(get_current_user)):
+    async with AsyncSessionLocal() as session:
+        from bot.handlers.base import generate_daily_chores_if_needed
+        await generate_daily_chores_if_needed(session, ACTIVE_HOUSE_ID)
+        await session.commit()
+    return {"ok": True}
+
+
+# -- Task actions (unclaim, skip, shift) --
+@app.post("/api/house/tasks/{instance_id}/unclaim")
+async def unclaim_chore(instance_id: int, user: User = Depends(get_current_user)):
+    async with AsyncSessionLocal() as session:
+        inst = await session.get(TaskInstance, instance_id)
+        if not inst or inst.done_by_user_id != user.id:
+            raise HTTPException(status_code=403, detail="Not your task")
+        inst.status = "free"
+        inst.done_by_user_id = None
+        await session.commit()
+    return {"ok": True}
+
+@app.post("/api/house/tasks/{instance_id}/skip")
+async def skip_chore(instance_id: int, user: User = Depends(get_current_user)):
+    async with AsyncSessionLocal() as session:
+        inst = await session.get(TaskInstance, instance_id)
+        if not inst or inst.done_by_user_id != user.id:
+            raise HTTPException(status_code=403, detail="Not your task")
+        inst.status = "skipped"
+        await session.commit()
+    return {"ok": True}
+
+class ShiftRequest(BaseModel):
+    new_date: str
+
+@app.post("/api/house/tasks/{instance_id}/shift")
+async def shift_chore_instance(instance_id: int, req: ShiftRequest, user: User = Depends(get_current_user)):
+    try:
+        new_date = datetime.strptime(req.new_date, "%Y-%m-%d").date()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid date format (YYYY-MM-DD)")
+        
+    async with AsyncSessionLocal() as session:
+        inst = await session.get(TaskInstance, instance_id)
+        if not inst or inst.done_by_user_id != user.id:
+            raise HTTPException(status_code=403, detail="Not your task")
+            
+        inst.status = "shifted"
+        exists = await session.scalar(
+            select(TaskInstance).where(
+                and_(
+                    TaskInstance.template_id == inst.template_id,
+                    TaskInstance.date == new_date,
+                    TaskInstance.status.in_(["free", "shifted"])
+                )
+            )
+        )
+        if not exists:
+            new_inst = TaskInstance(
+                template_id=inst.template_id,
+                date=new_date,
+                status="free",
+                priority=0
+            )
+            session.add(new_inst)
+        await session.commit()
+    return {"ok": True}
+
+@app.post("/api/tasks/{task_id}/shift")
+async def shift_personal_task(task_id: int, req: ShiftRequest, user: User = Depends(get_current_user)):
+    try:
+        new_date = datetime.strptime(req.new_date, "%Y-%m-%d").date()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid date format (YYYY-MM-DD)")
+        
+    async with AsyncSessionLocal() as session:
+        task = await session.get(PersonalTask, task_id)
+        if not task or task.user_id != user.id:
+            raise HTTPException(status_code=403, detail="Not your task")
+        task.date_execution = new_date
+        await session.commit()
+    return {"ok": True}
+
+
 # ── Static files for Mini App ─────────────────────────────────────────────────
 frontend_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend")
 if os.path.exists(frontend_dir):

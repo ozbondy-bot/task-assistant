@@ -7,6 +7,8 @@ const API_BASE = '';  // Same origin as the Mini App URL
 let initData = '';
 let currentUser = null;
 let currentPoints = 0;
+let shiftTaskId = null;
+let shiftTaskType = null;
 
 const FOOD_EMOJIS = [
   '🍏','🍎','🍐','🍊','🍋','🍌','🍉','🍇','🍓','🫐','🍒','🍑','🥭','🍍','🥥','🥝',
@@ -92,6 +94,7 @@ function setupTabs() {
       else if (tab === 'personal') loadPersonalTab();
       else if (tab === 'shopping') loadShoppingTab();
       else if (tab === 'shop') loadShopTab();
+      else if (tab === 'settings') loadSettingsTab();
     });
   });
 }
@@ -198,24 +201,29 @@ function renderPersonalTasks(personal, household) {
   list.innerHTML = all.map(t => {
     if (t.isHousehold) {
       return `
-        <div class="task-card household-claimed" id="ptask-h-${t.id}">
-          <div class="task-icon">🏠</div>
-          <div class="task-body">
-            <div class="task-title">${escHtml(t.text)}</div>
-            <div class="task-meta">
-              <span class="task-badge badge-house">Домашнее</span>
-              <span class="task-badge badge-points">+${t.points} ✨</span>
+        <div class="task-card household-claimed flex-col" id="ptask-h-${t.id}">
+          <div class="task-row">
+            <div class="task-icon">🏠</div>
+            <div class="task-body">
+              <div class="task-title">${escHtml(t.text)}</div>
+              <div class="task-meta">
+                <span class="task-badge badge-house">Домашнее</span>
+                <span class="task-badge badge-points">+${t.points} ✨</span>
+              </div>
             </div>
           </div>
-          <div class="task-action">
-            <button class="btn-done" onclick="completeHouseTask(${t.id})">Готово</button>
+          <div class="task-action-row" onclick="event.stopPropagation();">
+            <button class="btn-done btn-xs" onclick="completeHouseTask(${t.id})">Готово</button>
+            <button class="btn-unclaim btn-xs" onclick="unclaimChore(${t.id})">Вернуть ↩</button>
+            <button class="btn-skip btn-xs" onclick="skipChore(${t.id})">Пропустить 🗑</button>
+            <button class="btn-shift btn-xs" onclick="openShiftModal(${t.id}, 'chore')">Сдвиг 🗓</button>
           </div>
         </div>`;
     } else {
       const icon = getTaskIcon(t.text);
       const cleanText = stripEmoji(t.text);
       return `
-        <div class="task-card" id="ptask-${t.id}" onclick="completePersonalTask(${t.id}, this)">
+        <div class="task-card personal-task" id="ptask-${t.id}" onclick="completePersonalTask(${t.id}, this)">
           <div class="task-icon">${icon}</div>
           <div class="task-body">
             <div class="task-title">${escHtml(cleanText)}</div>
@@ -223,6 +231,10 @@ function renderPersonalTasks(personal, household) {
               ${t.recurrence ? `<span class="task-badge badge-rec">🔁 ${recLabel(t.recurrence)}</span>` : ''}
               ${t.category === 'routine' ? '<span class="task-badge">Ежедневное</span>' : ''}
             </div>
+          </div>
+          <div class="task-actions-compact" onclick="event.stopPropagation();">
+            <button class="btn-action-icon" onclick="openShiftModal(${t.id}, 'personal')">🗓</button>
+            <button class="btn-action-icon icon-danger" onclick="deletePersonalTask(${t.id})">🗑</button>
           </div>
         </div>`;
     }
@@ -305,6 +317,73 @@ function setupModals() {
     }
   });
 
+  // Chores templates modal
+  document.getElementById('cancelChoreBtn').addEventListener('click', () => {
+    document.getElementById('addChoreModal').classList.add('hidden');
+  });
+
+  document.getElementById('saveChoreTmplBtn').addEventListener('click', async () => {
+    const title = document.getElementById('choreTmplTitle').value.trim();
+    const points = parseInt(document.getElementById('choreTmplPoints').value) || 1;
+    const periodicity = document.getElementById('choreTmplPeriodicity').value;
+    const startDate = document.getElementById('choreTmplStartDate').value;
+    if (!title) return;
+    try {
+      await api('POST', '/api/chores/templates', { title, points, periodicity, start_date: startDate || null });
+      document.getElementById('addChoreModal').classList.add('hidden');
+      document.getElementById('choreTmplTitle').value = '';
+      document.getElementById('choreTmplPoints').value = '1';
+      document.getElementById('choreTmplStartDate').value = '';
+      showToast('✅ Шаблон добавлен!');
+      loadSettingsTab();
+    } catch (e) {
+      showToast(`⚠️ ${e.message}`);
+    }
+  });
+
+  // Rewards settings modal
+  document.getElementById('cancelRewardBtn').addEventListener('click', () => {
+    document.getElementById('createRewardModal').classList.add('hidden');
+  });
+
+  document.getElementById('saveRewardBtn').addEventListener('click', async () => {
+    const title = document.getElementById('rewardTitleInput').value.trim();
+    const price = parseInt(document.getElementById('rewardPriceInput').value) || 1;
+    if (!title) return;
+    try {
+      await api('POST', '/api/rewards', { title, price });
+      document.getElementById('createRewardModal').classList.add('hidden');
+      document.getElementById('rewardTitleInput').value = '';
+      document.getElementById('rewardPriceInput').value = '';
+      showToast('✅ Награда добавлена!');
+      loadSettingsTab();
+    } catch (e) {
+      showToast(`⚠️ ${e.message}`);
+    }
+  });
+
+  // Shift modal
+  document.getElementById('cancelShiftBtn').addEventListener('click', () => {
+    document.getElementById('shiftTaskModal').classList.add('hidden');
+  });
+
+  document.getElementById('saveShiftBtn').addEventListener('click', async () => {
+    const newDate = document.getElementById('shiftTaskDate').value;
+    if (!newDate) return;
+    try {
+      if (shiftTaskType === 'chore') {
+        await api('POST', `/api/house/tasks/${shiftTaskId}/shift`, { new_date: newDate });
+      } else {
+        await api('POST', `/api/tasks/${shiftTaskId}/shift`, { new_date: newDate });
+      }
+      document.getElementById('shiftTaskModal').classList.add('hidden');
+      showToast('🗓 Задача перенесена!');
+      loadPersonalTab();
+    } catch (e) {
+      showToast(`⚠️ ${e.message}`);
+    }
+  });
+
   // Close modals on overlay click
   document.querySelectorAll('.modal-overlay').forEach(overlay => {
     overlay.addEventListener('click', (e) => {
@@ -322,6 +401,37 @@ function setupFABs() {
   document.getElementById('addShopBtn').addEventListener('click', () => {
     document.getElementById('addShopModal').classList.remove('hidden');
     document.getElementById('shopItemName').focus();
+  });
+
+  // Settings tab buttons
+  document.getElementById('addChoreTmplBtn').addEventListener('click', () => {
+    document.getElementById('addChoreModal').classList.remove('hidden');
+  });
+
+  document.getElementById('addRewardBtn').addEventListener('click', () => {
+    document.getElementById('createRewardModal').classList.remove('hidden');
+  });
+
+  document.getElementById('saveHouseSettingsBtn').addEventListener('click', async () => {
+    const name = document.getElementById('settingsHouseName').value.trim();
+    const timezone = document.getElementById('settingsHouseTz').value;
+    try {
+      await api('POST', '/api/house/settings', { name, timezone });
+      showToast('✅ Настройки сохранены!');
+      loadSettingsTab();
+    } catch (e) {
+      showToast(`⚠️ ${e.message}`);
+    }
+  });
+
+  document.getElementById('forceGenerateBtn').addEventListener('click', async () => {
+    try {
+      await api('POST', '/api/house/generate');
+      showToast('🔄 Дела на сегодня обновлены!');
+      loadSettingsTab();
+    } catch (e) {
+      showToast(`⚠️ ${e.message}`);
+    }
   });
 }
 
@@ -477,4 +587,125 @@ function periodLabel(p) {
 function recLabel(r) {
   const m = { daily:'Ежедневно', weekly:'Еженед.', biweekly:'Раз в 2 нед.', monthly:'Ежемес.' };
   return m[r] || r;
+}
+
+// ── Settings Tab & Actions ───────────────────────────────────────────────────
+async function loadSettingsTab() {
+  const choresList = document.getElementById('settingsChoresList');
+  const rewardsList = document.getElementById('settingsRewardsList');
+  choresList.innerHTML = `<div class="loading-spinner"><div class="spinner"></div><p>Загрузка...</p></div>`;
+  rewardsList.innerHTML = `<div class="loading-spinner"><div class="spinner"></div><p>Загрузка...</p></div>`;
+
+  try {
+    const [settings, templates, rewardsData] = await Promise.all([
+      api('GET', '/api/house/settings'),
+      api('GET', '/api/chores/templates'),
+      api('GET', '/api/rewards'),
+    ]);
+
+    // Render house settings
+    document.getElementById('settingsHouseName').value = settings.name;
+    document.getElementById('settingsHouseTz').value = settings.timezone;
+    document.getElementById('settingsJoinCode').textContent = settings.join_code;
+
+    // Render templates & rewards
+    renderChoresTemplates(templates);
+    renderRewardsTemplates(rewardsData.rewards);
+  } catch (e) {
+    choresList.innerHTML = `<p style="color:var(--danger)">${e.message}</p>`;
+    rewardsList.innerHTML = `<p style="color:var(--danger)">${e.message}</p>`;
+  }
+}
+
+function renderChoresTemplates(templates) {
+  const list = document.getElementById('settingsChoresList');
+  if (!templates.length) {
+    list.innerHTML = `<p style="color:var(--text3);text-align:center;padding:12px">Нет шаблонов</p>`;
+    return;
+  }
+  list.innerHTML = templates.map(t => `
+    <div class="settings-item">
+      <div class="settings-item-body">
+        <div class="settings-item-title">${escHtml(t.title)}</div>
+        <div class="settings-item-meta">${t.points} 🍪 • ${periodLabel(t.periodicity)}</div>
+      </div>
+      <button class="btn-delete-icon" onclick="deleteChoreTemplate(${t.id})">🗑</button>
+    </div>
+  `).join('');
+}
+
+function renderRewardsTemplates(rewards) {
+  const list = document.getElementById('settingsRewardsList');
+  if (!rewards.length) {
+    list.innerHTML = `<p style="color:var(--text3);text-align:center;padding:12px">Нет наград</p>`;
+    return;
+  }
+  list.innerHTML = rewards.map(r => `
+    <div class="settings-item">
+      <div class="settings-item-body">
+        <div class="settings-item-title">${escHtml(r.title)}</div>
+        <div class="settings-item-meta">${r.price} 🍪</div>
+      </div>
+      <button class="btn-delete-icon" onclick="deleteReward(${r.id})">🗑</button>
+    </div>
+  `).join('');
+}
+
+async function deleteChoreTemplate(id) {
+  if (!confirm('Удалить этот шаблон дела?')) return;
+  try {
+    await api('DELETE', `/api/chores/templates/${id}`);
+    showToast('🗑 Шаблон удален!');
+    loadSettingsTab();
+  } catch (e) {
+    showToast(`⚠️ ${e.message}`);
+  }
+}
+
+async function deleteReward(id) {
+  if (!confirm('Удалить эту награду?')) return;
+  try {
+    await api('DELETE', `/api/rewards/${id}`);
+    showToast('🗑 Награда удалена!');
+    loadSettingsTab();
+  } catch (e) {
+    showToast(`⚠️ ${e.message}`);
+  }
+}
+
+async function unclaimChore(id) {
+  try {
+    await api('POST', `/api/house/tasks/${id}/unclaim`);
+    showToast('↩ Задача возвращена в свободные');
+    loadPersonalTab();
+  } catch (e) {
+    showToast(`⚠️ ${e.message}`);
+  }
+}
+
+async function skipChore(id) {
+  try {
+    await api('POST', `/api/house/tasks/${id}/skip`);
+    showToast('🗑 Задача пропущена на сегодня');
+    loadPersonalTab();
+  } catch (e) {
+    showToast(`⚠️ ${e.message}`);
+  }
+}
+
+async function deletePersonalTask(id) {
+  try {
+    await api('DELETE', `/api/tasks/${id}`);
+    showToast('🗑 Задача удалена');
+    loadPersonalTab();
+  } catch (e) {
+    showToast(`⚠️ ${e.message}`);
+  }
+}
+
+function openShiftModal(id, type) {
+  shiftTaskId = id;
+  shiftTaskType = type;
+  document.getElementById('shiftTaskModal').classList.remove('hidden');
+  document.getElementById('shiftTaskDate').value = new Date().toISOString().split('T')[0];
 }

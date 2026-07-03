@@ -44,6 +44,10 @@
         <span class="tab-icon">🎁</span>
         <span class="tab-label">Магазин</span>
       </button>
+      <button class="tab-btn" data-tab="settings" id="tabSettings">
+        <span class="tab-icon">⚙️</span>
+        <span class="tab-label">Настройки</span>
+      </button>
     </nav>
 
     <!-- Tab content -->
@@ -138,7 +142,120 @@
         </div>
       </section>
 
+      <!-- SETTINGS TAB -->
+      <section class="tab-pane" id="pane-settings">
+        <div class="section-header">
+          <h2>Настройки</h2>
+          <p class="section-sub">Управление домом, делами и магазином</p>
+        </div>
+        
+        <!-- House Info -->
+        <div class="settings-card">
+          <h3>🏠 Настройки Дома</h3>
+          <div class="form-group">
+            <label>Название дома</label>
+            <input id="settingsHouseName" type="text" placeholder="Название дома" />
+          </div>
+          <div class="form-group" style="margin-top: 8px;">
+            <label>Часовой пояс</label>
+            <select id="settingsHouseTz">
+              <option value="Europe/Moscow">Москва (UTC+3)</option>
+              <option value="Europe/London">Лондон (UTC+0)</option>
+              <option value="Europe/Paris">Париж (UTC+1)</option>
+              <option value="Asia/Yerevan">Ереван (UTC+4)</option>
+              <option value="Asia/Tashkent">Ташкент (UTC+5)</option>
+              <option value="Asia/Almaty">Алматы (UTC+6)</option>
+              <option value="UTC">UTC</option>
+            </select>
+          </div>
+          <button class="btn btn-primary btn-sm" id="saveHouseSettingsBtn" style="margin-top: 10px; width: 100%">Сохранить настройки</button>
+          
+          <div class="invite-code-box">
+            <span class="invite-label">Код для партнера:</span>
+            <code id="settingsJoinCode" class="invite-code">---</code>
+          </div>
+          
+          <button class="btn btn-secondary btn-sm" style="margin-top: 12px; width: 100%" id="forceGenerateBtn">🔄 Обновить дела на сегодня</button>
+        </div>
+
+        <!-- Chores Templates -->
+        <div class="settings-card">
+          <div class="card-header-action">
+            <h3>📋 Шаблоны домашних дел</h3>
+            <button class="btn btn-primary btn-xs" id="addChoreTmplBtn">Добавить</button>
+          </div>
+          <div id="settingsChoresList" class="settings-list">
+            <!-- Chores templates will be loaded here -->
+          </div>
+        </div>
+
+        <!-- Rewards Templates -->
+        <div class="settings-card">
+          <div class="card-header-action">
+            <h3>🎁 Настройки Магазина</h3>
+            <button class="btn btn-primary btn-xs" id="addRewardBtn">Добавить</button>
+          </div>
+          <div id="settingsRewardsList" class="settings-list">
+            <!-- Rewards templates will be loaded here -->
+          </div>
+        </div>
+      </section>
+
     </main>
+
+    <!-- Add Chore Template Modal -->
+    <div class="modal-overlay hidden" id="addChoreModal">
+      <div class="modal-card">
+        <h3>Новый шаблон дела</h3>
+        <input id="choreTmplTitle" type="text" placeholder="Название (например: Помыть посуду)" />
+        <input id="choreTmplPoints" type="number" placeholder="Баллы (например: 3)" min="1" />
+        <div class="form-group" style="margin-top: 8px">
+          <label>Периодичность</label>
+          <select id="choreTmplPeriodicity">
+            <option value="daily">Ежедневно</option>
+            <option value="twice_weekly">2 раза в неделю</option>
+            <option value="weekly">Еженедельно</option>
+            <option value="twice_monthly">2 раза в месяц</option>
+            <option value="monthly">Ежемесячно</option>
+            <option value="quarterly">Раз в квартал</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-top: 8px">
+          <label>Дата старта (необязательно)</label>
+          <input id="choreTmplStartDate" type="date" />
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-ghost" id="cancelChoreBtn">Отмена</button>
+          <button class="btn btn-primary" id="saveChoreTmplBtn">Создать ✓</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Add Reward Modal -->
+    <div class="modal-overlay hidden" id="createRewardModal">
+      <div class="modal-card">
+        <h3>Новая награда в магазине</h3>
+        <input id="rewardTitleInput" type="text" placeholder="Название (например: Романтический ужин)" />
+        <input id="rewardPriceInput" type="number" placeholder="Стоимость в 🍪" min="1" />
+        <div class="modal-actions">
+          <button class="btn btn-ghost" id="cancelRewardBtn">Отмена</button>
+          <button class="btn btn-primary" id="saveRewardBtn">Создать ✓</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Shift Task Modal -->
+    <div class="modal-overlay hidden" id="shiftTaskModal">
+      <div class="modal-card">
+        <h3>Перенести задачу</h3>
+        <p class="modal-hint" id="shiftTaskTitle">Выберите новую дату для сдвига:</p>
+        <input id="shiftTaskDate" type="date" style="width:100%; margin-top:8px;" />
+        <div class="modal-actions">
+          <button class="btn btn-ghost" id="cancelShiftBtn">Отмена</button>
+          <button class="btn btn-primary" id="saveShiftBtn">Перенести ✓</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- Toast notification -->
