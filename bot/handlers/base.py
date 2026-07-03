@@ -23,7 +23,7 @@ from bot.parser import parse_input, get_recurrence_delta, clean_task_text, extra
 logger = logging.getLogger(__name__)
 
 TOKEN = os.getenv("BOT_TOKEN")
-MINI_APP_URL = os.getenv("MINI_APP_URL", "https://example.com")
+MINI_APP_URL = os.getenv("MINI_APP_URL") or os.getenv("RENDER_EXTERNAL_URL") or "https://example.com"
 
 # Hardcoded house and users for auto-join
 ACTIVE_HOUSE_ID = 81
@@ -579,7 +579,7 @@ async def cmd_start(message: types.Message, db_user: User = None):
     # Set chat menu button for Web App dynamically
     import os
     from aiogram.types import WebAppInfo, MenuButtonWebApp
-    app_url = os.getenv("MINI_APP_URL", "https://example.com")
+    app_url = os.getenv("MINI_APP_URL") or os.getenv("RENDER_EXTERNAL_URL") or "https://example.com"
     if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
         app_url = app_url.rstrip("/") + "/app"
     try:

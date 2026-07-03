@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
 PORT = int(os.getenv("PORT", 8080))
-MINI_APP_URL = os.getenv("MINI_APP_URL", "https://example.com")
+MINI_APP_URL = os.getenv("MINI_APP_URL") or os.getenv("RENDER_EXTERNAL_URL") or "https://example.com"
 
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN env var is required!")

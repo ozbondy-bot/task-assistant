@@ -162,7 +162,8 @@ async def get_ai_emoji(text: str) -> str:
     models_to_try.insert(0, _working_model)
     
     for model in models_to_try:
-        url = f"https://generativelanguage.googleapis.com/v1/models/{model}:generateContent?key={api_key}"
+        base_endpoint = os.getenv("GEMINI_API_ENDPOINT", "https://generativelanguage.googleapis.com")
+        url = f"{base_endpoint.rstrip('/')}/v1/models/{model}:generateContent?key={api_key}"
         headers = {"Content-Type": "application/json"}
         prompt = (
             f"Тебе дана задача: '{text}'. "
