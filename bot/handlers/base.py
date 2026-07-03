@@ -373,6 +373,8 @@ async def send_midnight_summary():
     for u in users:
         try:
             await bot.send_message(chat_id=u.telegram_id, text=text, parse_mode="Markdown")
+            from bot.handlers.chores import render_household_chores
+            await render_household_chores(message=None, db_user=u, chat_id=u.telegram_id)
         except Exception as e:
             logger.error(f"Failed to send midnight summary to {u.telegram_id}: {e}")
 
@@ -396,14 +398,6 @@ async def scheduler_loop():
             if hour == 9 and minute == 0 and (today, "morning") not in sent_events:
                 await send_morning_message()
                 sent_events.add((today, "morning"))
-                
-            if hour == 14 and minute == 0 and (today, "reminder_14") not in sent_events:
-                await send_14_reminder()
-                sent_events.add((today, "reminder_14"))
-                
-            if hour == 17 and minute == 0 and (today, "reminder_17") not in sent_events:
-                await send_17_reminder()
-                sent_events.add((today, "reminder_17"))
                 
             if hour == 0 and minute == 0 and (today, "midnight_summary") not in sent_events:
                 await send_midnight_summary()

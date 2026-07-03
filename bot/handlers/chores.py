@@ -918,23 +918,12 @@ async def handle_nudge(call: types.CallbackQuery, db_user: User = None):
 @dp.callback_query(F.data.startswith("resched_menu:"))
 async def handle_resched_menu(call: types.CallbackQuery, db_user: User = None):
     inst_id = int(call.data.split(":")[1])
-    days_ru = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
-    
     async with AsyncSessionLocal() as session:
         today = await get_house_today_date(session)
-        inst = await session.get(TaskInstance, inst_id)
-        tmpl_id = inst.template_id if inst else 0
         
-    d1 = today + timedelta(days=1)
-    d2 = today + timedelta(days=2)
-    keyboard = [
-        [
-            InlineKeyboardButton(text=f"{d1.strftime('%d.%m')} ({days_ru[d1.weekday()]})", callback_data=f"shift:once:{inst_id}:{d1.strftime('%Y-%m-%d')}"),
-            InlineKeyboardButton(text=f"{d2.strftime('%d.%m')} ({days_ru[d2.weekday()]})", callback_data=f"shift:once:{inst_id}:{d2.strftime('%Y-%m-%d')}"),
-            InlineKeyboardButton(text="Другая дата", callback_data=f"rc_months:{inst_id}")
-        ]
-    ]
-    await call.message.edit_text("На какой день перенести задачу?", reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
+    markup = create_calendar_keyboard_custom(inst_id, today.year, today.month, today, "once")
+    header = format_calendar_header(today)
+    await call.message.edit_text(header, reply_markup=markup, parse_mode="Markdown")
 
 
 @dp.callback_query(F.data.startswith("shift:once:"))
@@ -973,8 +962,7 @@ async def handle_shift_once(call: types.CallbackQuery, db_user: User = None):
             
         await session.commit()
         title = tmpl.title if tmpl else "Домашнее дело"
-        await call.answer(f"✅ Перенесено на {new_date.strftime('%d.%m')}!", show_alert=False)
-        await call.message.answer(f"🔄 Задача '{title}' перенесена на {new_date.strftime('%d.%m.%Y')}!")
+        await call.answer(f"🔄 Задача '{title}' перенесена на {new_date.strftime('%d.%m.%Y')}!", show_alert=True)
         
     await render_household_chores(call.message, db_user, is_callback=True)
 
@@ -989,8 +977,7 @@ async def handle_del_inst(call: types.CallbackQuery, db_user: User = None):
             inst.status = "skipped"
             await session.commit()
             title = tmpl.title if tmpl else "Домашнее дело"
-            await call.answer("🗑 Копия удалена!", show_alert=False)
-            await call.message.answer(f"🗑 Копия домашнего дела '{title}' удалена на сегодня!")
+            await call.answer(f"🗑 Копия домашнего дела '{title}' удалена на сегодня!", show_alert=True)
         else:
             await call.answer("⚠️ Задача не найдена!", show_alert=False)
             

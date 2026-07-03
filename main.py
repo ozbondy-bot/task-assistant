@@ -77,7 +77,21 @@ async def run_bot():
             "Помощник по домашним делам и личным задачам. Зарабатывайте печеньки и обменивайте их на награды! 🍪🏠"
         )
         await bot.delete_my_commands()
-        logger.info("Bot descriptions and commands cleared/set successfully.")
+        
+        from aiogram.types import WebAppInfo, MenuButtonWebApp
+        app_url = MINI_APP_URL
+        if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
+            app_url = app_url.rstrip("/") + "/app"
+        try:
+            await bot.set_chat_menu_button(
+                menu_button=MenuButtonWebApp(
+                    text="📱 Открыть App",
+                    web_app=WebAppInfo(url=app_url)
+                )
+            )
+            logger.info("Bot descriptions, commands, and webapp menu button set successfully.")
+        except Exception as e:
+            logger.error(f"Failed to set chat menu button: {e}")
     except Exception as e:
         logger.error(f"Failed to set bot descriptions: {e}")
     await dp.start_polling(bot, allowed_updates=["message", "callback_query"])

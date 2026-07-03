@@ -381,26 +381,13 @@ async def handle_shift_pt_menu(call: types.CallbackQuery, db_user: User = None):
     parts = call.data.split(":")
     t_id = int(parts[1])
     page = int(parts[2]) if len(parts) > 2 else 0
-    days_ru = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
     
     async with AsyncSessionLocal() as session:
         today = await get_house_today_date(session)
         
-    d1 = today + timedelta(days=1)
-    d2 = today + timedelta(days=2)
-    
-    nav_builder = InlineKeyboardBuilder()
-    nav_builder.row(
-        InlineKeyboardButton(text="🏠 Home", callback_data="home_view"),
-        InlineKeyboardButton(text="⚡📋 My⚡", callback_data="noop"),
-        InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
-    )
-    nav_builder.row(
-        InlineKeyboardButton(text=f"{d1.strftime('%d.%m')} ({days_ru[d1.weekday()]})", callback_data=f"shift_pt:{page}:{t_id}:{d1.strftime('%Y-%m-%d')}"),
-        InlineKeyboardButton(text=f"{d2.strftime('%d.%m')} ({days_ru[d2.weekday()]})", callback_data=f"shift_pt:{page}:{t_id}:{d2.strftime('%Y-%m-%d')}"),
-        InlineKeyboardButton(text="Другая дата", callback_data=f"rc_months_pt:{t_id}:{page}")
-    )
-    await call.message.edit_text("На какой день перенести задачу?", reply_markup=nav_builder.as_markup())
+    markup = create_calendar_keyboard_custom(t_id, today.year, today.month, today, f"pt:{page}")
+    header = format_calendar_header(today)
+    await call.message.edit_text(header, reply_markup=markup, parse_mode="Markdown")
 
 
 @dp.callback_query(F.data.startswith("shift_chore_menu:"))
@@ -408,26 +395,13 @@ async def handle_shift_chore_menu(call: types.CallbackQuery, db_user: User = Non
     parts = call.data.split(":")
     inst_id = int(parts[1])
     page = int(parts[2]) if len(parts) > 2 else 0
-    days_ru = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
     
     async with AsyncSessionLocal() as session:
         today = await get_house_today_date(session)
         
-    d1 = today + timedelta(days=1)
-    d2 = today + timedelta(days=2)
-    
-    nav_builder = InlineKeyboardBuilder()
-    nav_builder.row(
-        InlineKeyboardButton(text="🏠 Home", callback_data="home_view"),
-        InlineKeyboardButton(text="⚡📋 My⚡", callback_data="noop"),
-        InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
-    )
-    nav_builder.row(
-        InlineKeyboardButton(text=f"{d1.strftime('%d.%m')} ({days_ru[d1.weekday()]})", callback_data=f"shift_chore:{page}:{inst_id}:{d1.strftime('%Y-%m-%d')}"),
-        InlineKeyboardButton(text=f"{d2.strftime('%d.%m')} ({days_ru[d2.weekday()]})", callback_data=f"shift_chore:{page}:{inst_id}:{d2.strftime('%Y-%m-%d')}"),
-        InlineKeyboardButton(text="Другая дата", callback_data=f"rc_months_chore:{inst_id}:{page}")
-    )
-    await call.message.edit_text("На какой день перенести задачу?", reply_markup=nav_builder.as_markup())
+    markup = create_calendar_keyboard_custom(inst_id, today.year, today.month, today, f"chore:{page}")
+    header = format_calendar_header(today)
+    await call.message.edit_text(header, reply_markup=markup, parse_mode="Markdown")
 
 
 # Calendar navigation & shift execution callbacks
@@ -482,8 +456,7 @@ async def handle_shift_pt(call: types.CallbackQuery, db_user: User = None):
             task.date_execution = new_date
             await session.commit()
             clean_text = clean_task_text(task.text)
-            await call.answer(f"✅ Перенесено на {new_date.strftime('%d.%m')}!", show_alert=False)
-            await call.message.answer(f"🔄 Задача '{clean_text}' перенесена на {new_date.strftime('%d.%m.%Y')}!")
+            await call.answer(f"🔄 Задача '{clean_text}' перенесена на {new_date.strftime('%d.%m.%Y')}!", show_alert=True)
         else:
             await call.answer("⚠️ Задача не найдена!", show_alert=False)
             
@@ -561,8 +534,7 @@ async def handle_shift_chore(call: types.CallbackQuery, db_user: User = None):
                 
             await session.commit()
             title = tmpl.title if tmpl else "Домашнее дело"
-            await call.answer(f"✅ Перенесено на {new_date.strftime('%d.%m')}!", show_alert=False)
-            await call.message.answer(f"🔄 Задача '{title}' перенесена на {new_date.strftime('%d.%m.%Y')}!")
+            await call.answer(f"🔄 Задача '{title}' перенесена на {new_date.strftime('%d.%m.%Y')}!", show_alert=True)
         else:
             await call.answer("⚠️ Задача не найдена!", show_alert=False)
             
@@ -651,8 +623,7 @@ async def handle_del_pt(call: types.CallbackQuery, db_user: User = None):
             clean_text = clean_task_text(task.text)
             await session.delete(task)
             await session.commit()
-            await call.answer("🗑 Удалено!", show_alert=False)
-            await call.message.answer(f"🗑 Личная задача '{clean_text}' полностью удалена!")
+            await call.answer(f"🗑 Личная задача '{clean_text}' полностью удалена!", show_alert=True)
         else:
             await call.answer("⚠️ Задача не найдена!", show_alert=False)
             
@@ -671,8 +642,7 @@ async def handle_del_chore_inst(call: types.CallbackQuery, db_user: User = None)
             inst.status = "skipped"
             await session.commit()
             title = tmpl.title if tmpl else "Домашнее дело"
-            await call.answer("🗑 Копия удалена!", show_alert=False)
-            await call.message.answer(f"🗑 Копия домашнего дела '{title}' удалена на сегодня!")
+            await call.answer(f"🗑 Копия домашнего дела '{title}' удалена на сегодня!", show_alert=True)
         else:
             await call.answer("⚠️ Задача не найдена!", show_alert=False)
             
@@ -787,20 +757,11 @@ async def p_move_menu(call: types.CallbackQuery, db_user: User = None):
 @dp.callback_query(F.data.startswith("mov_p:"))
 async def mov_p_select(call: types.CallbackQuery):
     t_id = int(call.data.split(":")[1])
-    days_ru = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
     async with AsyncSessionLocal() as session:
         today = await get_house_today_date(session)
-    d1 = today + timedelta(days=1)
-    d2 = today + timedelta(days=2)
-    
-    keyboard = [
-        [
-            InlineKeyboardButton(text=f"{d1.strftime('%d.%m')} ({days_ru[d1.weekday()]})", callback_data=f"set_dt:pm:{t_id}:{d1.strftime('%Y-%m-%d')}"),
-            InlineKeyboardButton(text=f"{d2.strftime('%d.%m')} ({days_ru[d2.weekday()]})", callback_data=f"set_dt:pm:{t_id}:{d2.strftime('%Y-%m-%d')}"),
-            InlineKeyboardButton(text="Другая дата", callback_data=f"rc_months_plan:{t_id}")
-        ]
-    ]
-    await call.message.edit_text("На какой день перенести задачу?", reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
+    markup = create_calendar_keyboard_custom(t_id, today.year, today.month, today, "plan")
+    header = format_calendar_header(today)
+    await call.message.edit_text(header, reply_markup=markup, parse_mode="Markdown")
 
 
 @dp.callback_query(F.data == "p_menu_del")
