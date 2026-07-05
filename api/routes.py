@@ -55,34 +55,52 @@ async def health():
 
 # -- Personal tasks --
 @app.get("/api/tasks/today")
-async def get_today_tasks(user: User = Depends(get_current_user)):
+async def get_today_tasks(date: Optional[str] = None, user: User = Depends(get_current_user)):
     from bot.handlers.base import get_house_today_date
     async with AsyncSessionLocal() as session:
         today = await get_house_today_date(session)
+        
+        target_date = today
+        if date:
+            try:
+                target_date = datetime.strptime(date, "%Y-%m-%d").date()
+            except Exception:
+                pass
+                
+        if target_date == today:
+            cond = and_(
+                PersonalTask.user_id == user.id,
+                PersonalTask.date_execution <= today,
+                PersonalTask.is_completed == False,
+                PersonalTask.is_deleted == False,
+            )
+        else:
+            cond = and_(
+                PersonalTask.user_id == user.id,
+                PersonalTask.date_execution == target_date,
+                PersonalTask.is_deleted == False,
+            )
+            
         result = await session.execute(
-            select(PersonalTask).where(
-                and_(
-                    PersonalTask.user_id == user.id,
-                    PersonalTask.date_execution == today,
-                    PersonalTask.is_completed == False,
-                    PersonalTask.is_deleted == False,
-                )
-            ).order_by(PersonalTask.id)
+            select(PersonalTask).where(cond).order_by(PersonalTask.id)
         )
         tasks = result.scalars().all()
         
         # Also get in-progress household tasks (claimed by this user)
-        house_result = await session.execute(
-            select(TaskInstance, TaskTemplate).join(
-                TaskTemplate, TaskInstance.template_id == TaskTemplate.id
-            ).where(
-                and_(
-                    TaskInstance.done_by_user_id == user.id,
-                    TaskInstance.status == "in_progress",
+        # Note: claimed chores only show up on today's dashboard
+        house_tasks = []
+        if target_date == today:
+            house_result = await session.execute(
+                select(TaskInstance, TaskTemplate).join(
+                    TaskTemplate, TaskInstance.template_id == TaskTemplate.id
+                ).where(
+                    and_(
+                        TaskInstance.done_by_user_id == user.id,
+                        TaskInstance.status == "in_progress",
+                    )
                 )
             )
-        )
-        house_tasks = house_result.all()
+            house_tasks = house_result.all()
 
     return {
         "personal": [
@@ -240,6 +258,7 @@ async def get_house_tasks(user: User = Depends(get_current_user)):
                 "points": tmpl.points,
                 "periodicity": tmpl.periodicity,
                 "period_days": tmpl.period_days,
+                "date": str(inst.date),
                 "status": inst.status,
                 "last_completed": last_date.isoformat() if last_date else None,
                 "next_execution": next_date.isoformat() if next_date else None
@@ -546,6 +565,7 @@ class CreateTemplateRequest(BaseModel):
     title: str
     points: int = 1
     periodicity: str = "daily"
+    period_days: Optional[int] = None
     start_date: Optional[str] = None
 
 @app.post("/api/chores/templates")
@@ -572,6 +592,10 @@ async def create_chore_template(req: CreateTemplateRequest, user: User = Depends
         if not start_date:
             start_date = await get_house_today_date(session)
             
+        p_days = req.period_days
+        if req.periodicity == "every_x_days" and not p_days:
+            p_days = 30
+            
         partner = await get_partner_user(session, user.id)
         if partner:
             pending = PendingAction(
@@ -582,7 +606,7 @@ async def create_chore_template(req: CreateTemplateRequest, user: User = Depends
                     "title": clean_title,
                     "points": req.points,
                     "periodicity": req.periodicity,
-                    "period_days": 1 if req.periodicity == "daily" else None
+                    "period_days": p_days
                 })
             )
             session.add(pending)
@@ -604,6 +628,8 @@ async def create_chore_template(req: CreateTemplateRequest, user: User = Depends
                 p_label = "раз в квартал"
             elif req.periodicity == "once":
                 p_label = "один раз"
+            elif req.periodicity == "every_x_days":
+                p_label = f"каждые {p_days} дней"
                 
             partner_text = (
                 f"🔔 *Согласование новой задачи!*\n\n"
@@ -629,6 +655,7 @@ async def create_chore_template(req: CreateTemplateRequest, user: User = Depends
                 title=clean_title,
                 points=req.points,
                 periodicity=req.periodicity,
+                period_days=p_days,
                 start_date=start_date,
                 deleted=False
             )
@@ -644,6 +671,10 @@ async def update_chore_template(template_id: int, req: CreateTemplateRequest, us
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid start_date format (YYYY-MM-DD)")
         
+    p_days = req.period_days
+    if req.periodicity == "every_x_days" and not p_days:
+        p_days = 30
+
     async with AsyncSessionLocal() as session:
         tmpl = await session.get(TaskTemplate, template_id)
         if not tmpl or tmpl.house_id != ACTIVE_HOUSE_ID:
@@ -652,6 +683,7 @@ async def update_chore_template(template_id: int, req: CreateTemplateRequest, us
         tmpl.title = req.title
         tmpl.points = req.points
         tmpl.periodicity = req.periodicity
+        tmpl.period_days = p_days
         if start_date:
             tmpl.start_date = start_date
             

@@ -72,9 +72,15 @@
 
       <!-- PERSONAL TASKS TAB -->
       <section class="tab-pane" id="pane-personal">
-        <div class="section-header">
+        <div class="section-header" style="margin-bottom: 12px;">
           <h2>Мои задачи</h2>
           <p class="section-sub">Личные и взятые домашние дела</p>
+        </div>
+        <!-- Date Pagination Bar -->
+        <div class="flex-between" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; background: var(--bg2); padding: 8px 12px; border-radius: 12px; border: 1px solid var(--border);">
+          <button class="btn btn-secondary btn-xs" onclick="shiftPersonalDay(-1)" style="padding: 6px 12px; font-weight: bold; height: 32px; font-size: 11px;">◀</button>
+          <span id="personalActiveDateDisplay" style="font-weight: 600; font-size: 14px; color: var(--text1);">05.07.</span>
+          <button class="btn btn-secondary btn-xs" onclick="shiftPersonalDay(1)" style="padding: 6px 12px; font-weight: bold; height: 32px; font-size: 11px;">▶</button>
         </div>
         <div id="personalTasksList" class="task-list"></div>
         <button class="fab" id="addTaskBtn">+</button>
@@ -165,9 +171,8 @@
 
       <!-- SETTINGS TAB -->
       <section class="tab-pane" id="pane-settings">
-        <div class="section-header">
+        <div class="section-header" style="margin-bottom: 12px;">
           <h2>Настройки</h2>
-          <p class="section-sub">Управление шаблонами задач и магазина</p>
         </div>
         
         <!-- Chores Templates -->

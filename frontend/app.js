@@ -194,12 +194,38 @@ function renderMembers(members) {
 }
 
 // ── Personal Tab ──────────────────────────────────────────────────────────────
+let personalActiveOffset = 0;
+
+function getPersonalActiveDateStr() {
+  const d = new Date();
+  d.setDate(d.getDate() + personalActiveOffset);
+  return d.toISOString().split('T')[0];
+}
+
+function getPersonalActiveDateLabel() {
+  const d = new Date();
+  d.setDate(d.getDate() + personalActiveOffset);
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  return `${day}.${month}.`;
+}
+
+function shiftPersonalDay(diff) {
+  personalActiveOffset += diff;
+  loadPersonalTab();
+}
+window.shiftPersonalDay = shiftPersonalDay;
+
 async function loadPersonalTab() {
   const list = document.getElementById('personalTasksList');
   showSpinnerIfNeeded(list, '.task-card');
 
+  const display = document.getElementById('personalActiveDateDisplay');
+  if (display) display.textContent = getPersonalActiveDateLabel();
+
+  const dateStr = getPersonalActiveDateStr();
   try {
-    const data = await api('GET', '/api/tasks/today');
+    const data = await api('GET', `/api/tasks/today?date=${dateStr}`);
     renderPersonalTasks(data.personal, data.household);
   } catch (e) {
     list.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-title">Ошибка</div><div class="empty-sub">${e.message}</div></div>`;
@@ -411,21 +437,26 @@ function setupModals() {
   document.getElementById('shiftTaskDate').addEventListener('change', async (e) => {
     const newDate = e.target.value;
     if (!newDate) return;
+    
+    // Close modal and show success toast instantly (optimistic UI)
+    document.getElementById('shiftTaskModal').classList.add('hidden');
+    showToast('🗓 Задача перенесена!');
+    
     try {
-      if (shiftTaskType === 'chore') {
-        await api('POST', `/api/house/tasks/${shiftTaskId}/shift`, { new_date: newDate });
+      const taskId = shiftTaskId;
+      const taskType = shiftTaskType;
+      if (taskType === 'chore') {
+        await api('POST', `/api/house/tasks/${taskId}/shift`, { new_date: newDate });
         loadHouseTab();
         loadPersonalTab();
-      } else if (shiftTaskType === 'personal') {
-        await api('POST', `/api/tasks/${shiftTaskId}/shift`, { new_date: newDate });
+      } else if (taskType === 'personal') {
+        await api('POST', `/api/tasks/${taskId}/shift`, { new_date: newDate });
         loadPersonalTab();
-      } else if (shiftTaskType === 'template') {
-        await api('POST', `/api/chores/templates/${shiftTaskId}/shift`, { new_date: newDate });
+      } else if (taskType === 'template') {
+        await api('POST', `/api/chores/templates/${taskId}/shift`, { new_date: newDate });
         loadSettingsTab();
         loadHouseTab();
       }
-      document.getElementById('shiftTaskModal').classList.add('hidden');
-      showToast('🗓 Задача перенесена!');
     } catch (err) {
       showToast(`⚠️ ${err.message}`);
     }
@@ -672,9 +703,9 @@ function renderChoresTemplates(templates) {
       nextStr = `${day}.${month}.`;
     }
     return `
-      <div class="task-card house-task flex-between" onclick="openTemplateDetailsModal(${JSON.stringify(t).replace(/"/g, '&quot;')})" style="padding: 0 12px; cursor: pointer; margin-bottom: 8px; height: 52px; align-items: center; display: flex;">
-        <span style="font-weight: 500; font-size: 14px;">${escHtml(stripEmoji(t.title))}</span>
-        <span class="task-badge" style="font-size: 13px; font-weight: 600; background: var(--bg3); color: var(--text2); border-radius: 8px; width: 80px; height: 42px; display: flex; align-items: center; justify-content: center; box-sizing: border-box; flex-shrink: 0; margin-left: auto;">📅 ${nextStr}</span>
+      <div class="task-card house-task flex-between" onclick="openTemplateDetailsModal(${JSON.stringify(t).replace(/"/g, '&quot;')})" style="padding: 0 10px; cursor: pointer; margin-bottom: 4px; height: 42px; align-items: center; display: flex;">
+        <span style="font-weight: 500; font-size: 13px;">${escHtml(stripEmoji(t.title))}</span>
+        <span class="task-badge" style="font-size: 12px; font-weight: 600; background: var(--bg3); color: var(--text2); border-radius: 6px; width: 70px; height: 32px; display: flex; align-items: center; justify-content: center; box-sizing: border-box; flex-shrink: 0; margin-left: auto;">📅 ${nextStr}</span>
       </div>
     `;
   }).join('');
@@ -750,15 +781,17 @@ function openShiftModal(id, type) {
   const input = document.getElementById('shiftTaskDate');
   input.value = new Date().toISOString().split('T')[0];
   
-  if (typeof input.showPicker === 'function') {
-    try {
-      input.showPicker();
-    } catch (err) {
+  setTimeout(() => {
+    if (typeof input.showPicker === 'function') {
+      try {
+        input.showPicker();
+      } catch (err) {
+        input.click();
+      }
+    } else {
       input.click();
     }
-  } else {
-    input.click();
-  }
+  }, 100);
 }
 
 
@@ -981,8 +1014,8 @@ function openChoreDetails(t) {
     <div style="display: flex; gap: 6px; width: 100%; align-items: center;">
       <button class="btn btn-primary" onclick="claimTask(${t.id}); closeModal('choreDetailsModal');" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 2px; font-size: 13px; font-weight: 600; background: var(--success); border-color: var(--success);">Взять</button>
       <button class="btn btn-secondary" onclick="nudgeTask(${t.id}); closeModal('choreDetailsModal');" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 2px; font-size: 13px; font-weight: 600;">Намек</button>
-      <button class="btn btn-secondary" onclick="skipFreeChore(${t.id}); closeModal('choreDetailsModal');" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 2px; font-size: 13px; font-weight: 600;">Убрать</button>
       <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'chore'); closeModal('choreDetailsModal');" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 2px; font-size: 13px; font-weight: 600;">Сдвиг</button>
+      <button class="btn btn-secondary" onclick="skipFreeChore(${t.id}); closeModal('choreDetailsModal');" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 2px; font-size: 13px; font-weight: 600;">Убрать</button>
       <button class="btn btn-secondary" onclick="goToChoreTemplateSettings(${t.template_id}, '${escAttr(t.title)}', ${t.points}, '${t.periodicity}', ${t.period_days || 'null'}, ${t.last_completed ? `'${t.last_completed}'` : 'null'}, ${t.next_execution ? `'${t.next_execution}'` : 'null'}); closeModal('choreDetailsModal');" style="width: 42px; height: 42px; box-sizing: border-box; padding: 0; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0;">⚙️</button>
     </div>
   `;
@@ -1288,7 +1321,9 @@ function goToChoreTemplateSettings(templateId, title, points, periodicity, perio
     last_completed: lastCompleted,
     next_execution: nextExecution
   };
-  openTemplateDetailsModal(t);
+  setTimeout(() => {
+    openTemplateDetailsModal(t);
+  }, 200);
 }
 
 window.openMyTaskDetails = openMyTaskDetails;
