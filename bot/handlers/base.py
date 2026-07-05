@@ -229,75 +229,31 @@ async def send_morning_message():
         for inst, tmpl in chores:
             pts_str = "2-8" if tmpl.title == "Готовка" else str(tmpl.points)
             text += f"• *{tmpl.title}* (`+{pts_str} 🍪`)\n"
-        text += "\n👉 Зайдите в 🏠 *Home*, чтобы взять задачу в работу!"
+        text += "\n👉 Откройте Mini App, чтобы взять задачу в работу!"
     else:
         text = "🌅 *Доброе утро!*\n\nНа сегодня свободных домашних дел нет. Отдыхаем! ☕️"
         
+    app_url = MINI_APP_URL
+    if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
+        app_url = app_url.rstrip("/") + "/app"
+        
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(
+            text="📱 Открыть App",
+            web_app=WebAppInfo(url=app_url)
+        )
+    )
+    markup = builder.as_markup()
+        
     for u in users:
         try:
-            await bot.send_message(chat_id=u.telegram_id, text=text, parse_mode="Markdown")
-            from bot.handlers.chores import render_household_chores
-            await render_household_chores(message=None, db_user=u, chat_id=u.telegram_id)
+            await bot.send_message(chat_id=u.telegram_id, text=text, parse_mode="Markdown", reply_markup=markup)
         except Exception as e:
             logger.error(f"Failed to send morning message to {u.telegram_id}: {e}")
  
  
-async def send_14_reminder():
-    async with AsyncSessionLocal() as session:
-        today = await get_house_today_date(session)
-        users = (await session.execute(select(User).where(User.house_id == ACTIVE_HOUSE_ID))).scalars().all()
-        for u in users:
-            res = await session.execute(
-                select(TaskInstance).where(and_(
-                    TaskInstance.done_by_user_id == u.id,
-                    TaskInstance.date <= today,
-                    TaskInstance.status.in_(["in_progress", "done"])
-                ))
-            )
-            taken = res.scalars().all()
-            if not taken:
-                text = (
-                    "🔔 *Напоминание!*\n\n"
-                    "Ты ещё не взял ни одной домашней задачи на сегодня.\n"
-                    "Загляни в вкладку 🏠 *Home* и выбери что-нибудь полезное! 🍪"
-                )
-                try:
-                    await bot.send_message(chat_id=u.telegram_id, text=text, parse_mode="Markdown")
-                    from bot.handlers.chores import render_household_chores
-                    await render_household_chores(message=None, db_user=u, chat_id=u.telegram_id)
-                except Exception as e:
-                    logger.error(f"Failed to send 14:00 reminder to {u.telegram_id}: {e}")
- 
- 
-async def send_17_reminder():
-    async with AsyncSessionLocal() as session:
-        today = await get_house_today_date(session)
-        result = await session.execute(
-            select(TaskInstance, TaskTemplate)
-            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
-            .where(and_(
-                TaskTemplate.house_id == ACTIVE_HOUSE_ID,
-                TaskInstance.date <= today,
-                TaskInstance.status == "free",
-                TaskTemplate.deleted == False
-            ))
-        )
-        free_chores = result.all()
-        users = (await session.execute(select(User).where(User.house_id == ACTIVE_HOUSE_ID))).scalars().all()
-        
-    if free_chores and users:
-        text = (
-            "⚠️ *Внимание!*\n\n"
-            "На сегодня ещё остались невыполненные домашние дела!\n"
-            "Успейте залутать печеньки 🍪 во вкладке 🏠 *Home*!"
-        )
-        for u in users:
-            try:
-                await bot.send_message(chat_id=u.telegram_id, text=text, parse_mode="Markdown")
-                from bot.handlers.chores import render_household_chores
-                await render_household_chores(message=None, db_user=u, chat_id=u.telegram_id)
-            except Exception as e:
-                logger.error(f"Failed to send 17:00 reminder to {u.telegram_id}: {e}")
+# send_14_reminder and send_17_reminder have been disabled as per optimization settings
 
 
 async def send_midnight_summary():
@@ -370,11 +326,22 @@ async def send_midnight_summary():
             text += "Задач не выполнял.\n"
         text += "\n"
         
+    app_url = MINI_APP_URL
+    if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
+        app_url = app_url.rstrip("/") + "/app"
+        
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(
+            text="📱 Открыть App",
+            web_app=WebAppInfo(url=app_url)
+        )
+    )
+    markup = builder.as_markup()
+        
     for u in users:
         try:
-            await bot.send_message(chat_id=u.telegram_id, text=text, parse_mode="Markdown")
-            from bot.handlers.chores import render_household_chores
-            await render_household_chores(message=None, db_user=u, chat_id=u.telegram_id)
+            await bot.send_message(chat_id=u.telegram_id, text=text, parse_mode="Markdown", reply_markup=markup)
         except Exception as e:
             logger.error(f"Failed to send midnight summary to {u.telegram_id}: {e}")
 
@@ -598,16 +565,20 @@ async def cmd_start(message: types.Message, db_user: User = None):
     
     text = (
         "👋 Привет!\n\n"
-        "Вот как у нас всё устроено:\n\n"
-        "1. 🏠 <b>Home (Домашние дела)</b>\n"
-        "Бери дела в работу нажатием на задачу, создавай новые задачи или добавляй их из готовой базы.\n\n"
-        "2. 📋 <b>My (Мои дела)</b>\n"
-        "Твой личный список дел на сегодня. Выполняй взятые домашние дела, веди свои личные задачи и список покупок. Выполнил — жми на задачу, чтобы получить печеньки 🍪!\n\n"
-        "3. 📊 <b>Stat (Магазин и Покупки)</b>\n"
-        "Копи печеньки и обменивай их в Магазине 🛍 на награды, веди список покупок 🛒 и смотри историю дел в Архиве 📜."
+        "Все функции управления домашними делами, личными задачами, покупками и наградами теперь доступны только в <b>Mini App</b>! 📱\n\n"
+        "В чате бота вы будете получать только:\n"
+        "• Утренний список дел (в 9:00) 🌅\n"
+        "• Итоги дня (в полночь) 🌙\n"
+        "• Запросы на одобрение изменений и удалений от вашего партнера 🔔\n\n"
+        "Нажмите на кнопку ниже, чтобы открыть приложение и приступить к работе!"
     )
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="К задачам", callback_data="ob_finish"))
+    builder.row(
+        InlineKeyboardButton(
+            text="📱 Открыть App",
+            web_app=WebAppInfo(url=app_url)
+        )
+    )
     sent_msg = await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
     try:
         await message.bot.pin_chat_message(chat_id=message.chat.id, message_id=sent_msg.message_id)
@@ -1113,6 +1084,39 @@ def create_calendar_keyboard_custom(target_id: int, year: int, month: int, today
         kb.append(row)
         
     return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+# ── Catch-All Handlers to Redirect to Mini App ─────────────────────────────────
+
+@dp.callback_query()
+async def catch_all_callbacks(call: types.CallbackQuery):
+    await call.answer(
+        "⚠️ Данное действие доступно только в Mini App!\nПожалуйста, используйте кнопку «Открыть App» внизу.",
+        show_alert=True
+    )
+
+
+@dp.message()
+async def catch_all_messages(message: types.Message):
+    import os
+    from aiogram.types import WebAppInfo
+    app_url = os.getenv("MINI_APP_URL") or os.getenv("RENDER_EXTERNAL_URL") or "https://example.com"
+    if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
+        app_url = app_url.rstrip("/") + "/app"
+        
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(
+            text="📱 Открыть App",
+            web_app=WebAppInfo(url=app_url)
+        )
+    )
+    await message.answer(
+        "🤖 Все функции управления домашними делами, личными задачами, покупками и наградами доступны только в <b>Mini App</b>!\n\n"
+        "Пожалуйста, откройте приложение с помощью кнопки ниже.",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML"
+    )
 
 
 

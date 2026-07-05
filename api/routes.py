@@ -14,7 +14,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from db.models import (
     AsyncSessionLocal, User, House, PersonalTask, ShoppingItem,
-    TaskTemplate, TaskInstance, Completion, Reward, RewardPurchase
+    TaskTemplate, TaskInstance, Completion, Reward, RewardPurchase,
+    PendingAction
 )
 from api.auth import validate_telegram_init_data
 
@@ -484,32 +485,125 @@ async def create_chore_template(req: CreateTemplateRequest, user: User = Depends
         clean_title = f"{emoji} {clean_title}"
         
     async with AsyncSessionLocal() as session:
-        from bot.handlers.base import get_house_today_date
+        from bot.handlers.base import get_house_today_date, get_partner_user, bot
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        from aiogram.types import InlineKeyboardButton
+        import json
+        
         if not start_date:
             start_date = await get_house_today_date(session)
             
-        tmpl = TaskTemplate(
-            house_id=ACTIVE_HOUSE_ID,
-            title=clean_title,
-            points=req.points,
-            periodicity=req.periodicity,
-            start_date=start_date,
-            deleted=False
-        )
-        session.add(tmpl)
-        await session.commit()
-        await session.refresh(tmpl)
-    return {"ok": True, "id": tmpl.id, "title": tmpl.title}
+        partner = await get_partner_user(session, user.id)
+        if partner:
+            pending = PendingAction(
+                house_id=ACTIVE_HOUSE_ID,
+                initiator_id=user.id,
+                action_type="create_template",
+                data_payload=json.dumps({
+                    "title": clean_title,
+                    "points": req.points,
+                    "periodicity": req.periodicity,
+                    "period_days": 1 if req.periodicity == "daily" else None
+                })
+            )
+            session.add(pending)
+            await session.commit()
+            await session.refresh(pending)
+            
+            p_label = req.periodicity
+            if req.periodicity == "daily":
+                p_label = "каждый день"
+            elif req.periodicity == "weekly":
+                p_label = "раз в неделю"
+            elif req.periodicity == "twice_weekly":
+                p_label = "2 раза в неделю"
+            elif req.periodicity == "monthly":
+                p_label = "раз в месяц"
+            elif req.periodicity == "twice_monthly":
+                p_label = "2 раза в месяц"
+            elif req.periodicity == "quarterly":
+                p_label = "раз в квартал"
+            elif req.periodicity == "once":
+                p_label = "один раз"
+                
+            partner_text = (
+                f"🔔 *Согласование новой задачи!*\n\n"
+                f"*{user.display_name or user.username or 'Партнёр'}* хочет добавить домашнюю задачу:\n"
+                f"📋 *Название:* {clean_title}\n"
+                f"🍪 *Награда:* {req.points} печенек\n"
+                f"📅 *Цикл:* {p_label}\n\n"
+                f"Одобряете добавление?"
+            )
+            builder = InlineKeyboardBuilder()
+            builder.row(
+                InlineKeyboardButton(text="✅ Одобрить", callback_data=f"approve_act:{pending.id}"),
+                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_act:{pending.id}")
+            )
+            try:
+                await bot.send_message(chat_id=partner.telegram_id, text=partner_text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+            except Exception as e:
+                logger.error(f"Failed to send approval message to partner: {e}")
+            return {"ok": True, "pending": True, "message": "⏳ Запрос отправлен на согласование партнёру!"}
+        else:
+            tmpl = TaskTemplate(
+                house_id=ACTIVE_HOUSE_ID,
+                title=clean_title,
+                points=req.points,
+                periodicity=req.periodicity,
+                start_date=start_date,
+                deleted=False
+            )
+            session.add(tmpl)
+            await session.commit()
+            await session.refresh(tmpl)
+            return {"ok": True, "id": tmpl.id, "title": tmpl.title}
 
 @app.delete("/api/chores/templates/{template_id}")
 async def delete_chore_template(template_id: int, user: User = Depends(get_current_user)):
     async with AsyncSessionLocal() as session:
+        from bot.handlers.base import get_partner_user, bot
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        from aiogram.types import InlineKeyboardButton
+        import json
+        
         tmpl = await session.get(TaskTemplate, template_id)
         if not tmpl or tmpl.house_id != ACTIVE_HOUSE_ID:
             raise HTTPException(status_code=404, detail="Template not found")
-        tmpl.deleted = True
-        await session.commit()
-    return {"ok": True}
+            
+        partner = await get_partner_user(session, user.id)
+        if partner:
+            pending = PendingAction(
+                house_id=ACTIVE_HOUSE_ID,
+                initiator_id=user.id,
+                action_type="delete_template",
+                data_payload=json.dumps({
+                    "template_id": template_id
+                })
+            )
+            session.add(pending)
+            await session.commit()
+            await session.refresh(pending)
+            
+            partner_text = (
+                f"🔔 *Согласование удаления задачи!*\n\n"
+                f"*{user.display_name or user.username or 'Партнёр'}* хочет удалить домашнюю задачу:\n"
+                f"🗑 *{tmpl.title}*\n\n"
+                f"Одобряете удаление?"
+            )
+            builder = InlineKeyboardBuilder()
+            builder.row(
+                InlineKeyboardButton(text="✅ Одобрить", callback_data=f"approve_act:{pending.id}"),
+                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_act:{pending.id}")
+            )
+            try:
+                await bot.send_message(chat_id=partner.telegram_id, text=partner_text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+            except Exception as e:
+                logger.error(f"Failed to send approval message to partner: {e}")
+            return {"ok": True, "pending": True, "message": "⏳ Запрос на удаление отправлен партнёру!"}
+        else:
+            tmpl.deleted = True
+            await session.commit()
+            return {"ok": True}
 
 
 # -- Rewards templates --

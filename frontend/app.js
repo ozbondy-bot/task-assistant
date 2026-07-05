@@ -329,12 +329,16 @@ function setupModals() {
     const startDate = document.getElementById('choreTmplStartDate').value;
     if (!title) return;
     try {
-      await api('POST', '/api/chores/templates', { title, points, periodicity, start_date: startDate || null });
+      const res = await api('POST', '/api/chores/templates', { title, points, periodicity, start_date: startDate || null });
       document.getElementById('addChoreModal').classList.add('hidden');
       document.getElementById('choreTmplTitle').value = '';
       document.getElementById('choreTmplPoints').value = '1';
       document.getElementById('choreTmplStartDate').value = '';
-      showToast('✅ Шаблон добавлен!');
+      if (res && res.pending) {
+        showToast(res.message || '⏳ Запрос отправлен на согласование партнёру!');
+      } else {
+        showToast('✅ Шаблон добавлен!');
+      }
       loadSettingsTab();
     } catch (e) {
       showToast(`⚠️ ${e.message}`);
@@ -654,8 +658,12 @@ function renderRewardsTemplates(rewards) {
 async function deleteChoreTemplate(id) {
   if (!confirm('Удалить этот шаблон дела?')) return;
   try {
-    await api('DELETE', `/api/chores/templates/${id}`);
-    showToast('🗑 Шаблон удален!');
+    const res = await api('DELETE', `/api/chores/templates/${id}`);
+    if (res && res.pending) {
+      showToast(res.message || '⏳ Запрос на удаление отправлен партнёру!');
+    } else {
+      showToast('🗑 Шаблон удален!');
+    }
     loadSettingsTab();
   } catch (e) {
     showToast(`⚠️ ${e.message}`);
