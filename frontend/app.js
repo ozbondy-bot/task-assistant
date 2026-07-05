@@ -566,19 +566,12 @@ async function markBought(id, el) {
 // ── Shop / Rewards Tab ────────────────────────────────────────────────────────
 async function loadShopTab() {
   const rList = document.getElementById('rewardsList');
-  const lb = document.getElementById('leaderboard');
   showSpinnerIfNeeded(rList, '.reward-card');
 
   try {
-    const [rewardsData, statsData] = await Promise.all([
-      api('GET', '/api/rewards'),
-      api('GET', '/api/stats'),
-    ]);
-
+    const rewardsData = await api('GET', '/api/rewards');
     currentPoints = rewardsData.user_points;
-
     renderRewards(rewardsData.rewards, rewardsData.user_points);
-    renderLeaderboard(statsData.leaderboard);
   } catch (e) {
     rList.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-title">Ошибка</div><div class="empty-sub">${e.message}</div></div>`;
   }
@@ -744,15 +737,28 @@ function renderRewardsTemplates(rewards) {
     return;
   }
   list.innerHTML = rewards.map(r => `
-    <div class="settings-item">
-      <div class="settings-item-body">
-        <div class="settings-item-title">${escHtml(r.title)}</div>
-        <div class="settings-item-meta">${r.price} 🍪</div>
-      </div>
-      <button class="btn-delete-icon" onclick="deleteReward(${r.id})">🗑</button>
+    <div class="settings-item" onclick="openRewardTemplateDetails(${JSON.stringify(r).replace(/"/g, '&quot;')})" style="cursor:pointer;">
+      <span class="settings-item-title" style="flex:1; font-size:13px;">${escHtml(stripEmoji(r.title))}</span>
+      <span style="font-size:12px; font-weight:600; color:var(--warning); white-space:nowrap;">${r.price} ⭐</span>
     </div>
   `).join('');
 }
+
+function openRewardTemplateDetails(r) {
+  document.getElementById('templateDetailsTitle').textContent = stripEmoji(r.title);
+  document.getElementById('templateDetailsBody').innerHTML = `
+    <div>⭐ <strong>Стоимость:</strong> <span>${r.price} ⭐</span></div>
+    ${r.base_days ? `<div>📅 <strong>База (дней):</strong> <span>${r.base_days}</span></div>` : ''}
+  `;
+  const actions = document.getElementById('templateDetailsActions');
+  actions.innerHTML = `
+    <div style="display: flex; gap: 6px; width: 100%;">
+      <button class="btn btn-secondary" onclick="deleteReward(${r.id}); closeModal('templateDetailsModal');" style="flex: 1; padding: 10px 4px; font-size: 13px; font-weight: 600; background: var(--danger); border-color: var(--danger);">Удалить</button>
+    </div>
+  `;
+  document.getElementById('templateDetailsModal').classList.remove('hidden');
+}
+window.openRewardTemplateDetails = openRewardTemplateDetails;
 
 async function deleteChoreTemplate(id) {
   closeModal('templateDetailsModal');
@@ -988,7 +994,7 @@ async function loadPurchasesArchive(page) {
             <span class="archive-item-title">${escHtml(p.reward_title)}</span>
             <span class="archive-item-meta">${dtStr} • Купил: ${escHtml(p.user)}</span>
           </div>
-          <span class="task-badge badge-points" style="background:rgba(251,191,36,0.15);color:var(--warning);font-size:11px;">-${p.price} 🍪</span>
+          <span class="task-badge badge-points" style="background:rgba(251,191,36,0.15);color:var(--warning);font-size:11px;">-${p.price} ⭐</span>
         </div>
       `;
     }).join('');
