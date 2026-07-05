@@ -1,24 +1,20 @@
-import os
+﻿import os
 import logging
 import asyncio
-import calendar
 from datetime import datetime, timedelta, date
 from aiogram import Bot, Dispatcher, types, F, BaseMiddleware
-from aiogram.filters import CommandStart, Command, StateFilter
+from aiogram.filters import CommandStart, Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, Date
-import sqlalchemy as sa
 
 
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from db.models import AsyncSessionLocal, User, House, PersonalTask, ShoppingItem, TaskTemplate, TaskInstance, Completion, Reward, RewardPurchase, PendingAction
-from bot.parser import parse_input, get_recurrence_delta, clean_task_text, extract_emoji
+from bot.parser import clean_task_text
 
 logger = logging.getLogger(__name__)
 
@@ -587,267 +583,13 @@ async def cmd_start(message: types.Message, db_user: User = None):
         logger.error(f"Failed to pin onboarding: {e}")
 
 
-@dp.callback_query(F.data.startswith("ob_page:"))
-async def handle_ob_page(call: types.CallbackQuery, db_user: User = None):
-    # No-op as we now have single page onboarding
-    await call.answer()
 
-
-@dp.callback_query(F.data == "ob_finish", StateFilter("*"))
-async def handle_ob_finish(call: types.CallbackQuery, state: FSMContext = None, db_user: User = None):
-    await call.answer()
-    if state:
-        await state.clear()
-    from bot.handlers.chores import render_household_chores
-    await render_household_chores(call.message, db_user, is_callback=False)
 
 
 @dp.message(Command("id"))
 async def cmd_id(message: types.Message):
     await message.answer(f"Твой Telegram ID: `{message.from_user.id}`", parse_mode="Markdown")
 
-
-
-# ── Render Today ───────────────────────────────────────────────────────────────
-
-
-
-
-async def render_today(message: types.Message, db_user: User, is_callback=False, page: int = 0):
-    async with AsyncSessionLocal() as session:
-        today = await get_house_today_date(session)
-
-
-
-        # 1. Fetch ALL active personal tasks
-        result = await session.execute(
-            select(PersonalTask).where(
-                and_(
-                    PersonalTask.user_id == db_user.id,
-                    PersonalTask.is_completed == False,
-                    PersonalTask.is_deleted == False,
-                )
-            ).order_by(PersonalTask.date_execution, PersonalTask.id)
-        )
-        personal_tasks_all = result.scalars().all()
-
-        # 2. Fetch ALL active household tasks claimed by user
-        result_chores = await session.execute(
-            select(TaskInstance, TaskTemplate).join(
-                TaskTemplate, TaskInstance.template_id == TaskTemplate.id
-            ).where(
-                and_(
-                    TaskInstance.done_by_user_id == db_user.id,
-                    TaskInstance.status == "in_progress",
-                )
-            ).order_by(TaskInstance.date, TaskInstance.id)
-        )
-        my_chores_all = result_chores.all()
-
-    # Build unique future dates set from database
-    all_dates = set()
-    all_dates.add(today)
-    for pt in personal_tasks_all:
-        if pt.date_execution > today:
-            all_dates.add(pt.date_execution)
-        if pt.recurrence:
-            delta = get_recurrence_delta(pt.recurrence)
-            # Add next 4 occurrences (limit to 30 days ahead)
-            for k in range(1, 5):
-                occ_date = pt.date_execution + k * delta
-                if occ_date <= today + timedelta(days=30):
-                    all_dates.add(occ_date)
-                    
-    for inst, tmpl in my_chores_all:
-        all_dates.add(inst.date)
-
-    # Future dates (strictly > today) sorted ascending
-    future_dates = sorted([d for d in all_dates if d > today])
-    total_pages = 1 + len(future_dates)
-
-    if page < 0:
-        page = 0
-    if page >= total_pages:
-        page = total_pages - 1
-
-    # Filter tasks for the selected page
-    personal_tasks = []
-    my_chores = []
-
-    def is_pt_occurring_on(pt, target_d):
-        if pt.date_execution == target_d:
-            return True
-        if pt.recurrence and target_d > pt.date_execution:
-            delta = get_recurrence_delta(pt.recurrence)
-            return (target_d - pt.date_execution).days % delta.days == 0
-        return False
-
-    def get_ru_weekday_abbr(d: date) -> str:
-        abbrs = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
-        return abbrs[d.weekday()]
-
-    if page == 0:
-        personal_tasks = [pt for pt in personal_tasks_all if pt.date_execution <= today]
-        my_chores = [(inst, tmpl) for inst, tmpl in my_chores_all if inst.date <= today]
-        info_title = "Мои дела на сегодня"
-    else:
-        target_date = future_dates[page - 1]
-        personal_tasks = [pt for pt in personal_tasks_all if is_pt_occurring_on(pt, target_date)]
-        my_chores = [(inst, tmpl) for inst, tmpl in my_chores_all if inst.date == target_date]
-        info_title = "Мои дела"
-
-    text = f"💈 {info_title} (жми для выполнения) 💈"
-
-    builder = InlineKeyboardBuilder()
-    
-    # Row 1 (Main Tabs)
-    builder.row(
-        InlineKeyboardButton(text="🏠 Home", callback_data="home_view"),
-        InlineKeyboardButton(text="⚡📋 My⚡", callback_data="my_page:0"),
-        InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
-    )
-
-    # Personal tasks rendering
-    for t in personal_tasks:
-        clean = clean_task_text(t.text)
-        is_urgent = "🔴" in t.text
-        
-        t_date = target_date if page > 0 else t.date_execution
-        date_str = t_date.strftime('%d.%m.')
-        
-        task_emoji = extract_emoji(t.text) or "👤"
-        emoji = "🔴" if is_urgent else ("🔁" if t.recurrence else task_emoji)
-        circle = ""
-        right_text = f"{date_str} {emoji} ℹ️"
-            
-        builder.row(
-            InlineKeyboardButton(text=clean, callback_data=f"done_task:{t.id}:{page}"),
-            InlineKeyboardButton(text=right_text, callback_data=f"pt_info:{t.id}:{page}")
-        )
-
-    # Chores rendering
-    for inst, tmpl in my_chores:
-        pts_str = "2-8" if tmpl.title == "Готовка" else str(tmpl.points)
-        c_date = inst.date
-        date_str = c_date.strftime('%d.%m.')
-        circle = ""
-        chore_emoji = extract_emoji(tmpl.title) or "🏠"
-        right_text = f"{chore_emoji} {date_str} {pts_str}🍪 ℹ️"
-            
-        builder.row(
-            InlineKeyboardButton(text=tmpl.title, callback_data=f"done_chore_inst:{inst.id}:{page}"),
-            InlineKeyboardButton(text=right_text, callback_data=f"my_chore_info:{inst.id}:{page}")
-        )
-
-    # Pagination row: LEFT=➕Добавить (page 0) or ⏪, MIDDLE=date, RIGHT=⏩ or empty
-    target_d = future_dates[page - 1] if page > 0 else today
-    date_lbl = f"{target_d.strftime('%d.%m')} ({get_ru_weekday_abbr(target_d)})"
-    nav = []
-    if page == 0:
-        nav.append(InlineKeyboardButton(text="➕ Добавить", callback_data=f"my_add:{page}"))
-    else:
-        nav.append(InlineKeyboardButton(text="⏪", callback_data=f"my_page:{page-1}"))
-    nav.append(InlineKeyboardButton(text=date_lbl, callback_data="noop"))
-    if page < total_pages - 1:
-        nav.append(InlineKeyboardButton(text="⏩", callback_data=f"my_page:{page+1}"))
-    else:
-        nav.append(InlineKeyboardButton(text=" ", callback_data="noop"))
-    builder.row(*nav)
-
-    markup = builder.as_markup()
-    if is_callback:
-        await message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
-    else:
-        await message.answer(text, reply_markup=markup, parse_mode="Markdown")
-
-
-@dp.callback_query(F.data.startswith("pt_info:"))
-async def handle_pt_info(call: types.CallbackQuery, db_user: User = None):
-    parts = call.data.split(":")
-    pt_id = int(parts[1])
-    page = int(parts[2])
-    
-    async with AsyncSessionLocal() as session:
-        pt = await session.get(PersonalTask, pt_id)
-        if not pt:
-            await call.answer("⚠️ Задача не найдена!", show_alert=False)
-            return
-            
-    clean = clean_task_text(pt.text)
-    cycle_str = pt.recurrence or "нет"
-    dt_str = pt.date_execution.strftime('%d.%m.%Y')
-    
-    text = (
-        f"ℹ️ <b>Информация о задаче:</b>\n\n"
-        f"📝 <b>Текст:</b> {clean}\n"
-        f"📅 <b>Дата выполнения:</b> {dt_str}\n"
-        f"🔁 <b>Цикл:</b> {cycle_str}"
-    )
-    
-    builder = InlineKeyboardBuilder()
-    # Row 1 (Main Tabs)
-    builder.row(
-        InlineKeyboardButton(text="🏠 Home", callback_data="home_view"),
-        InlineKeyboardButton(text="⚡📋 My⚡", callback_data="my_page:0"),
-        InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
-    )
-    builder.row(
-        InlineKeyboardButton(text="🗓 Сдвиг", callback_data=f"shift_pt_menu:{pt.id}:{page}"),
-        InlineKeyboardButton(text="🗑 Удалить", callback_data=f"del_pt:{pt.id}:{page}")
-    )
-    
-    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
-
-
-@dp.callback_query(F.data.startswith("my_chore_info:"))
-async def handle_my_chore_info(call: types.CallbackQuery, db_user: User = None):
-    parts = call.data.split(":")
-    inst_id = int(parts[1])
-    page = int(parts[2])
-    
-    async with AsyncSessionLocal() as session:
-        inst = await session.get(TaskInstance, inst_id)
-        if not inst:
-            await call.answer("⚠️ Задача не найдена!", show_alert=False)
-            return
-        tmpl = await session.get(TaskTemplate, inst.template_id)
-        if not tmpl:
-            await call.answer("⚠️ Шаблон не найден!", show_alert=False)
-            return
-            
-    clean = tmpl.title
-    pts_str = "2-8" if tmpl.title == "Готовка" else str(tmpl.points)
-    cycle_str = get_period_label(tmpl).capitalize()
-    dt_str = inst.date.strftime('%d.%m.%Y')
-    
-    text = (
-        f"ℹ️ <b>Информация о деле:</b>\n\n"
-        f"🏠 <b>Название:</b> {clean}\n"
-        f"🍪 <b>Награда:</b> {pts_str} печенек\n"
-        f"📅 <b>Дата выполнения:</b> {dt_str}\n"
-        f"🔁 <b>Цикл:</b> {cycle_str}"
-    )
-    
-    builder = InlineKeyboardBuilder()
-    # Row 1 (Main Tabs)
-    builder.row(
-        InlineKeyboardButton(text="🏠 Home", callback_data="home_view"),
-        InlineKeyboardButton(text="⚡📋 My⚡", callback_data="noop"),
-        InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
-    )
-    builder.row(
-        InlineKeyboardButton(text="🗓 Сдвиг", callback_data=f"shift_chore_menu:{inst.id}:{page}"),
-        InlineKeyboardButton(text="🔄 Вернуть", callback_data=f"unclaim_chore_inst:{inst.id}:{page}"),
-        InlineKeyboardButton(text="🗑 Копию", callback_data=f"del_chore_inst:{inst.id}:{page}")
-    )
-    
-    await call.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
-
-
-def format_calendar_header(today_date: date) -> str:
-    days_full_ru = ["Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"]
-    weekday_idx = (today_date.weekday() + 1) % 7
-    return f"📌 *Выберите дату переноса*\n_({days_full_ru[weekday_idx]}, {today_date.strftime('%d.%m.%Y')})_\n\n"
 
 
 def find_scheduled_date_on_or_after(t: TaskTemplate, search_date: date) -> date:
@@ -1035,55 +777,7 @@ def get_period_label(tmpl: TaskTemplate) -> str:
     return mapping.get(p, p)
 
 
-def create_calendar_keyboard_custom(target_id: int, year: int, month: int, today_date: date, callback_prefix: str) -> InlineKeyboardMarkup:
-    kb = []
-    # Add navigation bars at the top of the calendar
-    if 'pt' in callback_prefix or 'chore' in callback_prefix:
-        # My tab context
-        kb.append([
-            InlineKeyboardButton(text="🏠 Home", callback_data="home_view"),
-            InlineKeyboardButton(text="⚡📋 My⚡", callback_data="noop"),
-            InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
-        ])
-    else:
-        # Home tab context (chores)
-        kb.append([
-            InlineKeyboardButton(text="⚡🏠 Home⚡", callback_data="noop"),
-            InlineKeyboardButton(text="📋 My", callback_data="my_page:0"),
-            InlineKeyboardButton(text="📊 Stat", callback_data="stats_view")
-        ])
-        kb.append([
-            InlineKeyboardButton(text="➕ Добавить", callback_data="chores_add_menu"),
-            InlineKeyboardButton(text="⚙️ Настройки", callback_data="chores_settings")
-        ])
-    month_names_ru = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"]
-    kb.append([InlineKeyboardButton(text=f"🗓 {month_names_ru[month-1]} {year}", callback_data="noop")])
-    
-    prev_y, prev_m = (year, month - 1) if month > 1 else (year - 1, 12)
-    next_y, next_m = (year, month + 1) if month < 12 else (year + 1, 1)
-    
-    kb.append([
-        InlineKeyboardButton(text="⬅️ Пред.", callback_data=f"cal_nav_{callback_prefix}:{target_id}:{prev_y}:{prev_m}"),
-        InlineKeyboardButton(text="След. ➡️", callback_data=f"cal_nav_{callback_prefix}:{target_id}:{next_y}:{next_m}")
-    ])
-    
-    weeks_ru = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
-    kb.append([InlineKeyboardButton(text=w, callback_data="noop") for w in weeks_ru])
-    
-    cal = calendar.Calendar(firstweekday=0)
-    month_days = cal.monthdayscalendar(year, month)
-    
-    for week in month_days:
-        row = []
-        for day in week:
-            if day == 0: 
-                row.append(InlineKeyboardButton(text=" ", callback_data="noop"))
-            else:
-                btn_text = f"[{day}]" if year == today_date.year and month == today_date.month and day == today_date.day else str(day)
-                row.append(InlineKeyboardButton(text=btn_text, callback_data=f"shift_{callback_prefix}:{target_id}:{year}-{month:02d}-{day:02d}"))
-        kb.append(row)
-        
-    return InlineKeyboardMarkup(inline_keyboard=kb)
+
 
 
 # ── Catch-All Handlers to Redirect to Mini App ─────────────────────────────────
