@@ -185,6 +185,9 @@ async def get_ai_emoji(text: str) -> str:
                         if emoji_text:
                             _working_model = model
                             return emoji_text
+                    elif resp.status in (400, 401, 403):
+                        logger.error(f"Gemini API auth/bad-request error for model {model}: Status {resp.status}")
+                        return "📝"
                     elif resp.status == 404:
                         continue
                     else:

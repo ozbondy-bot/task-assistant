@@ -28,35 +28,60 @@ async def migrate_emojis_in_background():
         from db.models import AsyncSessionLocal, PersonalTask, TaskTemplate
         from sqlalchemy import select
         import re
+
+        # 1. Fetch records needing migration first, closing the session immediately
+        to_migrate_tasks = []
+        to_migrate_templates = []
+
         async with AsyncSessionLocal() as session:
-            # 1. Update PersonalTask records
             tasks_res = await session.execute(select(PersonalTask))
             tasks = tasks_res.scalars().all()
-            updated_any = False
             for t in tasks:
                 has_emoji = re.match(r'^([\u2600-\u27BF\U0001f000-\U0001f9ff])', t.text)
                 if not has_emoji and not t.text.startswith("🔴"):
-                    emoji = await get_ai_emoji(t.text)
-                    if emoji and emoji != "📝":
-                        t.text = f"{emoji} {t.text}"
-                        updated_any = True
-            
-            # 2. Update TaskTemplate records
+                    to_migrate_tasks.append((t.id, t.text))
+
             templates_res = await session.execute(select(TaskTemplate))
             templates = templates_res.scalars().all()
             for tmpl in templates:
                 has_emoji = re.match(r'^([\u2600-\u27BF\U0001f000-\U0001f9ff])', tmpl.title)
                 if not has_emoji:
-                    emoji = await get_ai_emoji(tmpl.title)
-                    if emoji and emoji != "📝":
-                        tmpl.title = f"{emoji} {tmpl.title}"
-                        updated_any = True
-                        
-            if updated_any:
-                await session.commit()
-                logger.info("Background database records successfully migrated with emojis.")
-            else:
-                logger.info("No database records needed emoji migration.")
+                    to_migrate_templates.append((tmpl.id, tmpl.title))
+
+        if not to_migrate_tasks and not to_migrate_templates:
+            logger.info("No database records needed emoji migration.")
+            return
+
+        logger.info(f"Found {len(to_migrate_tasks)} tasks and {len(to_migrate_templates)} templates needing emoji migration.")
+
+        # 2. Process each record one by one with a short-lived transaction
+        for task_id, text in to_migrate_tasks:
+            emoji = await get_ai_emoji(text)
+            if not emoji:
+                emoji = "📝"
+            new_text = f"{emoji} {text}"
+            
+            async with AsyncSessionLocal() as session:
+                db_task = await session.get(PersonalTask, task_id)
+                if db_task:
+                    db_task.text = new_text
+                    await session.commit()
+            await asyncio.sleep(0.5)
+
+        for tmpl_id, title in to_migrate_templates:
+            emoji = await get_ai_emoji(title)
+            if not emoji:
+                emoji = "📝"
+            new_title = f"{emoji} {title}"
+            
+            async with AsyncSessionLocal() as session:
+                db_tmpl = await session.get(TaskTemplate, tmpl_id)
+                if db_tmpl:
+                    db_tmpl.title = new_title
+                    await session.commit()
+            await asyncio.sleep(0.5)
+
+        logger.info("Background database records successfully migrated with emojis.")
     except Exception as e:
         logger.error(f"Failed to migrate database records with emojis in background: {e}")
 

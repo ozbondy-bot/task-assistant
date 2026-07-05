@@ -239,8 +239,8 @@ async def handle_stat_arch(call: types.CallbackQuery, state: FSMContext = None, 
     for e in day_entries:
         pts_str = str(e["points"])
         pts_suffix = f" (+{pts_str}🍪)" if e["points"] > 0 else ""
-        left_text = f"{e['user']}: {e['title']}"
-        right_text = f"{e['time']}{pts_suffix}"
+        left_text = e['title']
+        right_text = f"{e['user']} {e['time']}{pts_suffix}"
         
         if page == 0:
             cb_data = f"rollback_chore:{e['id']}:{page}" if e["type"] == "chore" else f"rollback_task:{e['id']}:{page}"
