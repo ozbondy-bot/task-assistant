@@ -131,23 +131,12 @@ function renderHouseTasks(tasks) {
     return;
   }
   list.innerHTML = tasks.map(t => `
-    <div class="task-card house-task flex-col" id="htask-${t.id}">
-      <div class="task-row">
-        <div class="task-icon">🏠</div>
-        <div class="task-body">
-          <div class="task-title">${escHtml(t.title)}</div>
-          <div class="task-meta">
-            <span class="task-badge badge-points">+${t.points} ✨</span>
-            <span class="task-badge">${periodLabel(t.periodicity)}</span>
-          </div>
-        </div>
+    <div class="task-card house-task flex-between" onclick="openChoreDetails(${JSON.stringify(t).replace(/"/g, '&quot;')})" style="padding: 10px 12px; cursor: pointer;">
+      <div class="task-left flex-row" style="align-items: center; gap: 8px;">
+        <span style="font-size: 16px;">🏠</span>
+        <span class="task-title" style="font-weight: 500; font-size: 14px;">${escHtml(stripEmoji(t.title))}</span>
       </div>
-      <div class="task-action-row" onclick="event.stopPropagation();">
-        <button class="btn-done btn-xs" onclick="claimTask(${t.id})">Взять</button>
-        <button class="btn-unclaim btn-xs" onclick="nudgeTask(${t.id})">Намек</button>
-        <button class="btn-skip btn-xs" onclick="skipFreeChore(${t.id})">Копия</button>
-        <button class="btn-shift btn-xs" onclick="openShiftModal(${t.id}, 'chore')">Сдвиг</button>
-      </div>
+      <span class="task-badge badge-points" style="font-size: 12px; margin-left: auto;">+${t.points} ✨</span>
     </div>
   `).join('');
 }
@@ -239,7 +228,7 @@ function renderPersonalTasks(personal, household) {
               </div>
             </div>
           </div>
-          <div class="task-actions-compact flex-row" style="gap: 8px; align-items: center;">
+          <div class="task-actions-compact flex-row" style="gap: 8px; align-items: center; pointer-events: auto;" onclick="event.stopPropagation();">
             <button class="btn-action-icon" onclick="openShiftModal(${t.id}, 'personal')" style="background: none; border: none; font-size: 16px; cursor: pointer; padding: 4px;">🗓</button>
             <button class="btn-action-icon icon-danger" onclick="deletePersonalTask(${t.id})" style="background: none; border: none; font-size: 16px; cursor: pointer; padding: 4px;">🗑</button>
           </div>
@@ -293,16 +282,20 @@ function setupModals() {
     if (!text) return;
     const date = document.getElementById('newTaskDate').value || null;
     const recurrence = document.getElementById('newTaskRecurrence').value || null;
+    
+    // Snappy modal close
+    document.getElementById('addTaskModal').classList.add('hidden');
+    document.getElementById('newTaskInput').value = '';
+    document.getElementById('newTaskDate').value = '';
+    document.getElementById('newTaskRecurrence').value = '';
+    
     try {
       await api('POST', '/api/tasks', { text, date, recurrence });
-      document.getElementById('addTaskModal').classList.add('hidden');
-      document.getElementById('newTaskInput').value = '';
-      document.getElementById('newTaskDate').value = '';
-      document.getElementById('newTaskRecurrence').value = '';
       showToast('✅ Задача добавлена!');
       loadPersonalTab();
     } catch (e) {
       showToast(`⚠️ ${e.message}`);
+      loadPersonalTab();
     }
   });
 
@@ -443,8 +436,9 @@ function setupFABs() {
   // Archive buttons listeners
   document.getElementById('viewChoresArchiveBtn').addEventListener('click', openChoresArchive);
   document.getElementById('viewTasksArchiveBtn').addEventListener('click', openTasksArchive);
-  document.getElementById('viewPurchasesArchiveBtn').addEventListener('click', openPurchasesArchive);
+  document.getElementById('viewShoppingArchiveBtn').addEventListener('click', openShoppingArchive);
   document.getElementById('viewPurchasesArchiveBtnFromSettings').addEventListener('click', openPurchasesArchive);
+  document.getElementById('viewPurchasesArchiveBtn').addEventListener('click', openPurchasesArchive);
 }
 
 // ── Shopping Tab ──────────────────────────────────────────────────────────────
@@ -596,10 +590,14 @@ function periodLabel(p) {
     twice_weekly: '2 раза/нед', 
     monthly: 'Ежемесячно',
     twice_monthly: '2 раза/мес', 
-    quarterly: 'Раз в квартал',
-    every_x_days: 'Каждые 30 дней' 
+    quarterly: 'Раз в квартал'
   };
-  return m[p] || 'Каждые 30 дней';
+  if (m[p]) return m[p];
+  if (p && p.startsWith('every_') && p.endsWith('_days')) {
+    const days = p.split('_')[1];
+    return `Каждые ${days} дней`;
+  }
+  return p || 'Каждые 30 дней';
 }
 
 function recLabel(r) {
@@ -919,3 +917,76 @@ window.completePersonalTask = completePersonalTask;
 window.completeHouseTask = completeHouseTask;
 window.unclaimChore = unclaimChore;
 window.skipChore = skipChore;
+
+/* ── Chore Details & Tab Switching ── */
+function openChoreDetails(t) {
+  document.getElementById('choreDetailsTitle').textContent = stripEmoji(t.title);
+  document.getElementById('choreDetailsPeriod').textContent = periodLabel(t.periodicity);
+  document.getElementById('choreDetailsPoints').textContent = `${t.points} очков`;
+  
+  const actions = document.getElementById('choreDetailsActions');
+  actions.innerHTML = `
+    <button class="btn-done btn-xs" onclick="claimTask(${t.id}); closeModal('choreDetailsModal');">Взять</button>
+    <button class="btn-unclaim btn-xs" onclick="nudgeTask(${t.id}); closeModal('choreDetailsModal');">Намек</button>
+    <button class="btn-skip btn-xs" onclick="skipFreeChore(${t.id}); closeModal('choreDetailsModal');">Копия</button>
+    <button class="btn-shift btn-xs" onclick="openShiftModal(${t.id}, 'chore'); closeModal('choreDetailsModal');">Сдвиг</button>
+  `;
+  document.getElementById('choreDetailsModal').classList.remove('hidden');
+}
+
+function switchTab(tabName) {
+  const btn = document.querySelector(`.tab-btn[data-tab="${tabName}"]`);
+  if (btn) btn.click();
+}
+
+/* ── Shopping List Archive ── */
+let shoppingArchivePage = 0;
+
+async function openShoppingArchive() {
+  shoppingArchivePage = 0;
+  document.getElementById('shoppingArchiveModal').classList.remove('hidden');
+  await loadShoppingArchive(0);
+}
+
+async function loadShoppingArchive(page) {
+  shoppingArchivePage = page;
+  const list = document.getElementById('shoppingArchiveList');
+  const pag = document.getElementById('shoppingArchivePagination');
+  list.innerHTML = `<div class="loading-spinner"><div class="spinner"></div><p>Загрузка...</p></div>`;
+  pag.innerHTML = '';
+  
+  try {
+    const items = await api('GET', `/api/archive/shopping?page=${page}&limit=10`);
+    if (!items.length) {
+      list.innerHTML = `<p style="color:var(--text3);text-align:center;padding:24px">Архив пуст</p>`;
+      return;
+    }
+    
+    list.innerHTML = items.map(item => {
+      const dt = item.date ? new Date(item.date) : null;
+      const dtStr = dt ? dt.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+      return `
+        <div class="archive-item">
+          <div class="archive-item-info">
+            <span class="archive-item-title">${escHtml(item.item_name)}</span>
+            <span class="archive-item-meta">${dtStr} • Купил: ${escHtml(item.user)}</span>
+          </div>
+          <span class="task-badge" style="font-size:11px;">${item.price} руб</span>
+        </div>
+      `;
+    }).join('');
+    
+    pag.innerHTML = `
+      <button class="btn btn-secondary btn-xs" ${page === 0 ? 'disabled' : ''} onclick="loadShoppingArchive(${page - 1})">⏪ Назад</button>
+      <span style="font-size:12px;color:var(--text2)">Страница ${page + 1}</span>
+      <button class="btn btn-secondary btn-xs" ${items.length < 10 ? 'disabled' : ''} onclick="loadShoppingArchive(${page + 1})">Вперед ⏩</button>
+    `;
+  } catch (e) {
+    list.innerHTML = `<p style="color:var(--danger);text-align:center;padding:24px">${e.message}</p>`;
+  }
+}
+
+window.openChoreDetails = openChoreDetails;
+window.switchTab = switchTab;
+window.openShoppingArchive = openShoppingArchive;
+window.loadShoppingArchive = loadShoppingArchive;

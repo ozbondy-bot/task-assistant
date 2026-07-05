@@ -474,9 +474,12 @@ class AutoRegisterMiddleware(BaseMiddleware):
             async with AsyncSessionLocal() as session:
                 user = await session.scalar(select(User).where(User.telegram_id == tg_id))
                 if not user:
+                    if tg_id not in ALLOWED_TELEGRAM_IDS:
+                        logger.warning(f"Registration request from unauthorized user ID: {tg_id}")
+                        return await handler(event, data)
                     user_info = ALLOWED_TELEGRAM_IDS.get(tg_id)
-                    display_name = user_info[0] if user_info else (from_user.first_name or str(tg_id))
-                    is_owner = user_info[1] if user_info else False
+                    display_name = user_info[0]
+                    is_owner = user_info[1]
                     user = User(
                         telegram_id=tg_id,
                         username=from_user.username,

@@ -1,13 +1,13 @@
 import os
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Header, Depends, Request
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, delete
 
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -958,6 +958,67 @@ async def get_purchases_archive(page: int = 0, limit: int = 10, user: User = Dep
         }
         for p, usr in rows
     ]
+
+
+@app.get("/api/archive/shopping")
+async def get_shopping_archive(page: int = 0, limit: int = 10, user: User = Depends(get_current_user)):
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(ShoppingItem, User)
+            .join(User, ShoppingItem.user_id == User.id)
+            .where(and_(
+                ShoppingItem.house_id == ACTIVE_HOUSE_ID,
+                ShoppingItem.is_bought == True,
+                ShoppingItem.is_deleted == False
+            ))
+            .order_by(ShoppingItem.bought_at.desc(), ShoppingItem.id.desc())
+            .offset(page * limit)
+            .limit(limit)
+        )
+        rows = result.all()
+    return [
+        {
+            "id": item.id,
+            "item_name": item.item_name,
+            "price": item.price,
+            "user": usr.display_name or usr.username or "Участник",
+            "date": item.bought_at.isoformat() if item.bought_at else "",
+        }
+        for item, usr in rows
+    ]
+
+
+@app.on_event("startup")
+async def startup_db_cleanup():
+    from bot.handlers.base import ALLOWED_TELEGRAM_IDS, ACTIVE_HOUSE_ID
+    async with AsyncSessionLocal() as session:
+        # 1. Clean unauthorized users
+        result = await session.execute(select(User))
+        users = result.scalars().all()
+        for u in users:
+            if u.telegram_id not in ALLOWED_TELEGRAM_IDS:
+                logger.info(f"Removing unauthorized user {u.username} (id: {u.telegram_id}) from house {ACTIVE_HOUSE_ID}")
+                await session.execute(delete(Completion).where(Completion.user_id == u.id))
+                await session.execute(delete(RewardPurchase).where(RewardPurchase.user_id == u.id))
+                await session.execute(delete(PersonalTask).where(PersonalTask.user_id == u.id))
+                await session.delete(u)
+        
+        # 2. Fix cooking template (if title matches 'готовка' or 'готовить' case-insensitive and points is 0)
+        tmpl_res = await session.execute(
+            select(TaskTemplate).where(
+                and_(
+                    TaskTemplate.house_id == ACTIVE_HOUSE_ID,
+                    TaskTemplate.points == 0
+                )
+            )
+        )
+        templates = tmpl_res.scalars().all()
+        for t in templates:
+            if "готов" in t.title.lower():
+                logger.info(f"Updating points of task template '{t.title}' to 15 (was 0)")
+                t.points = 15
+                
+        await session.commit()
 
 
 

@@ -46,7 +46,7 @@
       </button>
       <button class="tab-btn" data-tab="archive" id="tabArchive">
         <span class="tab-icon">📜</span>
-        <span class="tab-label">Архивы</span>
+        <span class="tab-label">Архив</span>
       </button>
       <button class="tab-btn" data-tab="settings" id="tabSettings">
         <span class="tab-icon">⚙️</span>
@@ -161,23 +161,15 @@
       <!-- ARCHIVES TAB -->
       <section class="tab-pane" id="pane-archive">
         <div class="section-header">
-          <h2>Архивы</h2>
-          <p class="section-sub">Выполненные дела, личные задачи и покупки</p>
+          <h2>Архив</h2>
+          <p class="section-sub">Выполненные дела, задачи и покупки</p>
         </div>
         
-        <div class="settings-card" style="margin-top: 12px;">
-          <button class="btn btn-secondary btn-sm" id="viewChoresArchiveBtn" style="margin-bottom: 8px; width: 100%; text-align: left; display: flex; justify-content: space-between;">
-            <span>Выполненные домашние дела</span>
-            <span>➡️</span>
-          </button>
-          <button class="btn btn-secondary btn-sm" id="viewTasksArchiveBtn" style="margin-bottom: 8px; width: 100%; text-align: left; display: flex; justify-content: space-between;">
-            <span>Завершенные личные задачи</span>
-            <span>➡️</span>
-          </button>
-          <button class="btn btn-secondary btn-sm" id="viewPurchasesArchiveBtnFromSettings" style="width: 100%; text-align: left; display: flex; justify-content: space-between;">
-            <span>Купленные награды</span>
-            <span>➡️</span>
-          </button>
+        <div class="archive-buttons-row" style="display: flex; gap: 6px; margin-top: 12px; width: 100%;">
+          <button class="btn btn-secondary btn-sm" id="viewChoresArchiveBtn" style="flex: 1; padding: 10px 4px; font-size: 11px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Дом</button>
+          <button class="btn btn-secondary btn-sm" id="viewTasksArchiveBtn" style="flex: 1; padding: 10px 4px; font-size: 11px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Мои дела</button>
+          <button class="btn btn-secondary btn-sm" id="viewShoppingArchiveBtn" style="flex: 1; padding: 10px 4px; font-size: 11px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Покупки</button>
+          <button class="btn btn-secondary btn-sm" id="viewPurchasesArchiveBtnFromSettings" style="flex: 1; padding: 10px 4px; font-size: 11px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Награды</button>
         </div>
       </section>
 
@@ -297,6 +289,36 @@
       <p class="modal-hint" style="margin-bottom: 10px;">Тапните на задачу, чтобы восстановить её на сегодня</p>
       <div id="tasksArchiveList" class="archive-list"></div>
       <div class="archive-pagination" id="tasksArchivePagination"></div>
+    </div>
+  </div>
+
+  <!-- Chore Details Modal -->
+  <div class="modal-overlay hidden" id="choreDetailsModal">
+    <div class="modal-card">
+      <div class="modal-header-row" style="margin-bottom: 16px;">
+        <h3 id="choreDetailsTitle">Детали дела</h3>
+        <button class="btn-close-modal" onclick="closeModal('choreDetailsModal')">✕</button>
+      </div>
+      <div class="chore-details-body" style="margin-bottom: 20px; font-size: 14px; color: var(--text2); display: flex; flex-direction: column; gap: 10px;">
+        <div>📅 <strong>Цикл повторения:</strong> <span id="choreDetailsPeriod">Каждые 30 дней</span></div>
+        <div>✨ <strong>Награда:</strong> <span id="choreDetailsPoints">0 очков</span></div>
+        <div>⚙️ <strong>Управление:</strong> <a href="#" onclick="event.preventDefault(); closeModal('choreDetailsModal'); switchTab('settings');" style="color: var(--accent); text-decoration: none;">Перейти к настройкам ⚙️</a></div>
+      </div>
+      <div class="task-action-row" id="choreDetailsActions" onclick="event.stopPropagation();">
+        <!-- Action buttons will be dynamically injected here -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Shopping Archive Modal -->
+  <div class="modal-overlay hidden" id="shoppingArchiveModal">
+    <div class="modal-card modal-large">
+      <div class="modal-header-row">
+        <h3>🛒 Архив покупок</h3>
+        <button class="btn-close-modal" onclick="closeModal('shoppingArchiveModal')">✕</button>
+      </div>
+      <div id="shoppingArchiveList" class="archive-list"></div>
+      <div class="archive-pagination" id="shoppingArchivePagination"></div>
     </div>
   </div>
 
