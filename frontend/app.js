@@ -54,6 +54,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadHouseTab();
   setupModals();
   setupFABs();
+  loadWeeklyGoal();
 });
 
 // ── API Helper ───────────────────────────────────────────────────────────────
@@ -73,6 +74,24 @@ async function api(method, path, body = null) {
   }
   return res.json();
 }
+
+async function loadWeeklyGoal() {
+  const percentEl = document.getElementById('weeklyGoalPercent');
+  const progressEl = document.getElementById('weeklyGoalProgress');
+  const textEl = document.getElementById('weeklyGoalText');
+  if (!percentEl || !progressEl || !textEl) return;
+  
+  try {
+    const dateStr = getHouseActiveDateStr();
+    const data = await api('GET', `/api/house/weekly_goal?date=${dateStr}`);
+    percentEl.textContent = `${data.percent}%`;
+    progressEl.style.width = `${data.percent}%`;
+    textEl.textContent = `выполнено ${data.completed_tasks} из ${data.total_tasks} задач`;
+  } catch (e) {
+    console.error('Failed to load weekly goal:', e);
+  }
+}
+window.loadWeeklyGoal = loadWeeklyGoal;
 
 // ── Toast ────────────────────────────────────────────────────────────────────
 let toastTimer;
@@ -97,8 +116,6 @@ function setupTabs() {
       if (tab === 'house') loadHouseTab();
       else if (tab === 'personal') loadPersonalTab();
       else if (tab === 'shopping') loadShoppingTab();
-      else if (tab === 'shop') loadShopTab();
-      else if (tab === 'settings') loadSettingsTab();
     });
   });
 }
@@ -114,10 +131,14 @@ async function loadHouseTab() {
   const list = document.getElementById('houseTasksList');
   showSpinnerIfNeeded(list, '.task-card');
 
+  const display = document.getElementById('houseActiveDateDisplay');
+  if (display) display.textContent = getHouseActiveDateLabel();
+
+  const dateStr = getHouseActiveDateStr();
   try {
     const [tasks, members] = await Promise.all([
-      api('GET', '/api/house/tasks'),
-      api('GET', '/api/house/members'),
+      api('GET', `/api/house/tasks?date=${dateStr}`),
+      api('GET', `/api/house/members`),
     ]);
 
     renderHouseTasks(tasks);
@@ -143,14 +164,20 @@ function isPastDate(dateStr) {
 function renderHouseTasks(tasks) {
   const list = document.getElementById('houseTasksList');
   if (!tasks.length) {
-    list.innerHTML = `<div class="empty-state"><div class="empty-icon">✨</div><div class="empty-title">Все задачи на сегодня разобраны!</div><div class="empty-sub">Возвращайся завтра</div></div>`;
+    list.innerHTML = `<div class="empty-state"><div class="empty-icon">✨</div><div class="empty-title">Задач нет!</div><div class="empty-sub">Нет активных или выполненных задач на выбранную дату</div></div>`;
     return;
   }
   list.innerHTML = tasks.map(t => {
     const isPast = isPastDate(t.date);
     const pastIcon = isPast ? '<span style="color: var(--danger); margin-right: 4px; font-weight: bold;" title="Просрочено">⚠️</span>' : '';
+    const isCompleted = t.status === 'done' || t.status === 'skipped';
+    const grayClass = isCompleted ? 'completed-gray' : '';
+    const clickHandler = isCompleted
+      ? `openArchivedChoreDetails(${JSON.stringify(t).replace(/"/g, '&quot;')})`
+      : `openChoreDetails(${JSON.stringify(t).replace(/"/g, '&quot;')})`;
+
     return `
-      <div class="task-card house-task flex-between" onclick="openChoreDetails(${JSON.stringify(t).replace(/"/g, '&quot;')})" style="padding: 10px 12px; cursor: pointer;">
+      <div class="task-card house-task flex-between ${grayClass}" onclick="${clickHandler}" style="padding: 10px 12px; cursor: pointer;">
         <div class="task-left flex-row" style="align-items: center; gap: 8px;">
           <span style="font-size: 16px;">🏠</span>
           <span class="task-title" style="font-weight: 500; font-size: 14px;">${pastIcon}${escHtml(stripEmoji(t.title))}</span>
@@ -193,14 +220,10 @@ function renderMembers(members) {
   container.innerHTML = html;
 }
 
-// ── Personal Tab ──────────────────────────────────────────────────────────────
+// ── Offsets & Date Helpers ───────────────────────────────────────────────────
 let personalActiveOffset = 0;
-
-function getPersonalActiveDateStr() {
-  const d = new Date();
-  d.setDate(d.getDate() + personalActiveOffset);
-  return d.toISOString().split('T')[0];
-}
+let houseActiveOffset = 0;
+let shoppingActiveOffset = 0;
 
 function formatPaginationDate(dateInput) {
   const d = new Date(dateInput);
@@ -211,17 +234,59 @@ function formatPaginationDate(dateInput) {
   return `${day}.${month}. (${wd})`;
 }
 
+// Personal Offset functions
+function getPersonalActiveDateStr() {
+  const d = new Date();
+  d.setDate(d.getDate() + personalActiveOffset);
+  return d.toISOString().split('T')[0];
+}
 function getPersonalActiveDateLabel() {
   const d = new Date();
   d.setDate(d.getDate() + personalActiveOffset);
   return formatPaginationDate(d);
 }
-
 function shiftPersonalDay(diff) {
   personalActiveOffset += diff;
   loadPersonalTab();
+  loadWeeklyGoal();
 }
 window.shiftPersonalDay = shiftPersonalDay;
+
+// House Offset functions
+function getHouseActiveDateStr() {
+  const d = new Date();
+  d.setDate(d.getDate() + houseActiveOffset);
+  return d.toISOString().split('T')[0];
+}
+function getHouseActiveDateLabel() {
+  const d = new Date();
+  d.setDate(d.getDate() + houseActiveOffset);
+  return formatPaginationDate(d);
+}
+function shiftHouseDay(diff) {
+  houseActiveOffset += diff;
+  loadHouseTab();
+  loadWeeklyGoal();
+}
+window.shiftHouseDay = shiftHouseDay;
+
+// Shopping Offset functions
+function getShoppingActiveDateStr() {
+  const d = new Date();
+  d.setDate(d.getDate() + shoppingActiveOffset);
+  return d.toISOString().split('T')[0];
+}
+function getShoppingActiveDateLabel() {
+  const d = new Date();
+  d.setDate(d.getDate() + shoppingActiveOffset);
+  return formatPaginationDate(d);
+}
+function shiftShoppingDay(diff) {
+  shoppingActiveOffset += diff;
+  loadShoppingTab();
+  loadWeeklyGoal();
+}
+window.shiftShoppingDay = shiftShoppingDay;
 
 async function loadPersonalTab() {
   const list = document.getElementById('personalTasksList');
@@ -254,9 +319,12 @@ function renderPersonalTasks(personal, household) {
   list.innerHTML = all.map(t => {
     const isPast = isPastDate(t.date);
     const pastIcon = isPast ? '<span style="color: var(--danger); margin-right: 4px; font-weight: bold;" title="Просрочено">⚠️</span>' : '';
+    const isCompleted = t.is_completed === true;
+    const grayClass = isCompleted ? 'completed-gray' : '';
+    
     if (t.isHousehold) {
       return `
-        <div class="task-card house-task flex-between" onclick="openMyTaskDetails(${JSON.stringify(t).replace(/"/g, '&quot;')}, 'household')" style="padding: 10px 12px; cursor: pointer; margin-bottom: 8px;">
+        <div class="task-card house-task flex-between ${grayClass}" onclick="openMyTaskDetails(${JSON.stringify(t).replace(/"/g, '&quot;')}, 'household')" style="padding: 10px 12px; cursor: pointer; margin-bottom: 8px;">
           <div class="task-left flex-row" style="align-items: center; gap: 8px;">
             <span style="font-size: 16px;">🏠</span>
             <span class="task-title" style="font-weight: 500; font-size: 14px;">${pastIcon}${escHtml(stripEmoji(t.text))}</span>
@@ -264,8 +332,12 @@ function renderPersonalTasks(personal, household) {
           <span class="task-badge badge-points" style="font-size: 12px; margin-left: auto;">${t.points} ✨</span>
         </div>`;
     } else {
+      const clickHandler = isCompleted
+        ? `openArchivedTaskDetails(${JSON.stringify(t).replace(/"/g, '&quot;')})`
+        : `openMyTaskDetails(${JSON.stringify(t).replace(/"/g, '&quot;')}, 'personal')`;
+
       return `
-        <div class="task-card personal-task flex-between" onclick="openMyTaskDetails(${JSON.stringify(t).replace(/"/g, '&quot;')}, 'personal')" style="padding: 10px 12px; cursor: pointer; margin-bottom: 8px;">
+        <div class="task-card personal-task flex-between ${grayClass}" onclick="${clickHandler}" style="padding: 10px 12px; cursor: pointer; margin-bottom: 8px;">
           <div class="task-left flex-row" style="align-items: center; gap: 8px;">
             <span style="font-size: 16px;">👤</span>
             <span class="task-title" style="font-weight: 500; font-size: 14px;">${pastIcon}${escHtml(stripEmoji(t.text))}</span>
@@ -281,6 +353,7 @@ async function completePersonalTask(id) {
     await api('POST', `/api/tasks/${id}/complete`);
     showToast('✅ Выполнено!');
     loadPersonalTab();
+    loadWeeklyGoal();
   } catch (e) {
     showToast(`⚠️ ${e.message}`);
   }
@@ -299,6 +372,7 @@ async function completeHouseTask(id, title) {
     showToast(`✅ Готово! ${res.points_earned} ✨`);
     loadPersonalTab();
     loadHouseTab();
+    loadWeeklyGoal();
   } catch (e) {
     showToast(`⚠️ ${e.message}`);
   }
@@ -390,14 +464,13 @@ function setupModals() {
     const periodicity = document.getElementById('choreTmplPeriodicity').value;
     const periodDaysInput = document.getElementById('choreTmplPeriodDays');
     const periodDays = periodicity === 'every_x_days' ? (parseInt(periodDaysInput.value) || 30) : null;
-    const startDate = document.getElementById('choreTmplStartDate').value;
     if (!title) return;
     try {
       if (currentEditingTemplateId) {
-        await api('PUT', `/api/chores/templates/${currentEditingTemplateId}`, { title, points, periodicity, period_days: periodDays, start_date: startDate || null });
+        await api('PUT', `/api/chores/templates/${currentEditingTemplateId}`, { title, points, periodicity, period_days: periodDays });
         showToast('✅ Шаблон сохранен!');
       } else {
-        const res = await api('POST', '/api/chores/templates', { title, points, periodicity, period_days: periodDays, start_date: startDate || null });
+        const res = await api('POST', '/api/chores/templates', { title, points, periodicity, period_days: periodDays });
         if (res && res.pending) {
           showToast(res.message || '⏳ Запрос отправлен на согласование партнёру!');
         } else {
@@ -407,30 +480,8 @@ function setupModals() {
       document.getElementById('addChoreModal').classList.add('hidden');
       document.getElementById('choreTmplTitle').value = '';
       document.getElementById('choreTmplPoints').value = '1';
-      document.getElementById('choreTmplStartDate').value = '';
-      loadSettingsTab();
       loadHouseTab();
-    } catch (e) {
-      showToast(`⚠️ ${e.message}`);
-    }
-  });
-
-  // Rewards settings modal
-  document.getElementById('cancelRewardBtn').addEventListener('click', () => {
-    document.getElementById('createRewardModal').classList.add('hidden');
-  });
-
-  document.getElementById('saveRewardBtn').addEventListener('click', async () => {
-    const title = document.getElementById('rewardTitleInput').value.trim();
-    const price = parseInt(document.getElementById('rewardPriceInput').value) || 1;
-    if (!title) return;
-    try {
-      await api('POST', '/api/rewards', { title, price });
-      document.getElementById('createRewardModal').classList.add('hidden');
-      document.getElementById('rewardTitleInput').value = '';
-      document.getElementById('rewardPriceInput').value = '';
-      showToast('✅ Награда добавлена!');
-      loadSettingsTab();
+      loadWeeklyGoal();
     } catch (e) {
       showToast(`⚠️ ${e.message}`);
     }
@@ -461,8 +512,8 @@ function setupModals() {
         loadPersonalTab();
       } else if (taskType === 'template') {
         await api('POST', `/api/chores/templates/${taskId}/shift`, { new_date: newDate });
-        loadSettingsTab();
         loadHouseTab();
+        loadWeeklyGoal();
       }
     } catch (err) {
       showToast(`⚠️ ${err.message}`);
@@ -492,24 +543,6 @@ function setupFABs() {
   document.getElementById('addChoreBtn').addEventListener('click', () => {
     document.getElementById('addChoreChoiceModal').classList.remove('hidden');
   });
-
-  const addSettingsTmplBtn = document.getElementById('addSettingsTmplBtn');
-  if (addSettingsTmplBtn) {
-    addSettingsTmplBtn.addEventListener('click', () => {
-      const isChoresHidden = document.getElementById('settingsChoresContainer').classList.contains('hidden');
-      if (!isChoresHidden) {
-        document.getElementById('addChoreChoiceModal').classList.remove('hidden');
-      } else {
-        document.getElementById('createRewardModal').classList.remove('hidden');
-      }
-    });
-  }
-
-  // Archive buttons listeners
-  document.getElementById('viewChoresArchiveBtn').addEventListener('click', openChoresArchive);
-  document.getElementById('viewTasksArchiveBtn').addEventListener('click', openTasksArchive);
-  document.getElementById('viewShoppingArchiveBtn').addEventListener('click', openShoppingArchive);
-  document.getElementById('viewPurchasesArchiveBtnFromSettings').addEventListener('click', openPurchasesArchive);
 }
 
 // ── Shopping Tab ──────────────────────────────────────────────────────────────
@@ -517,8 +550,12 @@ async function loadShoppingTab() {
   const list = document.getElementById('shoppingList');
   showSpinnerIfNeeded(list, '.shop-item-card');
 
+  const display = document.getElementById('shoppingActiveDateDisplay');
+  if (display) display.textContent = getShoppingActiveDateLabel();
+
+  const dateStr = getShoppingActiveDateStr();
   try {
-    const items = await api('GET', '/api/shopping');
+    const items = await api('GET', `/api/shopping?date=${dateStr}`);
     renderShoppingList(items);
   } catch (e) {
     list.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-title">Ошибка</div><div class="empty-sub">${e.message}</div></div>`;
@@ -535,16 +572,22 @@ function renderShoppingList(items) {
     return;
   }
 
-  list.innerHTML = items.map(item => `
-    <div class="shop-item-card ${item.priority === 'high' ? 'urgent' : ''}" id="sitem-${item.id}" onclick="markBought(${item.id}, this)">
-      <div class="shop-emoji">${seededEmoji(item.id)}</div>
-      <div class="shop-body">
-        <div class="shop-name">${item.priority === 'high' ? '🔴 ' : ''}${escHtml(item.item_name)}</div>
-        ${item.price > 0 ? `<div class="shop-price">${item.price} ₽</div>` : ''}
+  list.innerHTML = items.map(item => {
+    const isCompleted = item.is_bought === true;
+    const grayClass = isCompleted ? 'completed-gray' : '';
+    const clickHandler = isCompleted ? `restoreShoppingItem(${item.id})` : `markBought(${item.id}, this)`;
+    
+    return `
+      <div class="shop-item-card ${item.priority === 'high' ? 'urgent' : ''} ${grayClass}" id="sitem-${item.id}" onclick="${clickHandler}">
+        <div class="shop-emoji">${seededEmoji(item.id)}</div>
+        <div class="shop-body">
+          <div class="shop-name">${item.priority === 'high' ? '🔴 ' : ''}${escHtml(item.item_name)}</div>
+          ${item.price > 0 ? `<div class="shop-price">${item.price} ₽</div>` : ''}
+        </div>
+        <div class="shop-check">✓</div>
       </div>
-      <div class="shop-check">✓</div>
-    </div>
-  `).join('');
+    `;
+  }).join('');
 }
 
 async function markBought(id, el) {
@@ -555,6 +598,7 @@ async function markBought(id, el) {
     setTimeout(() => {
       el.remove();
       loadShoppingTab();
+      loadWeeklyGoal();
     }, 300);
     showToast('✅ Куплено!');
   } catch (e) {
@@ -562,6 +606,19 @@ async function markBought(id, el) {
     showToast(`⚠️ ${e.message}`);
   }
 }
+
+async function restoreShoppingItem(id) {
+  if (!confirm('Вернуть товар в список покупок?')) return;
+  try {
+    await api('POST', `/api/shopping/${id}/restore`);
+    showToast('↩ Товар возвращен в список!');
+    loadShoppingTab();
+    loadWeeklyGoal();
+  } catch (e) {
+    showToast(`⚠️ ${e.message}`);
+  }
+}
+window.restoreShoppingItem = restoreShoppingItem;
 
 // ── Shop / Rewards Tab ────────────────────────────────────────────────────────
 async function loadShopTab() {
@@ -770,7 +827,8 @@ async function deleteChoreTemplate(id) {
     } else {
       showToast('🗑 Шаблон удален!');
     }
-    loadSettingsTab();
+    loadHouseTab();
+    loadWeeklyGoal();
   } catch (e) {
     showToast(`⚠️ ${e.message}`);
   }
@@ -958,8 +1016,8 @@ async function restoreTaskFromArchive(id) {
   try {
     await api('POST', `/api/archive/tasks/${id}/restore`);
     showToast('↩ Задача вернулась в Мои дела!');
-    loadTasksArchive();
     loadPersonalTab();
+    loadWeeklyGoal();
   } catch (e) {
     showToast(`⚠️ ${e.message}`);
   }
@@ -1048,16 +1106,34 @@ function openChoreDetails(t) {
   
   const actions = document.getElementById('choreDetailsActions');
   actions.innerHTML = `
-    <div style="display: flex; gap: 6px; width: 100%; align-items: center;">
-      <button class="btn btn-primary" onclick="claimTask(${t.id}); closeModal('choreDetailsModal');" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 2px; font-size: 13px; font-weight: 600; background: var(--success); border-color: var(--success);">Взять</button>
-      <button class="btn btn-secondary" onclick="nudgeTask(${t.id}); closeModal('choreDetailsModal');" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 2px; font-size: 13px; font-weight: 600;">Намек</button>
-      <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'chore'); closeModal('choreDetailsModal');" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 2px; font-size: 13px; font-weight: 600;">Сдвиг</button>
-      <button class="btn btn-secondary" onclick="skipFreeChore(${t.id});" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 2px; font-size: 13px; font-weight: 600;">Убрать</button>
-      <button class="btn btn-secondary" onclick="goToChoreTemplateSettings(${t.template_id}, '${escAttr(t.title)}', ${t.points}, '${t.periodicity}', ${t.period_days || 'null'}, ${t.last_completed ? `'${t.last_completed}'` : 'null'}, ${t.next_execution ? `'${t.next_execution}'` : 'null'}); closeModal('choreDetailsModal');" style="width: 42px; height: 42px; box-sizing: border-box; padding: 0; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0;">⚙️</button>
+    <div style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
+      <div style="display: flex; gap: 6px; width: 100%;">
+        <button class="btn btn-primary" onclick="claimTask(${t.id}); closeModal('choreDetailsModal');" style="flex: 1; height: 38px; font-size: 12px; font-weight: 600; background: var(--success); border-color: var(--success);">Взять</button>
+        <button class="btn btn-secondary" onclick="nudgeTask(${t.id}); closeModal('choreDetailsModal');" style="flex: 1; height: 38px; font-size: 12px; font-weight: 600;">Намек</button>
+        <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'chore'); closeModal('choreDetailsModal');" style="flex: 1; height: 38px; font-size: 12px; font-weight: 600;">Сдвиг</button>
+        <button class="btn btn-secondary" onclick="skipFreeChore(${t.id});" style="flex: 1; height: 38px; font-size: 12px; font-weight: 600;">Убрать</button>
+      </div>
+      <div style="display: flex; gap: 6px; width: 100%;">
+        <button class="btn btn-secondary" onclick="editChoreTemplateDirectly(${JSON.stringify(t).replace(/"/g, '&quot;')}); closeModal('choreDetailsModal');" style="flex: 1; height: 38px; font-size: 12px; font-weight: 600;">Изменить шаблон</button>
+        <button class="btn btn-secondary" onclick="deleteChoreTemplate(${t.template_id}); closeModal('choreDetailsModal');" style="flex: 1; height: 38px; font-size: 12px; font-weight: 600; background: var(--danger); border-color: var(--danger); color: white;">Удалить шаблон</button>
+      </div>
     </div>
   `;
   document.getElementById('choreDetailsModal').classList.remove('hidden');
 }
+
+function editChoreTemplateDirectly(t) {
+  currentEditingTemplateId = t.template_id;
+  document.getElementById('addChoreModal').classList.remove('hidden');
+  document.getElementById('choreTmplTitle').value = stripEmoji(t.title);
+  document.getElementById('choreTmplPoints').value = t.points;
+  document.getElementById('choreTmplPeriodicity').value = t.periodicity;
+  toggleChorePeriodDays(t.periodicity);
+  if (t.periodicity === 'every_x_days') {
+    document.getElementById('choreTmplPeriodDays').value = t.period_days || 30;
+  }
+}
+window.editChoreTemplateDirectly = editChoreTemplateDirectly;
 
 function switchTab(tabName) {
   const btn = document.querySelector(`.tab-btn[data-tab="${tabName}"]`);
@@ -1167,10 +1243,11 @@ function openMyTaskDetails(t, type) {
 /* ── Restore Chore From Archive ── */
 async function restoreChoreFromArchive(id) {
   try {
-    await api('POST', `/api/archive/chores/${id}/restore`);
-    showToast('↩ Дело вернулось в Мои дела!');
-    loadChoresArchive();
+    await api('POST', `/api/house/tasks/${id}/restore`);
+    showToast('↩ Дело вернулось в работу!');
+    loadHouseTab();
     loadPersonalTab();
+    loadWeeklyGoal();
   } catch (e) {
     showToast(`⚠️ ${e.message}`);
   }
@@ -1347,22 +1424,6 @@ function deleteTemplate(id) {
   deleteChoreTemplate(id);
 }
 
-function goToChoreTemplateSettings(templateId, title, points, periodicity, periodDays, lastCompleted, nextExecution) {
-  switchTab('settings');
-  const t = {
-    id: templateId,
-    title: title,
-    points: points,
-    periodicity: periodicity,
-    period_days: periodDays,
-    last_completed: lastCompleted,
-    next_execution: nextExecution
-  };
-  setTimeout(() => {
-    openTemplateDetailsModal(t);
-  }, 200);
-}
-
 window.openMyTaskDetails = openMyTaskDetails;
 window.restoreChoreFromArchive = restoreChoreFromArchive;
 window.openAddFromDatabaseModal = openAddFromDatabaseModal;
@@ -1371,56 +1432,7 @@ window.submitCookingDone = submitCookingDone;
 window.openArchivedChoreDetails = openArchivedChoreDetails;
 window.openArchivedTaskDetails = openArchivedTaskDetails;
 window.openTemplateDetailsModal = openTemplateDetailsModal;
-window.stepChoresArchive = stepChoresArchive;
-window.stepTasksArchive = stepTasksArchive;
 window.startEditTemplate = startEditTemplate;
 window.openNewTemplateCreator = openNewTemplateCreator;
 window.deleteTemplate = deleteTemplate;
-window.goToChoreTemplateSettings = goToChoreTemplateSettings;
 window.toggleChorePeriodDays = toggleChorePeriodDays;
-
-function switchSettingsSubTab(sub) {
-  const choresBtn = document.getElementById('toggleTmplChoresBtn');
-  const rewardsBtn = document.getElementById('toggleTmplRewardsBtn');
-  const choresCont = document.getElementById('settingsChoresContainer');
-  const rewardsCont = document.getElementById('settingsRewardsContainer');
-  
-  if (!choresBtn || !rewardsBtn || !choresCont || !rewardsCont) return;
-  
-  currentSettingsSubTab = sub;
-  
-  if (sub === 'chores') {
-    choresBtn.className = 'btn btn-primary';
-    choresBtn.style.flex = '1';
-    choresBtn.style.height = '38px';
-    choresBtn.style.fontSize = '13px';
-    choresBtn.style.fontWeight = '600';
-    
-    rewardsBtn.className = 'btn btn-secondary';
-    rewardsBtn.style.flex = '1';
-    rewardsBtn.style.height = '38px';
-    rewardsBtn.style.fontSize = '13px';
-    rewardsBtn.style.fontWeight = '600';
-    
-    choresCont.classList.remove('hidden');
-    rewardsCont.classList.add('hidden');
-    loadSettingsChores();
-  } else {
-    choresBtn.className = 'btn btn-secondary';
-    choresBtn.style.flex = '1';
-    choresBtn.style.height = '38px';
-    choresBtn.style.fontSize = '13px';
-    choresBtn.style.fontWeight = '600';
-    
-    rewardsBtn.className = 'btn btn-primary';
-    rewardsBtn.style.flex = '1';
-    rewardsBtn.style.height = '38px';
-    rewardsBtn.style.fontSize = '13px';
-    rewardsBtn.style.fontWeight = '600';
-    
-    choresCont.classList.add('hidden');
-    rewardsCont.classList.remove('hidden');
-    loadSettingsRewards();
-  }
-}
-window.switchSettingsSubTab = switchSettingsSubTab;

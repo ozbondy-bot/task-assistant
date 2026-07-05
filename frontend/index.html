@@ -22,6 +22,18 @@
       </div>
     </header>
 
+    <!-- Weekly Goal Widget -->
+    <div class="weekly-goal-card" style="margin: 8px 12px 0 12px; padding: 10px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; gap: 6px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; font-size: 13px; font-weight: 600;">
+        <span style="color: var(--text2);">🎯 Цель недели:</span>
+        <span id="weeklyGoalPercent" style="color: var(--accent);">0%</span>
+      </div>
+      <div style="width: 100%; height: 8px; background: var(--surface3); border-radius: 4px; overflow: hidden; position: relative;">
+        <div id="weeklyGoalProgress" style="width: 0%; height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent2)); transition: width 0.3s ease;"></div>
+      </div>
+      <div id="weeklyGoalText" style="font-size: 11px; color: var(--text2); text-align: right;">выполнено 0 из 0 задач</div>
+    </div>
+
     <!-- Tabs -->
     <nav class="tab-nav">
       <button class="tab-btn active" data-tab="house" id="tabHouse">
@@ -36,18 +48,6 @@
         <span class="tab-icon">🛒</span>
         <span class="tab-label">Покупки</span>
       </button>
-      <button class="tab-btn" data-tab="shop" id="tabShop">
-        <span class="tab-icon">🎁</span>
-        <span class="tab-label">Магазин</span>
-      </button>
-      <button class="tab-btn" data-tab="archive" id="tabArchive">
-        <span class="tab-icon">📜</span>
-        <span class="tab-label">Архив</span>
-      </button>
-      <button class="tab-btn" data-tab="settings" id="tabSettings">
-        <span class="tab-icon">⚙️</span>
-        <span class="tab-label">Настройки</span>
-      </button>
     </nav>
 
     <!-- Tab content -->
@@ -60,6 +60,12 @@
             <h2 style="margin: 0;">Домашние задачи</h2>
           </div>
           <p class="section-sub" style="margin-top: 4px;">Свободные задачи — возьми в работу!</p>
+        </div>
+        <!-- Date Pagination Bar for House Chores -->
+        <div class="flex-between" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; background: var(--bg2); padding: 8px 12px; border-radius: 12px; border: 1px solid var(--border);">
+          <button class="btn btn-secondary btn-xs" onclick="shiftHouseDay(-1)" style="padding: 6px 12px; font-weight: bold; height: 32px; font-size: 11px;">◀</button>
+          <span id="houseActiveDateDisplay" style="font-weight: 600; font-size: 14px; color: var(--text);">05.07.</span>
+          <button class="btn btn-secondary btn-xs" onclick="shiftHouseDay(1)" style="padding: 6px 12px; font-weight: bold; height: 32px; font-size: 11px;">▶</button>
         </div>
         <div id="houseTasksList" class="task-list">
           <div class="loading-spinner">
@@ -117,6 +123,12 @@
           <h2>Список покупок</h2>
           <p class="section-sub" id="shoppingTotal">Общая сумма: 0 ₽</p>
         </div>
+        <!-- Date Pagination Bar for Shopping List -->
+        <div class="flex-between" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; background: var(--bg2); padding: 8px 12px; border-radius: 12px; border: 1px solid var(--border);">
+          <button class="btn btn-secondary btn-xs" onclick="shiftShoppingDay(-1)" style="padding: 6px 12px; font-weight: bold; height: 32px; font-size: 11px;">◀</button>
+          <span id="shoppingActiveDateDisplay" style="font-weight: 600; font-size: 14px; color: var(--text);">05.07.</span>
+          <button class="btn btn-secondary btn-xs" onclick="shiftShoppingDay(1)" style="padding: 6px 12px; font-weight: bold; height: 32px; font-size: 11px;">▶</button>
+        </div>
         <div id="shoppingList" class="task-list"></div>
         <button class="fab" id="addShopBtn">
           <span>+</span>
@@ -137,52 +149,6 @@
             </div>
           </div>
         </div>
-      </section>
-
-      <!-- SHOP / REWARDS TAB -->
-      <section class="tab-pane" id="pane-shop">
-        <div class="section-header">
-          <h2>Магазин наград</h2>
-          <p class="section-sub">Трать очки на приятные бонусы</p>
-        </div>
-        <div id="rewardsList" class="rewards-list"></div>
-      </section>
-
-      <!-- ARCHIVES TAB -->
-      <section class="tab-pane" id="pane-archive">
-        
-        <div class="archive-buttons-row" style="display: flex; gap: 6px; margin-top: 4px; width: 100%;">
-          <button class="btn btn-secondary btn-sm" id="viewChoresArchiveBtn" style="flex: 1; padding: 10px 4px; font-size: 11px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Дом</button>
-          <button class="btn btn-secondary btn-sm" id="viewTasksArchiveBtn" style="flex: 1; padding: 10px 4px; font-size: 11px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Мои дела</button>
-          <button class="btn btn-secondary btn-sm" id="viewShoppingArchiveBtn" style="flex: 1; padding: 10px 4px; font-size: 11px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Покупки</button>
-          <button class="btn btn-secondary btn-sm" id="viewPurchasesArchiveBtnFromSettings" style="flex: 1; padding: 10px 4px; font-size: 11px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Награды</button>
-        </div>
-      </section>
-
-      <!-- SETTINGS TAB -->
-      <section class="tab-pane" id="pane-settings" style="position: relative; padding-bottom: 80px;">
-        <!-- Settings Sub-Tabs Toggle -->
-        <div class="subtab-header" style="display: flex; gap: 8px; margin-bottom: 12px; width: 100%;">
-          <button class="btn btn-primary" id="toggleTmplChoresBtn" onclick="switchSettingsSubTab('chores')" style="flex: 1; height: 38px; font-size: 13px; font-weight: 600;">Шаблоны дел</button>
-          <button class="btn btn-secondary" id="toggleTmplRewardsBtn" onclick="switchSettingsSubTab('rewards')" style="flex: 1; height: 38px; font-size: 13px; font-weight: 600;">Шаблоны наград</button>
-        </div>
-        
-        <!-- Chores Templates Container -->
-        <div id="settingsChoresContainer" class="settings-card" style="margin: 0; border: none; background: transparent; box-shadow: none; padding: 0;">
-          <div id="settingsChoresList" class="settings-list">
-            <!-- Chores templates will be loaded here -->
-          </div>
-        </div>
-
-        <!-- Rewards Templates Container -->
-        <div id="settingsRewardsContainer" class="settings-card hidden" style="margin: 0; border: none; background: transparent; box-shadow: none; padding: 0;">
-          <div id="settingsRewardsList" class="settings-list">
-            <!-- Rewards templates will be loaded here -->
-          </div>
-        </div>
-
-        <!-- Floating action button for Settings Templates -->
-        <button class="fab" id="addSettingsTmplBtn">+</button>
       </section>
 
     </main>
@@ -223,30 +189,10 @@
             </div>
             <input id="choreTmplPeriodDays" type="number" placeholder="Например: 30" min="1" value="30" />
           </div>
-          <div class="form-group-with-emoji">
-            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
-              <span>🏁</span>
-              <strong style="font-size: 13px; color: var(--text2);">Дата старта (необязательно)</strong>
-            </div>
-            <input id="choreTmplStartDate" type="date" />
-          </div>
         </div>
         <div class="modal-actions" style="margin-top: 20px;">
           <button class="btn btn-ghost" id="cancelChoreBtn">Отмена</button>
           <button class="btn btn-primary" id="saveChoreTmplBtn">Создать ✓</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Add Reward Modal -->
-    <div class="modal-overlay hidden" id="createRewardModal">
-      <div class="modal-card">
-        <h3>Новая награда в магазине</h3>
-        <input id="rewardTitleInput" type="text" placeholder="Название (например: Романтический ужин)" />
-        <input id="rewardPriceInput" type="number" placeholder="Стоимость в ⭐" min="1" />
-        <div class="modal-actions">
-          <button class="btn btn-ghost" id="cancelRewardBtn">Отмена</button>
-          <button class="btn btn-primary" id="saveRewardBtn">Создать ✓</button>
         </div>
       </div>
     </div>
@@ -264,29 +210,7 @@
     </div>
   </div>
 
-  <!-- Chores Archive Modal -->
-  <div class="modal-overlay hidden" id="choresArchiveModal">
-    <div class="modal-card modal-large">
-      <div class="modal-header-row">
-        <h3>🏠 Архив домашних дел</h3>
-        <button class="btn-close-modal" onclick="closeModal('choresArchiveModal')">✕</button>
-      </div>
-      <div id="choresArchiveList" class="archive-list"></div>
-      <div class="archive-pagination" id="choresArchivePagination"></div>
-    </div>
-  </div>
 
-  <!-- Purchases Archive Modal -->
-  <div class="modal-overlay hidden" id="purchasesArchiveModal">
-    <div class="modal-card modal-large">
-      <div class="modal-header-row">
-        <h3>🛍 История покупок</h3>
-        <button class="btn-close-modal" onclick="closeModal('purchasesArchiveModal')">✕</button>
-      </div>
-      <div id="purchasesArchiveList" class="archive-list"></div>
-      <div class="archive-pagination" id="purchasesArchivePagination"></div>
-    </div>
-  </div>
 
   <!-- Archived Chore Details Modal -->
   <div class="modal-overlay hidden" id="archivedChoreDetailsModal" style="z-index: 120;">
@@ -336,18 +260,7 @@
     </div>
   </div>
 
-  <!-- Tasks Archive Modal -->
-  <div class="modal-overlay hidden" id="tasksArchiveModal">
-    <div class="modal-card modal-large">
-      <div class="modal-header-row">
-        <h3>👤 Архив личных задач</h3>
-        <button class="btn-close-modal" onclick="closeModal('tasksArchiveModal')">✕</button>
-      </div>
-      <p class="modal-hint" style="margin-bottom: 10px;">Тапните на задачу, чтобы восстановить её на сегодня</p>
-      <div id="tasksArchiveList" class="archive-list"></div>
-      <div class="archive-pagination" id="tasksArchivePagination"></div>
-    </div>
-  </div>
+
 
   <!-- Chore Details Modal -->
   <div class="modal-overlay hidden" id="choreDetailsModal">
@@ -366,17 +279,7 @@
     </div>
   </div>
 
-  <!-- Shopping Archive Modal -->
-  <div class="modal-overlay hidden" id="shoppingArchiveModal">
-    <div class="modal-card modal-large">
-      <div class="modal-header-row">
-        <h3>🛒 Архив покупок</h3>
-        <button class="btn-close-modal" onclick="closeModal('shoppingArchiveModal')">✕</button>
-      </div>
-      <div id="shoppingArchiveList" class="archive-list"></div>
-      <div class="archive-pagination" id="shoppingArchivePagination"></div>
-    </div>
-  </div>
+
 
   <!-- Cooking Duration Modal -->
   <div class="modal-overlay hidden" id="cookingDurationModal">

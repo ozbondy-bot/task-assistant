@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException, Header, Depends, Request
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from sqlalchemy import select, and_, delete
+from sqlalchemy import select, and_, delete, update, func, or_
 
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -51,8 +51,6 @@ async def health():
     return {"status": "ok", "ts": datetime.utcnow().isoformat()}
 
 
-# ── API Routes ────────────────────────────────────────────────────────────────
-
 # -- Personal tasks --
 @app.get("/api/tasks/today")
 async def get_today_tasks(date: Optional[str] = None, user: User = Depends(get_current_user)):
@@ -70,9 +68,11 @@ async def get_today_tasks(date: Optional[str] = None, user: User = Depends(get_c
         if target_date == today:
             cond = and_(
                 PersonalTask.user_id == user.id,
-                PersonalTask.date_execution <= today,
-                PersonalTask.is_completed == False,
                 PersonalTask.is_deleted == False,
+                or_(
+                    and_(PersonalTask.date_execution <= today, PersonalTask.is_completed == False),
+                    and_(PersonalTask.date_execution == today, PersonalTask.is_completed == True)
+                )
             )
         else:
             cond = and_(
@@ -101,7 +101,7 @@ async def get_today_tasks(date: Optional[str] = None, user: User = Depends(get_c
                 )
             )
             house_tasks = house_result.all()
-
+ 
     return {
         "personal": [
             {
@@ -111,6 +111,7 @@ async def get_today_tasks(date: Optional[str] = None, user: User = Depends(get_c
                 "recurrence": t.recurrence,
                 "category": t.category,
                 "type": "personal",
+                "is_completed": t.is_completed
             }
             for t in tasks
         ],
@@ -207,25 +208,51 @@ async def delete_task(task_id: int, user: User = Depends(get_current_user)):
 
 # -- Household tasks --
 @app.get("/api/house/tasks")
-async def get_house_tasks(user: User = Depends(get_current_user)):
+async def get_house_tasks(date: Optional[str] = None, user: User = Depends(get_current_user)):
     from bot.handlers.base import get_house_today_date, generate_daily_chores_if_needed
     async with AsyncSessionLocal() as session:
         # Auto-generate today's chores if needed
         await generate_daily_chores_if_needed(session, ACTIVE_HOUSE_ID)
         
         today = await get_house_today_date(session)
-        result = await session.execute(
-            select(TaskInstance, TaskTemplate).join(
-                TaskTemplate, TaskInstance.template_id == TaskTemplate.id
-            ).where(
-                and_(
-                    TaskTemplate.house_id == ACTIVE_HOUSE_ID,
-                    TaskInstance.date <= today,
-                    TaskInstance.status == "free",
-                    TaskTemplate.deleted == False,
-                )
-            ).order_by(TaskTemplate.points.desc())
-        )
+        target_date = today
+        if date:
+            try:
+                target_date = datetime.strptime(date, "%Y-%m-%d").date()
+            except Exception:
+                pass
+                
+        if target_date == today:
+            # Rollover free tasks (date <= today and status == "free")
+            # Plus today's task instances of any status (date == today)
+            result = await session.execute(
+                select(TaskInstance, TaskTemplate).join(
+                    TaskTemplate, TaskInstance.template_id == TaskTemplate.id
+                ).where(
+                    and_(
+                        TaskTemplate.house_id == ACTIVE_HOUSE_ID,
+                        TaskTemplate.deleted == False,
+                        or_(
+                            and_(TaskInstance.date <= today, TaskInstance.status == "free"),
+                            TaskInstance.date == today
+                        )
+                    )
+                ).order_by(TaskTemplate.points.desc(), TaskInstance.id.asc())
+            )
+        else:
+            # Just that specific day's task instances
+            result = await session.execute(
+                select(TaskInstance, TaskTemplate).join(
+                    TaskTemplate, TaskInstance.template_id == TaskTemplate.id
+                ).where(
+                    and_(
+                        TaskTemplate.house_id == ACTIVE_HOUSE_ID,
+                        TaskTemplate.deleted == False,
+                        TaskInstance.date == target_date
+                    )
+                ).order_by(TaskTemplate.points.desc(), TaskInstance.id.asc())
+            )
+            
         rows = result.all()
         
         res_list = []
@@ -251,6 +278,13 @@ async def get_house_tasks(user: User = Depends(get_current_user)):
                 .order_by(TaskInstance.date.asc())
                 .limit(1)
             )
+            
+            completed_by = ""
+            if inst.status == "done" and inst.done_by_user_id:
+                done_user = await session.get(User, inst.done_by_user_id)
+                if done_user:
+                    completed_by = done_user.display_name or done_user.username or "Участник"
+                    
             res_list.append({
                 "id": inst.id,
                 "template_id": tmpl.id,
@@ -261,7 +295,8 @@ async def get_house_tasks(user: User = Depends(get_current_user)):
                 "date": str(inst.date),
                 "status": inst.status,
                 "last_completed": last_date.isoformat() if last_date else None,
-                "next_execution": next_date.isoformat() if next_date else None
+                "next_execution": next_date.isoformat() if next_date else None,
+                "completed_by": completed_by
             })
             
     return res_list
@@ -349,22 +384,129 @@ async def get_house_members(user: User = Depends(get_current_user)):
 
 # -- Shopping --
 @app.get("/api/shopping")
-async def get_shopping(user: User = Depends(get_current_user)):
+async def get_shopping(date: Optional[str] = None, user: User = Depends(get_current_user)):
+    from bot.handlers.base import get_house_today_date
     async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(ShoppingItem).where(
-                and_(
-                    ShoppingItem.house_id == ACTIVE_HOUSE_ID,
+        today = await get_house_today_date(session)
+        target_date = today
+        if date:
+            try:
+                target_date = datetime.strptime(date, "%Y-%m-%d").date()
+            except Exception:
+                pass
+                
+        start_dt = datetime.combine(target_date, datetime.min.time())
+        end_dt = datetime.combine(target_date, datetime.max.time())
+        
+        if target_date == today:
+            cond = and_(
+                ShoppingItem.house_id == ACTIVE_HOUSE_ID,
+                ShoppingItem.is_deleted == False,
+                or_(
                     ShoppingItem.is_bought == False,
-                    ShoppingItem.is_deleted == False,
+                    and_(
+                        ShoppingItem.is_bought == True,
+                        ShoppingItem.bought_at >= start_dt,
+                        ShoppingItem.bought_at <= end_dt
+                    )
                 )
-            ).order_by(ShoppingItem.priority.desc(), ShoppingItem.id.asc())
+            )
+        else:
+            cond = and_(
+                ShoppingItem.house_id == ACTIVE_HOUSE_ID,
+                ShoppingItem.is_deleted == False,
+                ShoppingItem.is_bought == True,
+                ShoppingItem.bought_at >= start_dt,
+                ShoppingItem.bought_at <= end_dt
+            )
+            
+        result = await session.execute(
+            select(ShoppingItem).where(cond).order_by(ShoppingItem.priority.desc(), ShoppingItem.id.asc())
         )
         items = result.scalars().all()
+        
     return [
-        {"id": i.id, "item_name": i.item_name, "price": i.price, "priority": i.priority}
+        {
+            "id": i.id,
+            "item_name": i.item_name,
+            "price": i.price,
+            "priority": i.priority,
+            "is_bought": i.is_bought
+        }
         for i in items
     ]
+
+
+@app.get("/api/house/weekly_goal")
+async def get_weekly_goal(date: Optional[str] = None, user: User = Depends(get_current_user)):
+    from bot.handlers.base import get_house_today_date
+    async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
+        target_date = today
+        if date:
+            try:
+                target_date = datetime.strptime(date, "%Y-%m-%d").date()
+            except Exception:
+                pass
+                
+        # Find start (Monday) and end (Sunday) of the week containing target_date
+        start_of_week = target_date - timedelta(days=target_date.weekday())
+        end_of_week = start_of_week + timedelta(days=6)
+        
+        # 1. Total household task instances scheduled for this week (excluding shifted)
+        inst_res = await session.execute(
+            select(TaskInstance)
+            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
+            .where(
+                and_(
+                    TaskTemplate.house_id == ACTIVE_HOUSE_ID,
+                    TaskTemplate.deleted == False,
+                    TaskInstance.date >= start_of_week,
+                    TaskInstance.date <= end_of_week,
+                    TaskInstance.status.in_(["free", "in_progress", "done", "skipped"])
+                )
+            )
+        )
+        instances = inst_res.scalars().all()
+        
+        # 2. Personal tasks of all users in this house scheduled for this week
+        users_res = await session.execute(
+            select(User.id).where(User.house_id == ACTIVE_HOUSE_ID)
+        )
+        user_ids = [r[0] for r in users_res.all()]
+        
+        personal_res = await session.execute(
+            select(PersonalTask)
+            .where(
+                and_(
+                    PersonalTask.user_id.in_(user_ids),
+                    PersonalTask.is_deleted == False,
+                    PersonalTask.date_execution >= start_of_week,
+                    PersonalTask.date_execution <= end_of_week
+                )
+            )
+        )
+        personal_tasks = personal_res.scalars().all()
+        
+        # Total counts
+        total_chores = len(instances)
+        completed_chores = len([i for i in instances if i.status == "done"])
+        
+        total_personal = len(personal_tasks)
+        completed_personal = len([t for t in personal_tasks if t.is_completed])
+        
+        total_tasks = total_chores + total_personal
+        completed_tasks = completed_chores + completed_personal
+        
+        percent = int((completed_tasks / total_tasks * 100)) if total_tasks > 0 else 100
+        
+        return {
+            "start_date": str(start_of_week),
+            "end_date": str(end_of_week),
+            "total_tasks": total_tasks,
+            "completed_tasks": completed_tasks,
+            "percent": percent
+        }
 
 
 class AddShoppingRequest(BaseModel):
@@ -410,6 +552,18 @@ async def delete_shopping(item_id: int, user: User = Depends(get_current_user)):
         if not item:
             raise HTTPException(status_code=404, detail="Item not found")
         await session.delete(item)
+        await session.commit()
+    return {"ok": True}
+
+
+@app.post("/api/shopping/{item_id}/restore")
+async def restore_shopping_item(item_id: int, user: User = Depends(get_current_user)):
+    async with AsyncSessionLocal() as session:
+        item = await session.get(ShoppingItem, item_id)
+        if not item:
+            raise HTTPException(status_code=404, detail="Item not found")
+        item.is_bought = False
+        item.bought_at = None
         await session.commit()
     return {"ok": True}
 
@@ -1053,22 +1207,30 @@ async def restore_task_from_archive(task_id: int, user: User = Depends(get_curre
         await session.commit()
     return {"ok": True}
 
-@app.post("/api/archive/chores/{completion_id}/restore")
-async def restore_chore_from_archive(completion_id: int, user: User = Depends(get_current_user)):
+@app.post("/api/house/tasks/{instance_id}/restore")
+async def restore_completed_chore(instance_id: int, user: User = Depends(get_current_user)):
     async with AsyncSessionLocal() as session:
-        comp = await session.get(Completion, completion_id)
-        if not comp or comp.user_id != user.id:
-            raise HTTPException(status_code=404, detail="Completion record not found")
-            
-        inst = await session.get(TaskInstance, comp.task_instance_id)
+        inst = await session.get(TaskInstance, instance_id)
         if not inst:
             raise HTTPException(status_code=404, detail="Task instance not found")
+        tmpl = await session.get(TaskTemplate, inst.template_id)
+        if not tmpl or tmpl.house_id != user.house_id:
+            raise HTTPException(status_code=403, detail="Access denied")
             
         inst.status = "in_progress"
         inst.done_by_user_id = user.id
         inst.done_at = None
         
-        await session.delete(comp)
+        comp_res = await session.execute(
+            select(Completion).where(Completion.task_instance_id == instance_id)
+        )
+        comp = comp_res.scalar()
+        if comp:
+            db_user = await session.get(User, comp.user_id)
+            if db_user:
+                db_user.points = max(0, (db_user.points or 0) - comp.points)
+            await session.delete(comp)
+            
         await session.commit()
     return {"ok": True}
 
@@ -1155,6 +1317,23 @@ async def startup_db_cleanup():
                 logger.info(f"Updating points of task template '{t.title}' to 15 (was 0)")
                 t.points = 15
                 
+        # 3. Reset points earned on or before July 5th, 2026 inclusive
+        # July 5th 23:59:59 MSK is July 5th 20:59:59 UTC
+        cutoff_dt = datetime(2026, 7, 5, 21, 0, 0)
+        await session.execute(
+            update(Completion)
+            .where(Completion.created_at <= cutoff_dt)
+            .values(points=0)
+        )
+        
+        # Recalculate each user's points
+        for u in users:
+            sum_points = await session.scalar(
+                select(func.sum(Completion.points))
+                .where(Completion.user_id == u.id)
+            ) or 0
+            u.points = sum_points
+            
         await session.commit()
 
 

@@ -134,12 +134,12 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
-  padding: 10px 4px;
+  gap: 4px;
+  padding: 12px 6px;
   background: none;
   border: none;
   cursor: pointer;
-  color: var(--text3);
+  color: var(--text2);
   transition: all 0.2s ease;
   position: relative;
   font-family: var(--font);
@@ -167,14 +167,41 @@ body {
 }
 
 .tab-icon {
-  font-size: 18px;
+  font-size: 20px;
   line-height: 1;
 }
 
 .tab-label {
-  font-size: 10px;
-  font-weight: 500;
+  font-size: 11px;
+  font-weight: 600;
   letter-spacing: 0.3px;
+}
+
+/* Grayed out completed tasks */
+.task-card.completed-gray,
+.shop-item-card.completed-gray {
+  opacity: 0.6;
+  background: var(--surface2) !important;
+  border-color: var(--border) !important;
+  border-left-color: var(--text3) !important;
+}
+
+.task-card.completed-gray .task-title,
+.shop-item-card.completed-gray .shop-name {
+  text-decoration: line-through;
+  color: var(--text2) !important;
+}
+
+.task-card.completed-gray .task-badge,
+.shop-item-card.completed-gray .shop-price {
+  background: rgba(255, 255, 255, 0.05) !important;
+  color: var(--text3) !important;
+  border-color: transparent !important;
+}
+
+.weekly-goal-card {
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 /* ── Tab Content ─────────────────────────────────────────────────────────────── */
