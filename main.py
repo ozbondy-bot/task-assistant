@@ -21,76 +21,10 @@ if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL env var is required!")
 
 
-async def migrate_emojis_in_background():
-    logger.info("Starting background database records emoji migration...")
-    try:
-        from bot.parser import get_ai_emoji
-        from db.models import AsyncSessionLocal, PersonalTask, TaskTemplate
-        from sqlalchemy import select
-        import re
-
-        # 1. Fetch records needing migration first, closing the session immediately
-        to_migrate_tasks = []
-        to_migrate_templates = []
-
-        async with AsyncSessionLocal() as session:
-            tasks_res = await session.execute(select(PersonalTask))
-            tasks = tasks_res.scalars().all()
-            for t in tasks:
-                has_emoji = re.match(r'^([\u2600-\u27BF\U0001f000-\U0001f9ff])', t.text)
-                if not has_emoji and not t.text.startswith("🔴"):
-                    to_migrate_tasks.append((t.id, t.text))
-
-            templates_res = await session.execute(select(TaskTemplate))
-            templates = templates_res.scalars().all()
-            for tmpl in templates:
-                has_emoji = re.match(r'^([\u2600-\u27BF\U0001f000-\U0001f9ff])', tmpl.title)
-                if not has_emoji:
-                    to_migrate_templates.append((tmpl.id, tmpl.title))
-
-        if not to_migrate_tasks and not to_migrate_templates:
-            logger.info("No database records needed emoji migration.")
-            return
-
-        logger.info(f"Found {len(to_migrate_tasks)} tasks and {len(to_migrate_templates)} templates needing emoji migration.")
-
-        # 2. Process each record one by one with a short-lived transaction
-        for task_id, text in to_migrate_tasks:
-            emoji = await get_ai_emoji(text)
-            if not emoji:
-                emoji = "📝"
-            new_text = f"{emoji} {text}"
-            
-            async with AsyncSessionLocal() as session:
-                db_task = await session.get(PersonalTask, task_id)
-                if db_task:
-                    db_task.text = new_text
-                    await session.commit()
-            await asyncio.sleep(0.5)
-
-        for tmpl_id, title in to_migrate_templates:
-            emoji = await get_ai_emoji(title)
-            if not emoji:
-                emoji = "📝"
-            new_title = f"{emoji} {title}"
-            
-            async with AsyncSessionLocal() as session:
-                db_tmpl = await session.get(TaskTemplate, tmpl_id)
-                if db_tmpl:
-                    db_tmpl.title = new_title
-                    await session.commit()
-            await asyncio.sleep(0.5)
-
-        logger.info("Background database records successfully migrated with emojis.")
-    except Exception as e:
-        logger.error(f"Failed to migrate database records with emojis in background: {e}")
-
-
 async def run_bot():
     from bot.handlers.base import bot
     from bot.handlers import dp
     logger.info("Starting bot polling...")
-    asyncio.create_task(migrate_emojis_in_background())
     try:
         await bot.set_my_description(
             "Привет! Я семейный помощник по дому и личным делам. 🏠✨\n\n"
@@ -236,13 +170,17 @@ async def migrate_reward_prices_to_days():
 async def main():
     from bot.handlers.base import scheduler_loop
     
-
-
     # Run database migration for reward prices
     try:
         await migrate_reward_prices_to_days()
     except Exception as e:
         logger.error(f"Reward price migration failed: {e}")
+
+    # Run emoji stripping migration to clean database records
+    try:
+        await migrate_template_emojis()
+    except Exception as e:
+        logger.error(f"Emoji migration cleanup failed: {e}")
 
     # Run bot polling, FastAPI, and scheduler loop concurrently
     await asyncio.gather(

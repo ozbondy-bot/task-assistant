@@ -151,52 +151,7 @@ logger = logging.getLogger(__name__)
 _working_model = "gemini-1.5-flash"
 
 async def get_ai_emoji(text: str) -> str:
-    global _working_model
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        return "📝"
-        
-    models_to_try = ["gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-1.5-pro", "gemini-pro", "gemini-2.0-flash-exp"]
-    if _working_model in models_to_try:
-        models_to_try.remove(_working_model)
-    models_to_try.insert(0, _working_model)
-    
-    for model in models_to_try:
-        base_endpoint = os.getenv("GEMINI_API_ENDPOINT", "https://generativelanguage.googleapis.com")
-        url = f"{base_endpoint.rstrip('/')}/v1/models/{model}:generateContent?key={api_key}"
-        headers = {"Content-Type": "application/json"}
-        prompt = (
-            f"Тебе дана задача: '{text}'. "
-            "Верни ровно один наиболее подходящий эмодзи для этой задачи. "
-            "Не пиши никаких объяснений, никаких других слов, только один символ эмодзи."
-        )
-        payload = {
-            "contents": [{
-                "parts": [{"text": prompt}]
-            }]
-        }
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, headers=headers, json=payload, timeout=5) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        emoji_text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
-                        emoji_text = emoji_text.replace(" ", "").replace("\n", "").replace("\r", "").replace("`", "").replace('"', '').replace("'", "")
-                        if emoji_text:
-                            _working_model = model
-                            return emoji_text
-                    elif resp.status in (400, 401, 403):
-                        logger.error(f"Gemini API auth/bad-request error for model {model}: Status {resp.status}")
-                        return "📝"
-                    elif resp.status == 404:
-                        continue
-                    else:
-                        resp_text = await resp.text()
-                        logger.error(f"Gemini API error for model {model}: Status {resp.status}, Response: {resp_text}")
-        except Exception as e:
-            logger.error(f"Error fetching AI emoji from Gemini for model {model}: {e}")
-            
-    return "📝" # Default fallback chore emoji
+    return ""
 
 
 def clean_task_text(text: str) -> str:
