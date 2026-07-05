@@ -144,9 +144,9 @@ function renderHouseTasks(tasks) {
       </div>
       <div class="task-action-row" onclick="event.stopPropagation();">
         <button class="btn-done btn-xs" onclick="claimTask(${t.id})">Взять</button>
-        <button class="btn-unclaim btn-xs" onclick="nudgeTask(${t.id})">Намекнуть 🔔</button>
-        <button class="btn-skip btn-xs" onclick="skipFreeChore(${t.id})">Пропустить 🗑</button>
-        <button class="btn-shift btn-xs" onclick="openShiftModal(${t.id}, 'chore')">Сдвиг 🗓</button>
+        <button class="btn-unclaim btn-xs" onclick="nudgeTask(${t.id})">Намек</button>
+        <button class="btn-skip btn-xs" onclick="skipFreeChore(${t.id})">Копия</button>
+        <button class="btn-shift btn-xs" onclick="openShiftModal(${t.id}, 'chore')">Сдвиг</button>
       </div>
     </div>
   `).join('');
@@ -228,18 +228,20 @@ function renderPersonalTasks(personal, household) {
       const icon = getTaskIcon(t.text);
       const cleanText = stripEmoji(t.text);
       return `
-        <div class="task-card personal-task" id="ptask-${t.id}" onclick="completePersonalTask(${t.id}, this)">
-          <div class="task-icon">${icon}</div>
-          <div class="task-body">
-            <div class="task-title">${escHtml(cleanText)}</div>
-            <div class="task-meta">
-              ${t.recurrence ? `<span class="task-badge badge-rec">🔁 ${recLabel(t.recurrence)}</span>` : ''}
-              ${t.category === 'routine' ? '<span class="task-badge">Ежедневное</span>' : ''}
+        <div class="task-card personal-task flex-between" id="ptask-${t.id}">
+          <div class="task-left flex-row" style="flex: 1; align-items: center; gap: 8px; overflow: hidden;">
+            <div class="task-check-circle" onclick="completePersonalTask(${t.id}, document.getElementById('ptask-${t.id}'))" style="cursor: pointer; font-size: 18px; user-select: none;">⚪</div>
+            <div class="task-body">
+              <div class="task-title" style="font-size: 14px;">${escHtml(cleanText)}</div>
+              <div class="task-meta">
+                ${t.recurrence ? `<span class="task-badge badge-rec">🔁 ${recLabel(t.recurrence)}</span>` : ''}
+                ${t.category === 'routine' ? '<span class="task-badge">Ежедневное</span>' : ''}
+              </div>
             </div>
           </div>
-          <div class="task-actions-compact" onclick="event.stopPropagation();">
-            <button class="btn-action-icon" onclick="openShiftModal(${t.id}, 'personal')">🗓</button>
-            <button class="btn-action-icon icon-danger" onclick="deletePersonalTask(${t.id})">🗑</button>
+          <div class="task-actions-compact flex-row" style="gap: 8px; align-items: center;">
+            <button class="btn-action-icon" onclick="openShiftModal(${t.id}, 'personal')" style="background: none; border: none; font-size: 16px; cursor: pointer; padding: 4px;">🗓</button>
+            <button class="btn-action-icon icon-danger" onclick="deletePersonalTask(${t.id})" style="background: none; border: none; font-size: 16px; cursor: pointer; padding: 4px;">🗑</button>
           </div>
         </div>`;
     }
@@ -426,17 +428,7 @@ function setupFABs() {
     document.getElementById('createRewardModal').classList.remove('hidden');
   });
 
-  document.getElementById('saveHouseSettingsBtn').addEventListener('click', async () => {
-    const name = document.getElementById('settingsHouseName').value.trim();
-    const timezone = document.getElementById('settingsHouseTz').value;
-    try {
-      await api('POST', '/api/house/settings', { name, timezone });
-      showToast('✅ Настройки сохранены!');
-      loadSettingsTab();
-    } catch (e) {
-      showToast(`⚠️ ${e.message}`);
-    }
-  });
+
 
   document.getElementById('forceGenerateBtn').addEventListener('click', async () => {
     try {
@@ -518,7 +510,6 @@ async function loadShopTab() {
       api('GET', '/api/stats'),
     ]);
 
-    document.getElementById('shopPoints').textContent = rewardsData.user_points;
     currentPoints = rewardsData.user_points;
 
     renderRewards(rewardsData.rewards, rewardsData.user_points);
@@ -536,9 +527,8 @@ function renderRewards(rewards, myPoints) {
   }
   list.innerHTML = rewards.map(r => `
     <div class="reward-card">
-      <div class="reward-icon">${rewardIcon(r.id)}</div>
       <div class="reward-body">
-        <div class="reward-title">${escHtml(r.title)}</div>
+        <div class="reward-title">${escHtml(stripEmoji(r.title))}</div>
         <div class="reward-price">${r.price} ✨ <span>очков</span></div>
       </div>
       <button class="btn-buy" ${myPoints < r.price ? 'disabled' : ''} onclick="buyReward(${r.id}, '${escAttr(r.title)}')">
@@ -581,10 +571,11 @@ function escAttr(str) {
 }
 
 function stripEmoji(text) {
-  const icons = ['🟢','🟡','🔴','❗️','⚡','⬜','💧','🤸‍♂️','🚶‍♂️','🐈','📚'];
-  let t = text;
-  for (const icon of icons) t = t.replaceAll(icon, '');
-  return t.trim();
+  if (!text) return '';
+  return text
+    .replace(/\p{Extended_Pictographic}/gu, '')
+    .replace(/[\u{1F300}-\u{1F9FF}]|[\u{1F600}-\u{1F64F}]|[\u{1F680}-\u{1F6FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu, '')
+    .trim();
 }
 
 function getTaskIcon(text) {
@@ -599,9 +590,16 @@ function getTaskIcon(text) {
 }
 
 function periodLabel(p) {
-  const m = { daily:'Ежедневно', weekly:'Еженедельно', twice_weekly:'2 раза/нед', monthly:'Ежемесячно',
-               twice_monthly:'2 раза/мес', quarterly:'Раз в квартал' };
-  return m[p] || p;
+  const m = { 
+    daily: 'Ежедневно', 
+    weekly: 'Еженедельно', 
+    twice_weekly: '2 раза/нед', 
+    monthly: 'Ежемесячно',
+    twice_monthly: '2 раза/мес', 
+    quarterly: 'Раз в квартал',
+    every_x_days: 'Каждые 30 дней' 
+  };
+  return m[p] || 'Каждые 30 дней';
 }
 
 function recLabel(r) {
@@ -617,16 +615,10 @@ async function loadSettingsTab() {
   rewardsList.innerHTML = `<div class="loading-spinner"><div class="spinner"></div><p>Загрузка...</p></div>`;
 
   try {
-    const [settings, templates, rewardsData] = await Promise.all([
-      api('GET', '/api/house/settings'),
+    const [templates, rewardsData] = await Promise.all([
       api('GET', '/api/chores/templates'),
       api('GET', '/api/rewards'),
     ]);
-
-    // Render house settings
-    document.getElementById('settingsHouseName').value = settings.name;
-    document.getElementById('settingsHouseTz').value = settings.timezone;
-    document.getElementById('settingsJoinCode').textContent = settings.join_code;
 
     // Render templates & rewards
     renderChoresTemplates(templates);
@@ -736,10 +728,10 @@ async function nudgeTask(instanceId) {
 }
 
 async function skipFreeChore(instanceId) {
-  if (!confirm('Пропустить это дело на сегодня?')) return;
+  if (!confirm('Удалить эту копию дела на сегодня?')) return;
   try {
     await api('POST', `/api/house/tasks/${instanceId}/skip`);
-    showToast('🗑 Дело пропущено на сегодня');
+    showToast('🗑 Копия дела удалена на сегодня');
     loadHouseTab();
   } catch (e) {
     showToast(`⚠️ ${e.message}`);
@@ -921,3 +913,9 @@ window.openPurchasesArchive = openPurchasesArchive;
 window.nudgeTask = nudgeTask;
 window.skipFreeChore = skipFreeChore;
 window.deletePersonalTask = deletePersonalTask;
+window.claimTask = claimTask;
+window.openShiftModal = openShiftModal;
+window.completePersonalTask = completePersonalTask;
+window.completeHouseTask = completeHouseTask;
+window.unclaimChore = unclaimChore;
+window.skipChore = skipChore;

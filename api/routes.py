@@ -367,7 +367,39 @@ async def delete_shopping(item_id: int, user: User = Depends(get_current_user)):
     return {"ok": True}
 
 
-# -- Rewards / Shop --
+# -- Rewards / Shop calculation and adjustment --
+async def get_shop_calculation_stats(session):
+    from sqlalchemy import func
+    thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+    
+    total_points = await session.scalar(
+        select(func.sum(Completion.points))
+        .join(User, Completion.user_id == User.id)
+        .where(
+            and_(
+                User.house_id == ACTIVE_HOUSE_ID,
+                Completion.created_at >= thirty_days_ago
+            )
+        )
+    ) or 0
+    
+    num_users = await session.scalar(
+        select(func.count(User.id)).where(User.house_id == ACTIVE_HOUSE_ID)
+    ) or 1
+    if num_users == 0:
+        num_users = 1
+        
+    points_per_day = total_points / (30.0 * num_users)
+    return total_points, num_users, points_per_day
+
+async def get_adjusted_price(session, base_days: int) -> int:
+    total_points, num_users, points_per_day = await get_shop_calculation_stats(session)
+    if points_per_day <= 0:
+        return max(1, base_days)
+    price_cookies = base_days * points_per_day
+    return max(1, int(round(price_cookies)))
+
+
 @app.get("/api/rewards")
 async def get_rewards(user: User = Depends(get_current_user)):
     async with AsyncSessionLocal() as session:
@@ -377,10 +409,21 @@ async def get_rewards(user: User = Depends(get_current_user)):
         rewards = result.scalars().all()
         db_user = await session.get(User, user.id)
         user_points = db_user.points or 0
+        
+        # Calculate adjusted price for each reward
+        adjusted_rewards = []
+        for r in rewards:
+            adj = await get_adjusted_price(session, r.price)
+            adjusted_rewards.append({
+                "id": r.id,
+                "title": r.title,
+                "price": adj,
+                "base_days": r.price
+            })
 
     return {
         "user_points": user_points,
-        "rewards": [{"id": r.id, "title": r.title, "price": r.price} for r in rewards],
+        "rewards": adjusted_rewards,
     }
 
 
@@ -391,15 +434,16 @@ async def buy_reward(reward_id: int, user: User = Depends(get_current_user)):
         if not reward:
             raise HTTPException(status_code=404, detail="Reward not found")
 
+        adj_price = await get_adjusted_price(session, reward.price)
         db_user = await session.get(User, user.id)
-        if (db_user.points or 0) < reward.price:
+        if (db_user.points or 0) < adj_price:
             raise HTTPException(status_code=402, detail="Not enough points")
 
-        db_user.points -= reward.price
+        db_user.points -= adj_price
         purchase = RewardPurchase(
             user_id=user.id,
             reward_title=reward.title,
-            price=reward.price,
+            price=adj_price,
             status="purchased",
         )
         session.add(purchase)

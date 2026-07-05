@@ -44,6 +44,10 @@
         <span class="tab-icon">🎁</span>
         <span class="tab-label">Магазин</span>
       </button>
+      <button class="tab-btn" data-tab="archive" id="tabArchive">
+        <span class="tab-icon">📜</span>
+        <span class="tab-label">Архивы</span>
+      </button>
       <button class="tab-btn" data-tab="settings" id="tabSettings">
         <span class="tab-icon">⚙️</span>
         <span class="tab-label">Настройки</span>
@@ -138,17 +142,12 @@
 
       <!-- SHOP / REWARDS TAB -->
       <section class="tab-pane" id="pane-shop">
-        <div class="section-header">
-          <h2>Магазин наград</h2>
-          <p class="section-sub">Трать очки на приятные бонусы 💫</p>
-        </div>
-        <div class="points-banner-compact" id="pointsBanner">
-          <div class="points-left">
-            <span class="points-icon">🍪</span>
-            <span class="points-lbl">Очки:</span>
-            <strong class="points-val-small" id="shopPoints">0</strong>
+        <div class="section-header flex-between" style="align-items: center; width: 100%;">
+          <div>
+            <h2>Магазин наград</h2>
+            <p class="section-sub">Трать очки на приятные бонусы</p>
           </div>
-          <button class="btn btn-secondary btn-xs" id="viewPurchasesArchiveBtn">📜 История покупок</button>
+          <button class="btn btn-secondary btn-xs" id="viewPurchasesArchiveBtn">История</button>
         </div>
         <div id="rewardsList" class="rewards-list"></div>
 
@@ -159,40 +158,39 @@
         </div>
       </section>
 
+      <!-- ARCHIVES TAB -->
+      <section class="tab-pane" id="pane-archive">
+        <div class="section-header">
+          <h2>Архивы</h2>
+          <p class="section-sub">Выполненные дела, личные задачи и покупки</p>
+        </div>
+        
+        <div class="settings-card" style="margin-top: 12px;">
+          <button class="btn btn-secondary btn-sm" id="viewChoresArchiveBtn" style="margin-bottom: 8px; width: 100%; text-align: left; display: flex; justify-content: space-between;">
+            <span>Выполненные домашние дела</span>
+            <span>➡️</span>
+          </button>
+          <button class="btn btn-secondary btn-sm" id="viewTasksArchiveBtn" style="margin-bottom: 8px; width: 100%; text-align: left; display: flex; justify-content: space-between;">
+            <span>Завершенные личные задачи</span>
+            <span>➡️</span>
+          </button>
+          <button class="btn btn-secondary btn-sm" id="viewPurchasesArchiveBtnFromSettings" style="width: 100%; text-align: left; display: flex; justify-content: space-between;">
+            <span>Купленные награды</span>
+            <span>➡️</span>
+          </button>
+        </div>
+      </section>
+
       <!-- SETTINGS TAB -->
       <section class="tab-pane" id="pane-settings">
         <div class="section-header">
           <h2>Настройки</h2>
-          <p class="section-sub">Управление домом, делами и магазином</p>
+          <p class="section-sub">Управление шаблонами дел и магазина</p>
         </div>
         
-        <!-- House Info -->
+        <!-- Chores Generation -->
         <div class="settings-card">
-          <h3>🏠 Настройки Дома</h3>
-          <div class="form-group">
-            <label>Название дома</label>
-            <input id="settingsHouseName" type="text" placeholder="Название дома" />
-          </div>
-          <div class="form-group" style="margin-top: 8px;">
-            <label>Часовой пояс</label>
-            <select id="settingsHouseTz">
-              <option value="Europe/Moscow">Москва (UTC+3)</option>
-              <option value="Europe/London">Лондон (UTC+0)</option>
-              <option value="Europe/Paris">Париж (UTC+1)</option>
-              <option value="Asia/Yerevan">Ереван (UTC+4)</option>
-              <option value="Asia/Tashkent">Ташкент (UTC+5)</option>
-              <option value="Asia/Almaty">Алматы (UTC+6)</option>
-              <option value="UTC">UTC</option>
-            </select>
-          </div>
-          <button class="btn btn-primary btn-sm" id="saveHouseSettingsBtn" style="margin-top: 10px; width: 100%">Сохранить настройки</button>
-          
-          <div class="invite-code-box">
-            <span class="invite-label">Код для партнера:</span>
-            <code id="settingsJoinCode" class="invite-code">---</code>
-          </div>
-          
-          <button class="btn btn-secondary btn-sm" style="margin-top: 12px; width: 100%" id="forceGenerateBtn">🔄 Обновить дела на сегодня</button>
+          <button class="btn btn-secondary btn-sm" style="width: 100%" id="forceGenerateBtn">🔄 Обновить дела на сегодня</button>
         </div>
 
         <!-- Chores Templates -->
@@ -217,25 +215,7 @@
           </div>
         </div>
 
-        <!-- Archives -->
-        <div class="settings-card">
-          <h3>📜 Архивы истории</h3>
-          <p class="modal-hint" style="margin-bottom: 10px;">Просматривайте историю выполненных дел, завершенных задач и совершенных покупок</p>
-          <div class="archive-buttons-grid">
-            <button class="btn btn-secondary btn-sm" id="viewChoresArchiveBtn" style="margin-bottom: 8px; width: 100%; text-align: left; display: flex; justify-content: space-between;">
-              <span>🏠 Выполненные домашние дела</span>
-              <span>➡️</span>
-            </button>
-            <button class="btn btn-secondary btn-sm" id="viewTasksArchiveBtn" style="margin-bottom: 8px; width: 100%; text-align: left; display: flex; justify-content: space-between;">
-              <span>👤 Завершенные личные задачи</span>
-              <span>➡️</span>
-            </button>
-            <button class="btn btn-secondary btn-sm" id="viewPurchasesArchiveBtnFromSettings" style="width: 100%; text-align: left; display: flex; justify-content: space-between;">
-              <span>🛍 История покупок в магазине</span>
-              <span>➡️</span>
-            </button>
-          </div>
-        </div>
+
       </section>
 
     </main>
