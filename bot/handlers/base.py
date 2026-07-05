@@ -1,4 +1,4 @@
-﻿import os
+import os
 import logging
 import asyncio
 from datetime import datetime, timedelta, date
@@ -458,41 +458,6 @@ async def generate_daily_chores_if_needed(session, house_id: int):
     house.last_summary_date = today
     await session.commit()
     logger.info(f"Generated daily chores for house {house_id}")
-
-
-# ── FSM States ────────────────────────────────────────────────────────────────
-class EditShop(StatesGroup):
-    waiting_for_input = State()
-    item_id = State()
-
-
-class AddTemplateState(StatesGroup):
-    waiting_for_title = State()
-    waiting_for_points = State()
-    waiting_for_periodicity = State()
-    waiting_for_period_days = State()
-
-
-class AddRewardState(StatesGroup):
-    waiting_for_title = State()
-    waiting_for_price = State()
-
-
-class AddPersonalTaskState(StatesGroup):
-    waiting_for_text = State()
-    waiting_for_date = State()
-    waiting_for_recurrence = State()
-    waiting_for_recurrence_days = State()
-
-
-
-class EditTemplateState(StatesGroup):
-    waiting_for_title = State()
-    waiting_for_points = State()
-    waiting_for_periodicity = State()
-    waiting_for_period_days = State()
-
-
 
 
 # ── Middleware: auto-register users ──────────────────────────────────────────
