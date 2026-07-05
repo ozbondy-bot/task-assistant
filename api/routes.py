@@ -1656,6 +1656,9 @@ async def startup_db_cleanup():
             delete_insts = sorted_insts[1:]
             
             for inst in delete_insts:
+                await session.execute(
+                    delete(Completion).where(Completion.task_instance_id == inst.id)
+                )
                 await session.delete(inst)
             
         await session.commit()
