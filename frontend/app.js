@@ -729,9 +729,9 @@ function renderChoresTemplates(templates) {
       nextStr = `${day}.${month}.`;
     }
     return `
-      <div class="task-card house-task flex-between" onclick="openTemplateDetailsModal(${JSON.stringify(t).replace(/"/g, '&quot;')})" style="padding: 0 10px; cursor: pointer; margin-bottom: 4px; height: 42px; align-items: center; display: flex;">
+      <div class="task-card house-task flex-between" onclick="openTemplateDetailsModal(${JSON.stringify(t).replace(/"/g, '&quot;')})" style="padding: 0 10px; cursor: pointer; height: 36px; align-items: center; display: flex; box-sizing: border-box;">
         <span style="font-weight: 500; font-size: 13px;">${escHtml(stripEmoji(t.title))}</span>
-        <span class="task-badge" style="font-size: 12px; font-weight: 600; background: var(--bg3); color: var(--text2); border-radius: 6px; width: 70px; height: 32px; display: flex; align-items: center; justify-content: center; box-sizing: border-box; flex-shrink: 0; margin-left: auto;">📅 ${nextStr}</span>
+        <span class="task-badge" style="font-size: 11px; font-weight: 600; background: var(--bg3); color: var(--text2); border-radius: 6px; width: 70px; height: 28px; display: flex; align-items: center; justify-content: center; box-sizing: border-box; flex-shrink: 0; margin-left: auto;">📅 ${nextStr}</span>
       </div>
     `;
   }).join('');
