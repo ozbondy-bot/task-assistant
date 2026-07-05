@@ -202,12 +202,19 @@ function getPersonalActiveDateStr() {
   return d.toISOString().split('T')[0];
 }
 
+function formatPaginationDate(dateInput) {
+  const d = new Date(dateInput);
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const weekdays = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
+  const wd = weekdays[d.getDay()];
+  return `${day}.${month}. (${wd})`;
+}
+
 function getPersonalActiveDateLabel() {
   const d = new Date();
   d.setDate(d.getDate() + personalActiveOffset);
-  const day = String(d.getDate()).padStart(2, '0');
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  return `${day}.${month}.`;
+  return formatPaginationDate(d);
 }
 
 function shiftPersonalDay(diff) {
@@ -486,9 +493,17 @@ function setupFABs() {
     document.getElementById('addChoreChoiceModal').classList.remove('hidden');
   });
 
-  document.getElementById('addRewardBtn').addEventListener('click', () => {
-    document.getElementById('createRewardModal').classList.remove('hidden');
-  });
+  const addSettingsTmplBtn = document.getElementById('addSettingsTmplBtn');
+  if (addSettingsTmplBtn) {
+    addSettingsTmplBtn.addEventListener('click', () => {
+      const isChoresHidden = document.getElementById('settingsChoresContainer').classList.contains('hidden');
+      if (!isChoresHidden) {
+        document.getElementById('addChoreChoiceModal').classList.remove('hidden');
+      } else {
+        document.getElementById('createRewardModal').classList.remove('hidden');
+      }
+    });
+  }
 
   // Archive buttons listeners
   document.getElementById('viewChoresArchiveBtn').addEventListener('click', openChoresArchive);
@@ -729,6 +744,7 @@ function renderRewardsTemplates(rewards) {
 }
 
 async function deleteChoreTemplate(id) {
+  closeModal('templateDetailsModal');
   if (!confirm('Удалить этот шаблон дела?')) return;
   try {
     const res = await api('DELETE', `/api/chores/templates/${id}`);
@@ -755,6 +771,8 @@ async function deleteReward(id) {
 }
 
 async function unclaimChore(id) {
+  closeModal('myTaskDetailsModal');
+  if (!confirm('Вернуть задачу в свободные?')) return;
   try {
     await api('POST', `/api/house/tasks/${id}/unclaim`);
     showToast('↩ Задача возвращена в свободные');
@@ -806,6 +824,7 @@ async function nudgeTask(instanceId) {
 }
 
 async function skipFreeChore(instanceId) {
+  closeModal('choreDetailsModal');
   if (!confirm('Удалить эту копию дела на сегодня?')) return;
   try {
     await api('POST', `/api/house/tasks/${instanceId}/skip`);
@@ -855,11 +874,11 @@ async function loadChoresArchive() {
       `).join('');
     }
     
-    const displayDate = choresArchiveDate.toLocaleDateString('ru-RU');
+    const displayDate = formatPaginationDate(choresArchiveDate);
     pag.innerHTML = `
-      <button class="btn btn-secondary btn-xs" onclick="stepChoresArchive(-1)">⏪ Назад</button>
-      <span style="font-size:12px;color:var(--text2);font-weight:600;">${displayDate}</span>
-      <button class="btn btn-secondary btn-xs" onclick="stepChoresArchive(1)">Вперед ⏩</button>
+      <button class="btn btn-secondary btn-xs btn-pagination" onclick="stepChoresArchive(-1)">←</button>
+      <span class="pagination-label">${displayDate}</span>
+      <button class="btn btn-secondary btn-xs btn-pagination" onclick="stepChoresArchive(1)">→</button>
     `;
   } catch (e) {
     list.innerHTML = `<p style="color:var(--danger);text-align:center;padding:24px">${e.message}</p>`;
@@ -902,11 +921,11 @@ async function loadTasksArchive() {
       }).join('');
     }
     
-    const displayDate = tasksArchiveDate.toLocaleDateString('ru-RU');
+    const displayDate = formatPaginationDate(tasksArchiveDate);
     pag.innerHTML = `
-      <button class="btn btn-secondary btn-xs" onclick="stepTasksArchive(-1)">⏪ Назад</button>
-      <span style="font-size:12px;color:var(--text2);font-weight:600;">${displayDate}</span>
-      <button class="btn btn-secondary btn-xs" onclick="stepTasksArchive(1)">Вперед ⏩</button>
+      <button class="btn btn-secondary btn-xs btn-pagination" onclick="stepTasksArchive(-1)">←</button>
+      <span class="pagination-label">${displayDate}</span>
+      <button class="btn btn-secondary btn-xs btn-pagination" onclick="stepTasksArchive(1)">→</button>
     `;
   } catch (e) {
     list.innerHTML = `<p style="color:var(--danger);text-align:center;padding:24px">${e.message}</p>`;
@@ -964,9 +983,9 @@ async function loadPurchasesArchive(page) {
     }).join('');
     
     pag.innerHTML = `
-      <button class="btn btn-secondary btn-xs" ${page === 0 ? 'disabled' : ''} onclick="loadPurchasesArchive(${page - 1})">⏪ Назад</button>
-      <span style="font-size:12px;color:var(--text2)">Страница ${page + 1}</span>
-      <button class="btn btn-secondary btn-xs" ${items.length < 10 ? 'disabled' : ''} onclick="loadPurchasesArchive(${page + 1})">Вперед ⏩</button>
+      <button class="btn btn-secondary btn-xs btn-pagination" ${page === 0 ? 'disabled' : ''} onclick="loadPurchasesArchive(${page - 1})">←</button>
+      <span class="pagination-label">Страница ${page + 1}</span>
+      <button class="btn btn-secondary btn-xs btn-pagination" ${items.length < 10 ? 'disabled' : ''} onclick="loadPurchasesArchive(${page + 1})">→</button>
     `;
   } catch (e) {
     list.innerHTML = `<p style="color:var(--danger);text-align:center;padding:24px">${e.message}</p>`;
@@ -974,6 +993,7 @@ async function loadPurchasesArchive(page) {
 }
 
 async function deletePersonalTask(id) {
+  closeModal('myTaskDetailsModal');
   if (!confirm('Удалить эту задачу?')) return;
   try {
     await api('DELETE', `/api/tasks/${id}`);
@@ -1015,7 +1035,7 @@ function openChoreDetails(t) {
       <button class="btn btn-primary" onclick="claimTask(${t.id}); closeModal('choreDetailsModal');" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 2px; font-size: 13px; font-weight: 600; background: var(--success); border-color: var(--success);">Взять</button>
       <button class="btn btn-secondary" onclick="nudgeTask(${t.id}); closeModal('choreDetailsModal');" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 2px; font-size: 13px; font-weight: 600;">Намек</button>
       <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'chore'); closeModal('choreDetailsModal');" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 2px; font-size: 13px; font-weight: 600;">Сдвиг</button>
-      <button class="btn btn-secondary" onclick="skipFreeChore(${t.id}); closeModal('choreDetailsModal');" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 2px; font-size: 13px; font-weight: 600;">Убрать</button>
+      <button class="btn btn-secondary" onclick="skipFreeChore(${t.id});" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 2px; font-size: 13px; font-weight: 600;">Убрать</button>
       <button class="btn btn-secondary" onclick="goToChoreTemplateSettings(${t.template_id}, '${escAttr(t.title)}', ${t.points}, '${t.periodicity}', ${t.period_days || 'null'}, ${t.last_completed ? `'${t.last_completed}'` : 'null'}, ${t.next_execution ? `'${t.next_execution}'` : 'null'}); closeModal('choreDetailsModal');" style="width: 42px; height: 42px; box-sizing: border-box; padding: 0; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0;">⚙️</button>
     </div>
   `;
@@ -1065,9 +1085,9 @@ async function loadShoppingArchive(page) {
     }).join('');
     
     pag.innerHTML = `
-      <button class="btn btn-secondary btn-xs" ${page === 0 ? 'disabled' : ''} onclick="loadShoppingArchive(${page - 1})">⏪ Назад</button>
-      <span style="font-size:12px;color:var(--text2)">Страница ${page + 1}</span>
-      <button class="btn btn-secondary btn-xs" ${items.length < 10 ? 'disabled' : ''} onclick="loadShoppingArchive(${page + 1})">Вперед ⏩</button>
+      <button class="btn btn-secondary btn-xs btn-pagination" ${page === 0 ? 'disabled' : ''} onclick="loadShoppingArchive(${page - 1})">←</button>
+      <span class="pagination-label">Страница ${page + 1}</span>
+      <button class="btn btn-secondary btn-xs btn-pagination" ${items.length < 10 ? 'disabled' : ''} onclick="loadShoppingArchive(${page + 1})">→</button>
     `;
   } catch (e) {
     list.innerHTML = `<p style="color:var(--danger);text-align:center;padding:24px">${e.message}</p>`;
@@ -1111,7 +1131,7 @@ function openMyTaskDetails(t, type) {
       <div style="display: flex; gap: 6px; width: 100%;">
         <button class="btn btn-primary" onclick="completeHouseTask(${t.id}, '${escAttr(title)}'); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 4px; font-size: 13px; font-weight: 600;">Выполнить</button>
         <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'chore'); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 4px; font-size: 13px; font-weight: 600;">Сдвиг</button>
-        <button class="btn btn-secondary" onclick="unclaimChore(${t.id}); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 4px; font-size: 13px; font-weight: 600;">Вернуть</button>
+        <button class="btn btn-secondary" onclick="unclaimChore(${t.id});" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 4px; font-size: 13px; font-weight: 600;">Вернуть</button>
       </div>
     `;
   } else {
@@ -1119,7 +1139,7 @@ function openMyTaskDetails(t, type) {
       <div style="display: flex; gap: 6px; width: 100%;">
         <button class="btn btn-primary" onclick="completePersonalTask(${t.id}); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 4px; font-size: 13px; font-weight: 600;">Выполнить</button>
         <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'personal'); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 4px; font-size: 13px; font-weight: 600;">Сдвиг</button>
-        <button class="btn btn-secondary" onclick="deletePersonalTask(${t.id}); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 4px; font-size: 13px; font-weight: 600; background: var(--danger); border-color: var(--danger);">Удалить</button>
+        <button class="btn btn-secondary" onclick="deletePersonalTask(${t.id});" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 4px; font-size: 13px; font-weight: 600; background: var(--danger); border-color: var(--danger);">Удалить</button>
       </div>
     `;
   }
@@ -1341,3 +1361,45 @@ window.openNewTemplateCreator = openNewTemplateCreator;
 window.deleteTemplate = deleteTemplate;
 window.goToChoreTemplateSettings = goToChoreTemplateSettings;
 window.toggleChorePeriodDays = toggleChorePeriodDays;
+
+function switchSettingsSubTab(sub) {
+  const choresBtn = document.getElementById('toggleTmplChoresBtn');
+  const rewardsBtn = document.getElementById('toggleTmplRewardsBtn');
+  const choresCont = document.getElementById('settingsChoresContainer');
+  const rewardsCont = document.getElementById('settingsRewardsContainer');
+  
+  if (!choresBtn || !rewardsBtn || !choresCont || !rewardsCont) return;
+  
+  if (sub === 'chores') {
+    choresBtn.className = 'btn btn-primary';
+    choresBtn.style.flex = '1';
+    choresBtn.style.height = '38px';
+    choresBtn.style.fontSize = '13px';
+    choresBtn.style.fontWeight = '600';
+    
+    rewardsBtn.className = 'btn btn-secondary';
+    rewardsBtn.style.flex = '1';
+    rewardsBtn.style.height = '38px';
+    rewardsBtn.style.fontSize = '13px';
+    rewardsBtn.style.fontWeight = '600';
+    
+    choresCont.classList.remove('hidden');
+    rewardsCont.classList.add('hidden');
+  } else {
+    choresBtn.className = 'btn btn-secondary';
+    choresBtn.style.flex = '1';
+    choresBtn.style.height = '38px';
+    choresBtn.style.fontSize = '13px';
+    choresBtn.style.fontWeight = '600';
+    
+    rewardsBtn.className = 'btn btn-primary';
+    rewardsBtn.style.flex = '1';
+    rewardsBtn.style.height = '38px';
+    rewardsBtn.style.fontSize = '13px';
+    rewardsBtn.style.fontWeight = '600';
+    
+    choresCont.classList.add('hidden');
+    rewardsCont.classList.remove('hidden');
+  }
+}
+window.switchSettingsSubTab = switchSettingsSubTab;

@@ -156,9 +156,8 @@
 
       <!-- ARCHIVES TAB -->
       <section class="tab-pane" id="pane-archive">
-        <div class="section-header">
+        <div class="section-header" style="margin-bottom: 12px;">
           <h2>Архив</h2>
-          <p class="section-sub">Выполненные дела, задачи и покупки</p>
         </div>
         
         <div class="archive-buttons-row" style="display: flex; gap: 6px; margin-top: 12px; width: 100%;">
@@ -170,33 +169,29 @@
       </section>
 
       <!-- SETTINGS TAB -->
-      <section class="tab-pane" id="pane-settings">
-        <div class="section-header" style="margin-bottom: 12px;">
-          <h2>Настройки</h2>
+      <section class="tab-pane" id="pane-settings" style="position: relative; padding-bottom: 80px;">
+        <!-- Settings Sub-Tabs Toggle -->
+        <div class="subtab-header" style="display: flex; gap: 8px; margin-bottom: 12px; width: 100%;">
+          <button class="btn btn-primary" id="toggleTmplChoresBtn" onclick="switchSettingsSubTab('chores')" style="flex: 1; height: 38px; font-size: 13px; font-weight: 600;">Шаблоны дел</button>
+          <button class="btn btn-secondary" id="toggleTmplRewardsBtn" onclick="switchSettingsSubTab('rewards')" style="flex: 1; height: 38px; font-size: 13px; font-weight: 600;">Шаблоны наград</button>
         </div>
         
-        <!-- Chores Templates -->
-        <div class="settings-card">
-          <div class="card-header-action">
-            <h3>📋 Шаблоны домашних задач</h3>
-          </div>
+        <!-- Chores Templates Container -->
+        <div id="settingsChoresContainer" class="settings-card" style="margin: 0; border: none; background: transparent; box-shadow: none; padding: 0;">
           <div id="settingsChoresList" class="settings-list">
             <!-- Chores templates will be loaded here -->
           </div>
         </div>
 
-        <!-- Rewards Templates -->
-        <div class="settings-card">
-          <div class="card-header-action">
-            <h3>🎁 Настройки Магазина</h3>
-            <button class="btn btn-primary btn-xs" id="addRewardBtn">Добавить</button>
-          </div>
+        <!-- Rewards Templates Container -->
+        <div id="settingsRewardsContainer" class="settings-card hidden" style="margin: 0; border: none; background: transparent; box-shadow: none; padding: 0;">
           <div id="settingsRewardsList" class="settings-list">
             <!-- Rewards templates will be loaded here -->
           </div>
         </div>
 
-
+        <!-- Floating action button for Settings Templates -->
+        <button class="fab" id="addSettingsTmplBtn">+</button>
       </section>
 
     </main>
