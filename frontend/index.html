@@ -56,9 +56,8 @@
       <!-- HOUSEHOLD TASKS TAB -->
       <section class="tab-pane active" id="pane-house">
         <div class="section-header">
-          <div class="flex-row" style="align-items: center; gap: 8px;">
-            <h2 style="margin: 0;">Домашние дела</h2>
-            <button class="btn btn-primary btn-xs" id="addChoreBtn" style="padding: 4px 10px; font-size: 12px; height: fit-content; line-height: 1;">Добавить</button>
+          <div style="display: flex; flex-direction: row; align-items: center; gap: 8px;">
+            <h2 style="margin: 0;">Домашние задачи</h2>
           </div>
           <p class="section-sub" style="margin-top: 4px;">Свободные задачи — возьми в работу!</p>
         </div>
@@ -68,6 +67,9 @@
             <p>Загрузка...</p>
           </div>
         </div>
+        <button class="fab" id="addChoreBtn">
+          <span>+</span>
+        </button>
       </section>
 
       <!-- PERSONAL TASKS TAB -->
@@ -169,13 +171,13 @@
       <section class="tab-pane" id="pane-settings">
         <div class="section-header">
           <h2>Настройки</h2>
-          <p class="section-sub">Управление шаблонами дел и магазина</p>
+          <p class="section-sub">Управление шаблонами задач и магазина</p>
         </div>
         
         <!-- Chores Templates -->
         <div class="settings-card">
           <div class="card-header-action">
-            <h3>📋 Шаблоны домашних дел</h3>
+            <h3>📋 Шаблоны домашних задач</h3>
           </div>
           <div id="settingsChoresList" class="settings-list">
             <!-- Chores templates will be loaded here -->
@@ -201,25 +203,48 @@
     <!-- Add Chore Template Modal -->
     <div class="modal-overlay hidden" id="addChoreModal">
       <div class="modal-card">
-        <h3>Новый шаблон дела</h3>
-        <input id="choreTmplTitle" type="text" placeholder="Название (например: Помыть посуду)" />
-        <input id="choreTmplPoints" type="number" placeholder="Баллы (например: 3)" min="1" />
-        <div class="form-group" style="margin-top: 8px">
-          <label>Периодичность</label>
-          <select id="choreTmplPeriodicity">
-            <option value="daily">Ежедневно</option>
-            <option value="twice_weekly">2 раза в неделю</option>
-            <option value="weekly">Еженедельно</option>
-            <option value="twice_monthly">2 раза в месяц</option>
-            <option value="monthly">Ежемесячно</option>
-            <option value="quarterly">Раз в квартал</option>
-          </select>
+        <h3>Новый шаблон задачи</h3>
+        <div style="display: flex; flex-direction: column; gap: 14px; margin-top: 10px;">
+          <div class="form-group-with-emoji">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+              <span>📝</span>
+              <strong style="font-size: 13px; color: var(--text2);">Название задачи</strong>
+            </div>
+            <input id="choreTmplTitle" type="text" placeholder="Например: Помыть посуду" />
+          </div>
+          <div class="form-group-with-emoji">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+              <span>✨</span>
+              <strong style="font-size: 13px; color: var(--text2);">Баллы (награда)</strong>
+            </div>
+            <input id="choreTmplPoints" type="number" placeholder="Например: 3" min="1" value="1" />
+          </div>
+          <div class="form-group-with-emoji">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+              <span>🔁</span>
+              <strong style="font-size: 13px; color: var(--text2);">Периодичность</strong>
+            </div>
+            <select id="choreTmplPeriodicity" onchange="toggleChorePeriodDays(this.value)">
+              <option value="once">Единоразово</option>
+              <option value="every_x_days">Каждые X дней</option>
+            </select>
+          </div>
+          <div class="form-group-with-emoji hidden" id="chorePeriodDaysGroup">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+              <span>📅</span>
+              <strong style="font-size: 13px; color: var(--text2);">Интервал в днях</strong>
+            </div>
+            <input id="choreTmplPeriodDays" type="number" placeholder="Например: 30" min="1" value="30" />
+          </div>
+          <div class="form-group-with-emoji">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+              <span>🏁</span>
+              <strong style="font-size: 13px; color: var(--text2);">Дата старта (необязательно)</strong>
+            </div>
+            <input id="choreTmplStartDate" type="date" />
+          </div>
         </div>
-        <div class="form-group" style="margin-top: 8px">
-          <label>Дата старта (необязательно)</label>
-          <input id="choreTmplStartDate" type="date" />
-        </div>
-        <div class="modal-actions">
+        <div class="modal-actions" style="margin-top: 20px;">
           <button class="btn btn-ghost" id="cancelChoreBtn">Отмена</button>
           <button class="btn btn-primary" id="saveChoreTmplBtn">Создать ✓</button>
         </div>
@@ -418,11 +443,11 @@
   <div class="modal-overlay hidden" id="addChoreChoiceModal">
     <div class="modal-card">
       <div class="modal-header-row" style="margin-bottom: 16px;">
-        <h3>Добавить домашнее дело</h3>
+        <h3>Добавить домашнюю задачу</h3>
         <button class="btn-close-modal" onclick="closeModal('addChoreChoiceModal')">✕</button>
       </div>
       <div style="display: flex; flex-direction: column; gap: 10px; width: 100%;">
-        <button class="btn btn-primary" onclick="openNewTemplateCreator();" style="width: 100%; padding: 12px; font-weight: 600;">Создать новое дело</button>
+        <button class="btn btn-primary" onclick="openNewTemplateCreator();" style="width: 100%; padding: 12px; font-weight: 600;">Создать новую задачу</button>
         <button class="btn btn-secondary" onclick="openAddFromDatabaseModal();" style="width: 100%; padding: 12px; font-weight: 600;">Добавить из базы (шаблоны)</button>
       </div>
     </div>

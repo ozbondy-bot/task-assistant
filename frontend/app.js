@@ -129,21 +129,31 @@ async function loadHouseTab() {
   }
 }
 
+function isPastDate(dateStr) {
+  if (!dateStr) return false;
+  const todayStr = new Date().toISOString().split('T')[0];
+  return dateStr < todayStr;
+}
+
 function renderHouseTasks(tasks) {
   const list = document.getElementById('houseTasksList');
   if (!tasks.length) {
-    list.innerHTML = `<div class="empty-state"><div class="empty-icon">✨</div><div class="empty-title">Все дела на сегодня разобраны!</div><div class="empty-sub">Возвращайся завтра</div></div>`;
+    list.innerHTML = `<div class="empty-state"><div class="empty-icon">✨</div><div class="empty-title">Все задачи на сегодня разобраны!</div><div class="empty-sub">Возвращайся завтра</div></div>`;
     return;
   }
-  list.innerHTML = tasks.map(t => `
-    <div class="task-card house-task flex-between" onclick="openChoreDetails(${JSON.stringify(t).replace(/"/g, '&quot;')})" style="padding: 10px 12px; cursor: pointer;">
-      <div class="task-left flex-row" style="align-items: center; gap: 8px;">
-        <span style="font-size: 16px;">🏠</span>
-        <span class="task-title" style="font-weight: 500; font-size: 14px;">${escHtml(stripEmoji(t.title))}</span>
+  list.innerHTML = tasks.map(t => {
+    const isPast = isPastDate(t.date);
+    const pastIcon = isPast ? '<span style="color: var(--danger); margin-right: 4px; font-weight: bold;" title="Просрочено">⚠️</span>' : '';
+    return `
+      <div class="task-card house-task flex-between" onclick="openChoreDetails(${JSON.stringify(t).replace(/"/g, '&quot;')})" style="padding: 10px 12px; cursor: pointer;">
+        <div class="task-left flex-row" style="align-items: center; gap: 8px;">
+          <span style="font-size: 16px;">🏠</span>
+          <span class="task-title" style="font-weight: 500; font-size: 14px;">${pastIcon}${escHtml(stripEmoji(t.title))}</span>
+        </div>
+        <span class="task-badge badge-points" style="font-size: 12px; margin-left: auto;">${t.points} ✨</span>
       </div>
-      <span class="task-badge badge-points" style="font-size: 12px; margin-left: auto;">${t.points} ✨</span>
-    </div>
-  `).join('');
+    `;
+  }).join('');
 }
 
 async function claimTask(instanceId) {
@@ -193,12 +203,14 @@ function renderPersonalTasks(personal, household) {
   }
 
   list.innerHTML = all.map(t => {
+    const isPast = isPastDate(t.date);
+    const pastIcon = isPast ? '<span style="color: var(--danger); margin-right: 4px; font-weight: bold;" title="Просрочено">⚠️</span>' : '';
     if (t.isHousehold) {
       return `
         <div class="task-card house-task flex-between" onclick="openMyTaskDetails(${JSON.stringify(t).replace(/"/g, '&quot;')}, 'household')" style="padding: 10px 12px; cursor: pointer; margin-bottom: 8px;">
           <div class="task-left flex-row" style="align-items: center; gap: 8px;">
             <span style="font-size: 16px;">🏠</span>
-            <span class="task-title" style="font-weight: 500; font-size: 14px;">${escHtml(stripEmoji(t.text))}</span>
+            <span class="task-title" style="font-weight: 500; font-size: 14px;">${pastIcon}${escHtml(stripEmoji(t.text))}</span>
           </div>
           <span class="task-badge badge-points" style="font-size: 12px; margin-left: auto;">${t.points} ✨</span>
         </div>`;
@@ -207,7 +219,7 @@ function renderPersonalTasks(personal, household) {
         <div class="task-card personal-task flex-between" onclick="openMyTaskDetails(${JSON.stringify(t).replace(/"/g, '&quot;')}, 'personal')" style="padding: 10px 12px; cursor: pointer; margin-bottom: 8px;">
           <div class="task-left flex-row" style="align-items: center; gap: 8px;">
             <span style="font-size: 16px;">👤</span>
-            <span class="task-title" style="font-weight: 500; font-size: 14px;">${escHtml(stripEmoji(t.text))}</span>
+            <span class="task-title" style="font-weight: 500; font-size: 14px;">${pastIcon}${escHtml(stripEmoji(t.text))}</span>
           </div>
           ${t.recurrence ? `<span class="task-badge badge-rec" style="font-size: 11px; margin-left: auto;">🔁</span>` : ''}
         </div>`;
@@ -327,14 +339,16 @@ function setupModals() {
     const title = document.getElementById('choreTmplTitle').value.trim();
     const points = parseInt(document.getElementById('choreTmplPoints').value) || 1;
     const periodicity = document.getElementById('choreTmplPeriodicity').value;
+    const periodDaysInput = document.getElementById('choreTmplPeriodDays');
+    const periodDays = periodicity === 'every_x_days' ? (parseInt(periodDaysInput.value) || 30) : null;
     const startDate = document.getElementById('choreTmplStartDate').value;
     if (!title) return;
     try {
       if (currentEditingTemplateId) {
-        await api('PUT', `/api/chores/templates/${currentEditingTemplateId}`, { title, points, periodicity, start_date: startDate || null });
+        await api('PUT', `/api/chores/templates/${currentEditingTemplateId}`, { title, points, periodicity, period_days: periodDays, start_date: startDate || null });
         showToast('✅ Шаблон сохранен!');
       } else {
-        const res = await api('POST', '/api/chores/templates', { title, points, periodicity, start_date: startDate || null });
+        const res = await api('POST', '/api/chores/templates', { title, points, periodicity, period_days: periodDays, start_date: startDate || null });
         if (res && res.pending) {
           showToast(res.message || '⏳ Запрос отправлен на согласование партнёру!');
         } else {
@@ -942,11 +956,13 @@ function openChoreDetails(t) {
   
   const actions = document.getElementById('choreDetailsActions');
   actions.innerHTML = `
-    <button class="btn-done btn-xs" onclick="claimTask(${t.id}); closeModal('choreDetailsModal');">Взять</button>
-    <button class="btn-unclaim btn-xs" onclick="nudgeTask(${t.id}); closeModal('choreDetailsModal');">Намек</button>
-    <button class="btn-skip btn-xs" onclick="skipFreeChore(${t.id}); closeModal('choreDetailsModal');">Копия</button>
-    <button class="btn-shift btn-xs" onclick="openShiftModal(${t.id}, 'chore'); closeModal('choreDetailsModal');">Сдвиг</button>
-    <button class="btn-secondary btn-xs" onclick="goToChoreTemplateSettings(${t.template_id}); closeModal('choreDetailsModal');" style="display:flex;align-items:center;justify-content:center;font-size:16px;">⚙️</button>
+    <div style="display: flex; gap: 6px; width: 100%; align-items: center;">
+      <button class="btn btn-primary" onclick="claimTask(${t.id}); closeModal('choreDetailsModal');" style="flex: 1; padding: 10px 2px; font-size: 13px; font-weight: 600; background: var(--success); border-color: var(--success);">Взять</button>
+      <button class="btn btn-secondary" onclick="nudgeTask(${t.id}); closeModal('choreDetailsModal');" style="flex: 1; padding: 10px 2px; font-size: 13px; font-weight: 600;">Намек</button>
+      <button class="btn btn-secondary" onclick="skipFreeChore(${t.id}); closeModal('choreDetailsModal');" style="flex: 1; padding: 10px 2px; font-size: 13px; font-weight: 600;">Копия</button>
+      <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'chore'); closeModal('choreDetailsModal');" style="flex: 1; padding: 10px 2px; font-size: 13px; font-weight: 600;">Сдвиг</button>
+      <button class="btn btn-secondary" onclick="goToChoreTemplateSettings(${t.template_id}); closeModal('choreDetailsModal');" style="width: 42px; height: 42px; padding: 0; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0;">⚙️</button>
+    </div>
   `;
   document.getElementById('choreDetailsModal').classList.remove('hidden');
 }
@@ -1089,15 +1105,25 @@ async function openAddFromDatabaseModal() {
       return;
     }
     
-    list.innerHTML = inactive.map(t => `
-      <div class="archive-item" style="cursor:pointer;" onclick="spawnChoreFromTemplate(${t.id})">
-        <div class="archive-item-info">
-          <span class="archive-item-title">${escHtml(stripEmoji(t.title))}</span>
-          <span class="archive-item-meta">${periodLabel(t.periodicity, t.period_days)}</span>
+    // Sort from nearest next execution to furthest
+    inactive.sort((a, b) => {
+      const da = a.next_execution ? new Date(a.next_execution) : new Date(2100, 11, 31);
+      const db = b.next_execution ? new Date(b.next_execution) : new Date(2100, 11, 31);
+      return da - db;
+    });
+    
+    list.innerHTML = inactive.map(t => {
+      const nextStr = t.next_execution ? new Date(t.next_execution).toLocaleDateString('ru-RU') : 'Нет даты';
+      return `
+        <div class="archive-item" style="display: flex; justify-content: space-between; align-items: center; padding: 10px; border-bottom: 1px solid var(--border);">
+          <div class="archive-item-info" style="text-align: left; flex: 1; padding-right: 8px;">
+            <span class="archive-item-title" style="font-weight: 500; font-size: 14px; display: block; margin-bottom: 2px;">${escHtml(stripEmoji(t.title))}</span>
+            <span class="archive-item-meta" style="font-size: 11px; color: var(--text3);">📅 Ближайший: ${nextStr}</span>
+          </div>
+          <button class="btn btn-primary btn-xs" onclick="spawnChoreFromTemplate(${t.id})" style="width: 80px; padding: 6px 0; text-align: center; font-size: 12px; flex-shrink: 0;">Добавить</button>
         </div>
-        <button class="btn btn-primary btn-xs" style="font-size:11px;padding:3px 8px;">Активировать</button>
-      </div>
-    `).join('');
+      `;
+    }).join('');
   } catch (e) {
     list.innerHTML = `<p style="color:var(--danger);text-align:center;padding:24px">${e.message}</p>`;
   }
@@ -1106,7 +1132,7 @@ async function openAddFromDatabaseModal() {
 async function spawnChoreFromTemplate(tmplId) {
   try {
     await api('POST', `/api/house/tasks/spawn`, { template_id: tmplId });
-    showToast('✅ Дело активировано на сегодня!');
+    showToast('✅ Задача активирована на сегодня!');
     closeModal('addFromDbModal');
     loadHouseTab();
   } catch (e) {
@@ -1168,28 +1194,53 @@ function openTemplateDetailsModal(t) {
   document.getElementById('templateDetailsModal').classList.remove('hidden');
 }
 
+function toggleChorePeriodDays(val) {
+  const group = document.getElementById('chorePeriodDaysGroup');
+  if (val === 'every_x_days') {
+    group.classList.remove('hidden');
+  } else {
+    group.classList.add('hidden');
+  }
+}
+
 function startEditTemplate(t) {
   currentEditingTemplateId = t.id;
   document.getElementById('addChoreModal').classList.remove('hidden');
   document.getElementById('choreTmplTitle').value = stripEmoji(t.title);
   document.getElementById('choreTmplPoints').value = t.points;
-  document.getElementById('choreTmplPeriodicity').value = t.periodicity;
+  
+  let p = t.periodicity;
+  let d = t.period_days;
+  if (p === 'daily') { p = 'every_x_days'; d = 1; }
+  else if (p === 'weekly') { p = 'every_x_days'; d = 7; }
+  else if (p === 'monthly') { p = 'every_x_days'; d = 30; }
+  else if (p === 'once') { p = 'once'; d = ''; }
+  else if (p === 'every_x_days') { d = t.period_days || 30; }
+  else { p = 'every_x_days'; d = 30; }
+  
+  document.getElementById('choreTmplPeriodicity').value = p;
+  document.getElementById('choreTmplPeriodDays').value = d;
+  toggleChorePeriodDays(p);
+  
   if (t.start_date) {
     document.getElementById('choreTmplStartDate').value = t.start_date;
   } else {
     document.getElementById('choreTmplStartDate').value = '';
   }
-  document.querySelector('#addChoreModal h3').textContent = 'Изменить шаблон дела';
+  document.querySelector('#addChoreModal h3').textContent = 'Изменить шаблон задачи';
   document.getElementById('saveChoreTmplBtn').textContent = 'Сохранить ✓';
 }
 
 function openNewTemplateCreator() {
   closeModal('addChoreChoiceModal');
   currentEditingTemplateId = null;
-  document.querySelector('#addChoreModal h3').textContent = 'Новый шаблон дела';
+  document.querySelector('#addChoreModal h3').textContent = 'Новый шаблон задачи';
   document.getElementById('saveChoreTmplBtn').textContent = 'Создать ✓';
   document.getElementById('choreTmplTitle').value = '';
   document.getElementById('choreTmplPoints').value = '1';
+  document.getElementById('choreTmplPeriodicity').value = 'once';
+  document.getElementById('choreTmplPeriodDays').value = '30';
+  toggleChorePeriodDays('once');
   document.getElementById('choreTmplStartDate').value = '';
   document.getElementById('addChoreModal').classList.remove('hidden');
 }
@@ -1225,3 +1276,4 @@ window.startEditTemplate = startEditTemplate;
 window.openNewTemplateCreator = openNewTemplateCreator;
 window.deleteTemplate = deleteTemplate;
 window.goToChoreTemplateSettings = goToChoreTemplateSettings;
+window.toggleChorePeriodDays = toggleChorePeriodDays;
