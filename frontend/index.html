@@ -14,15 +14,11 @@
   <div id="app">
     <!-- Header -->
     <header class="app-header">
-      <div class="header-content">
-        <div class="user-info">
-          <div class="user-avatar" id="userAvatar">?</div>
-          <div class="user-details">
-            <span class="user-name" id="userName">Загрузка...</span>
-            <span class="user-points" id="userPoints">0 ✨</span>
-          </div>
+      <div class="header-content" style="display: flex; flex-direction: column; align-items: center; text-align: center; width: 100%;">
+        <div class="house-name" id="houseName" style="font-size: 16px; font-weight: 700; color: var(--text1); margin-bottom: 4px;">🏠 Уютное гнездышко</div>
+        <div id="membersListHeader" style="display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; font-size: 13px; color: var(--text2);">
+          <!-- Participants and points will be loaded here dynamically in 1 row -->
         </div>
-        <div class="house-name" id="houseName">🏠 Уютное гнездышко</div>
       </div>
     </header>
 
@@ -59,22 +55,18 @@
 
       <!-- HOUSEHOLD TASKS TAB -->
       <section class="tab-pane active" id="pane-house">
-        <div class="section-header flex-between" style="align-items: center; width: 100%;">
-          <div>
-            <h2>Домашние дела</h2>
-            <p class="section-sub">Свободные задачи — возьми в работу!</p>
+        <div class="section-header">
+          <div class="flex-row" style="align-items: center; gap: 8px;">
+            <h2 style="margin: 0;">Домашние дела</h2>
+            <button class="btn btn-primary btn-xs" id="addChoreBtn" style="padding: 4px 10px; font-size: 12px; height: fit-content; line-height: 1;">Добавить</button>
           </div>
-          <button class="btn btn-primary btn-xs" id="addChoreBtn">Добавить</button>
+          <p class="section-sub" style="margin-top: 4px;">Свободные задачи — возьми в работу!</p>
         </div>
         <div id="houseTasksList" class="task-list">
           <div class="loading-spinner">
             <div class="spinner"></div>
             <p>Загрузка...</p>
           </div>
-        </div>
-        <div class="members-section">
-          <h3>Участники</h3>
-          <div id="membersList" class="members-list"></div>
         </div>
       </section>
 
@@ -356,7 +348,6 @@
       <div class="chore-details-body" style="margin-bottom: 20px; font-size: 14px; color: var(--text2); display: flex; flex-direction: column; gap: 10px;">
         <div>📅 <strong>Цикл повторения:</strong> <span id="choreDetailsPeriod">Каждые 30 дней</span></div>
         <div>✨ <strong>Награда:</strong> <span id="choreDetailsPoints">0 очков</span></div>
-        <div>⚙️ <strong>Управление:</strong> <a href="#" onclick="event.preventDefault(); closeModal('choreDetailsModal'); switchTab('settings');" style="color: var(--accent); text-decoration: none;">Перейти к настройкам ⚙️</a></div>
       </div>
       <div class="task-action-row" id="choreDetailsActions" onclick="event.stopPropagation();">
         <!-- Action buttons will be dynamically injected here -->

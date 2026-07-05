@@ -35,15 +35,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const tgUser = tg.initDataUnsafe?.user;
     if (tgUser) {
       currentUser = tgUser;
-      document.getElementById('userAvatar').textContent = (tgUser.first_name || '?')[0].toUpperCase();
-      document.getElementById('userName').textContent = tgUser.first_name || 'Пользователь';
+      const av = document.getElementById('userAvatar');
+      if (av) av.textContent = (tgUser.first_name || '?')[0].toUpperCase();
+      const name = document.getElementById('userName');
+      if (name) name.textContent = tgUser.first_name || 'Пользователь';
     }
   } else {
     // Dev mode — use mock initData
     console.warn('[DEV] Telegram WebApp not available. Using mock data.');
     initData = 'dev_mock';
-    document.getElementById('userName').textContent = 'Шурик';
-    document.getElementById('userAvatar').textContent = 'Ш';
+    const name = document.getElementById('userName');
+    if (name) name.textContent = 'Шурик';
+    const av = document.getElementById('userAvatar');
+    if (av) av.textContent = 'Ш';
   }
 
   setupTabs();
@@ -116,7 +120,8 @@ async function loadHouseTab() {
 
     const me = members.find(m => m.is_me);
     if (me) {
-      document.getElementById('userPoints').textContent = `${me.points} ✨`;
+      const up = document.getElementById('userPoints');
+      if (up) up.textContent = `${me.points} ✨`;
       currentPoints = me.points;
     }
   } catch (e) {
@@ -152,19 +157,14 @@ async function claimTask(instanceId) {
 }
 
 function renderMembers(members) {
-  const list = document.getElementById('membersList');
-  const medals = ['🥇', '🥈', '🥉'];
+  const container = document.getElementById('membersListHeader');
+  if (!container) return;
   const sorted = [...members].sort((a, b) => b.points - a.points);
-  list.innerHTML = sorted.map((m, i) => `
-    <div class="member-card">
-      <div class="member-avatar">${(m.display_name || '?')[0].toUpperCase()}</div>
-      <div class="member-name">
-        ${escHtml(m.display_name || 'Участник')}
-        ${m.is_me ? '<span class="you-badge">это ты</span>' : ''}
-      </div>
-      <div class="member-pts">${medals[i] || ''} ${m.points} ✨</div>
-    </div>
-  `).join('');
+  
+  container.innerHTML = sorted.map(m => {
+    const isMeStyle = m.is_me ? 'font-weight: 700; color: var(--accent);' : 'color: var(--text2);';
+    return `<span style="${isMeStyle}">${escHtml(m.display_name || 'Участник')}: ${m.points} ✨</span>`;
+  }).join('<span style="color:var(--text3); margin: 0 4px;">•</span>');
 }
 
 // ── Personal Tab ──────────────────────────────────────────────────────────────
@@ -575,7 +575,7 @@ function getTaskIcon(text) {
   return '🟢';
 }
 
-function periodLabel(p) {
+function periodLabel(p, days) {
   const m = { 
     daily: 'Ежедневно', 
     weekly: 'Еженедельно', 
@@ -585,9 +585,9 @@ function periodLabel(p) {
     quarterly: 'Раз в квартал'
   };
   if (m[p]) return m[p];
-  if (p && p.startsWith('every_') && p.endsWith('_days')) {
-    const days = p.split('_')[1];
-    return `Каждые ${days} дней`;
+  if (p === 'every_x_days' || (p && p.startsWith('every_') && p.endsWith('_days'))) {
+    const d = days || (p.split('_')[1] !== 'x' ? p.split('_')[1] : 30);
+    return `Каждые ${d} дней`;
   }
   return p || 'Каждые 30 дней';
 }
@@ -937,8 +937,8 @@ window.skipChore = skipChore;
 /* ── Chore Details & Tab Switching ── */
 function openChoreDetails(t) {
   document.getElementById('choreDetailsTitle').textContent = stripEmoji(t.title);
-  document.getElementById('choreDetailsPeriod').textContent = periodLabel(t.periodicity);
-  document.getElementById('choreDetailsPoints').textContent = `${t.points} очков`;
+  document.getElementById('choreDetailsPeriod').textContent = periodLabel(t.periodicity, t.period_days);
+  document.getElementById('choreDetailsPoints').textContent = `${t.points} ✨`;
   
   const actions = document.getElementById('choreDetailsActions');
   actions.innerHTML = `
@@ -946,6 +946,7 @@ function openChoreDetails(t) {
     <button class="btn-unclaim btn-xs" onclick="nudgeTask(${t.id}); closeModal('choreDetailsModal');">Намек</button>
     <button class="btn-skip btn-xs" onclick="skipFreeChore(${t.id}); closeModal('choreDetailsModal');">Копия</button>
     <button class="btn-shift btn-xs" onclick="openShiftModal(${t.id}, 'chore'); closeModal('choreDetailsModal');">Сдвиг</button>
+    <button class="btn-secondary btn-xs" onclick="goToChoreTemplateSettings(${t.template_id}); closeModal('choreDetailsModal');" style="display:flex;align-items:center;justify-content:center;font-size:16px;">⚙️</button>
   `;
   document.getElementById('choreDetailsModal').classList.remove('hidden');
 }
@@ -1092,7 +1093,7 @@ async function openAddFromDatabaseModal() {
       <div class="archive-item" style="cursor:pointer;" onclick="spawnChoreFromTemplate(${t.id})">
         <div class="archive-item-info">
           <span class="archive-item-title">${escHtml(stripEmoji(t.title))}</span>
-          <span class="archive-item-meta">${periodLabel(t.periodicity)}</span>
+          <span class="archive-item-meta">${periodLabel(t.periodicity, t.period_days)}</span>
         </div>
         <button class="btn btn-primary btn-xs" style="font-size:11px;padding:3px 8px;">Активировать</button>
       </div>
@@ -1150,7 +1151,7 @@ function openTemplateDetailsModal(t) {
   const next = t.next_execution ? new Date(t.next_execution).toLocaleDateString('ru-RU') : 'Нет данных';
   
   document.getElementById('templateDetailsBody').innerHTML = `
-    <div>📅 <strong>Цикл повторения:</strong> <span>${periodLabel(t.periodicity)}</span></div>
+    <div>📅 <strong>Цикл повторения:</strong> <span>${periodLabel(t.periodicity, t.period_days)}</span></div>
     <div>📅 <strong>Последнее выполнение:</strong> <span>${last}</span></div>
     <div>🗓 <strong>Следующий повтор:</strong> <span>${next}</span></div>
     <div>✨ <strong>Награда:</strong> <span>${t.points} ✨</span></div>
@@ -1197,6 +1198,19 @@ function deleteTemplate(id) {
   deleteChoreTemplate(id);
 }
 
+async function goToChoreTemplateSettings(templateId) {
+  switchTab('settings');
+  try {
+    const templates = await api('GET', '/api/chores/templates');
+    const t = templates.find(item => item.id === templateId);
+    if (t) {
+      openTemplateDetailsModal(t);
+    }
+  } catch (e) {
+    showToast(`⚠️ ${e.message}`);
+  }
+}
+
 window.openMyTaskDetails = openMyTaskDetails;
 window.restoreChoreFromArchive = restoreChoreFromArchive;
 window.openAddFromDatabaseModal = openAddFromDatabaseModal;
@@ -1210,3 +1224,4 @@ window.stepTasksArchive = stepTasksArchive;
 window.startEditTemplate = startEditTemplate;
 window.openNewTemplateCreator = openNewTemplateCreator;
 window.deleteTemplate = deleteTemplate;
+window.goToChoreTemplateSettings = goToChoreTemplateSettings;

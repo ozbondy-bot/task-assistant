@@ -239,6 +239,7 @@ async def get_house_tasks(user: User = Depends(get_current_user)):
                 "title": tmpl.title,
                 "points": tmpl.points,
                 "periodicity": tmpl.periodicity,
+                "period_days": tmpl.period_days,
                 "status": inst.status,
                 "last_completed": last_date.isoformat() if last_date else None,
                 "next_execution": next_date.isoformat() if next_date else None
@@ -534,6 +535,7 @@ async def get_chores_templates(user: User = Depends(get_current_user)):
                 "title": t.title,
                 "points": t.points,
                 "periodicity": t.periodicity,
+                "period_days": t.period_days,
                 "start_date": str(t.start_date) if t.start_date else None,
                 "last_completed": last_done.isoformat() if last_done else None,
                 "next_execution": nd.isoformat() if nd else None

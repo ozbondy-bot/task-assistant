@@ -393,6 +393,9 @@ async def generate_daily_chores_if_needed(session, house_id: int):
     if not house:
         return
 
+    if house.last_summary_date == today:
+        return
+
     # Rollover old uncompleted tasks is disabled (we keep their original date)
     # to naturally show them with their original date and yellow circles.
 
@@ -524,8 +527,12 @@ async def cmd_start(message: types.Message, db_user: User = None):
     except Exception as e:
         logger.error(f"Failed to set chat menu button: {e}")
 
-    # Remove reply keyboard
-    await message.answer("🤖 Добро пожаловать!", reply_markup=types.ReplyKeyboardRemove())
+    # Remove reply keyboard quietly
+    try:
+        tmp = await message.answer("🧹", reply_markup=types.ReplyKeyboardRemove())
+        await tmp.delete()
+    except Exception:
+        pass
     
     text = (
         "👋 Привет!\n\n"
