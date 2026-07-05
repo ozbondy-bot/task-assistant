@@ -76,22 +76,69 @@ async function api(method, path, body = null) {
 }
 
 async function loadWeeklyGoal() {
-  const percentEl = document.getElementById('weeklyGoalPercent');
-  const progressEl = document.getElementById('weeklyGoalProgress');
-  const textEl = document.getElementById('weeklyGoalText');
-  if (!percentEl || !progressEl || !textEl) return;
-  
+  const headerEl = document.getElementById('membersListHeader');
+  if (!headerEl) return;
   try {
-    const dateStr = getHouseActiveDateStr();
-    const data = await api('GET', `/api/house/weekly_goal?date=${dateStr}`);
-    percentEl.textContent = `${data.percent}%`;
-    progressEl.style.width = `${data.percent}%`;
-    textEl.textContent = `выполнено ${data.completed_tasks} из ${data.total_tasks} задач`;
+    const members = await api('GET', '/api/house/members');
+    headerEl.innerHTML = members.map(m => {
+      return `<span style="font-weight: 600; font-size: 13px;">${escHtml(m.display_name)}: ${m.weekly_earned}/${m.weekly_target} ⭐</span>`;
+    }).join('<span style="color: var(--text3); margin: 0 10px;">|</span>');
   } catch (e) {
     console.error('Failed to load weekly goal:', e);
   }
 }
 window.loadWeeklyGoal = loadWeeklyGoal;
+
+async function openWeeklyGoalExplanation() {
+  const body = document.getElementById('weeklyGoalExplanationBody');
+  if (!body) return;
+  body.innerHTML = `<div class="loading-spinner"><div class="spinner"></div><p>Загрузка...</p></div>`;
+  document.getElementById('weeklyGoalExplanationModal').classList.remove('hidden');
+  
+  try {
+    const data = await api('GET', '/api/house/weekly_goal_explanation');
+    
+    let templatesHtml = '';
+    if (!data.templates.length) {
+      templatesHtml = `<p style="color: var(--text3); font-style: italic; text-align: center; padding: 12px 0;">Нет активных задач в этом доме</p>`;
+    } else {
+      templatesHtml = data.templates.map(t => {
+        return `
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px dashed var(--border);">
+            <div>
+              <div style="font-weight: 600; font-size: 13px; color: var(--text);">${escHtml(t.title)}</div>
+              <div style="font-size: 11px; color: var(--text2);">${recLabel(t.periodicity)} • ${t.points} ✨ за раз</div>
+            </div>
+            <div style="font-weight: 600; text-align: right; font-size: 12px;">
+              ${t.occurrences} раз${t.occurrences > 1 && t.occurrences < 5 ? 'а' : ''} / нед<br/>
+              <span style="color: var(--accent2);">+${t.total} ✨</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+    
+    body.innerHTML = `
+      <p style="margin: 0; line-height: 1.4; color: var(--text);">
+        Цель каждого участника на неделю рассчитывается как сумма очков всех запланированных задач дома, деленная на число участников.
+      </p>
+      <div style="background: var(--surface3); padding: 12px; border-radius: 12px; margin: 4px 0; display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--border);">
+        <div style="display: flex; justify-content: space-between;"><span>Общая сумма очков дома:</span><strong>${data.total_points} ✨</strong></div>
+        <div style="display: flex; justify-content: space-between;"><span>Количество участников:</span><strong>${data.num_members}</strong></div>
+        <div style="font-size: 14px; margin-top: 6px; border-top: 1px solid var(--border); padding-top: 6px; display: flex; justify-content: space-between; color: var(--accent2);">
+          <span>Цель на каждого:</span><strong>${data.target_points} ⭐</strong>
+        </div>
+      </div>
+      <h4 style="margin: 8px 0 2px 0; color: var(--text); font-size: 14px;">Список планируемых задач:</h4>
+      <div style="display: flex; flex-direction: column; gap: 4px; max-height: 200px; overflow-y: auto; padding-right: 4px;">
+        ${templatesHtml}
+      </div>
+    `;
+  } catch (e) {
+    body.innerHTML = `<p style="color: var(--danger); text-align: center; padding: 12px 0;">Ошибка: ${e.message}</p>`;
+  }
+}
+window.openWeeklyGoalExplanation = openWeeklyGoalExplanation;
 
 // ── Toast ────────────────────────────────────────────────────────────────────
 let toastTimer;
@@ -167,6 +214,16 @@ function renderHouseTasks(tasks) {
     list.innerHTML = `<div class="empty-state"><div class="empty-icon">✨</div><div class="empty-title">Задач нет!</div><div class="empty-sub">Нет активных или выполненных задач на выбранную дату</div></div>`;
     return;
   }
+
+  // Sort: completed tasks at the end
+  tasks.sort((a, b) => {
+    const aDone = a.status === 'done' || a.status === 'skipped';
+    const bDone = b.status === 'done' || b.status === 'skipped';
+    if (aDone && !bDone) return 1;
+    if (!aDone && bDone) return -1;
+    return 0;
+  });
+
   list.innerHTML = tasks.map(t => {
     const isPast = isPastDate(t.date);
     const pastIcon = isPast ? '<span style="color: var(--danger); margin-right: 4px; font-weight: bold;" title="Просрочено">⚠️</span>' : '';
@@ -201,7 +258,7 @@ async function claimTask(instanceId) {
 function renderMembers(members) {
   const container = document.getElementById('membersListHeader');
   if (!container) return;
-  const sorted = [...members].sort((a, b) => b.points - a.points);
+  const sorted = [...members].sort((a, b) => b.weekly_earned - a.weekly_earned);
   
   const m1 = sorted[0];
   const m2 = sorted[1];
@@ -209,11 +266,11 @@ function renderMembers(members) {
   let html = '';
   if (m1) {
     const isMeStyle = m1.is_me ? 'font-weight: 700; color: var(--accent);' : 'color: var(--text1);';
-    html += `<span style="${isMeStyle} text-align: left; flex: 1;">${escHtml(m1.display_name || 'Участник')}: ${m1.points} ✨</span>`;
+    html += `<span style="${isMeStyle} text-align: left; flex: 1;">${escHtml(m1.display_name || 'Участник')}: ${m1.weekly_earned}/${m1.weekly_target} ⭐</span>`;
   }
   if (m2) {
     const isMeStyle = m2.is_me ? 'font-weight: 700; color: var(--accent);' : 'color: var(--text1);';
-    html += `<span style="${isMeStyle} text-align: right; flex: 1;">${escHtml(m2.display_name || 'Участник')}: ${m2.points} ✨</span>`;
+    html += `<span style="${isMeStyle} text-align: right; flex: 1;">${escHtml(m2.display_name || 'Участник')}: ${m2.weekly_earned}/${m2.weekly_target} ⭐</span>`;
   } else {
     html += `<span style="flex: 1;"></span>`;
   }
@@ -315,6 +372,15 @@ function renderPersonalTasks(personal, household) {
     list.innerHTML = `<div class="empty-state"><div class="empty-icon">🎉</div><div class="empty-title">Всё сделано!</div><div class="empty-sub">На сегодня задач нет</div></div>`;
     return;
   }
+
+  // Sort: completed tasks at the end
+  all.sort((a, b) => {
+    const aDone = a.is_completed === true;
+    const bDone = b.is_completed === true;
+    if (aDone && !bDone) return 1;
+    if (!aDone && bDone) return -1;
+    return 0;
+  });
 
   list.innerHTML = all.map(t => {
     const isPast = isPastDate(t.date);
@@ -564,13 +630,25 @@ async function loadShoppingTab() {
 
 function renderShoppingList(items) {
   const list = document.getElementById('shoppingList');
-  const total = items.reduce((s, i) => s + i.price, 0);
-  document.getElementById('shoppingTotal').textContent = total > 0 ? `Сумма: ${total} ₽` : 'Список покупок';
+  const total = items.reduce((s, i) => s + (i.is_bought ? 0 : i.price), 0);
+  const totalEl = document.getElementById('shoppingTotal');
+  if (totalEl) {
+    totalEl.textContent = `Сумма: ${total} ₽`;
+  }
 
   if (!items.length) {
     list.innerHTML = `<div class="empty-state"><div class="empty-icon">🛒</div><div class="empty-title">Список пуст</div><div class="empty-sub">Нажми «+» чтобы добавить товар</div></div>`;
     return;
   }
+
+  // Sort: bought items at the end
+  items.sort((a, b) => {
+    const aDone = a.is_bought === true;
+    const bDone = b.is_bought === true;
+    if (aDone && !bDone) return 1;
+    if (!aDone && bDone) return -1;
+    return 0;
+  });
 
   list.innerHTML = items.map(item => {
     const isCompleted = item.is_bought === true;
@@ -1108,14 +1186,14 @@ function openChoreDetails(t) {
   actions.innerHTML = `
     <div style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
       <div style="display: flex; gap: 6px; width: 100%;">
-        <button class="btn btn-primary" onclick="claimTask(${t.id}); closeModal('choreDetailsModal');" style="flex: 1; height: 38px; font-size: 12px; font-weight: 600; background: var(--success); border-color: var(--success);">Взять</button>
-        <button class="btn btn-secondary" onclick="nudgeTask(${t.id}); closeModal('choreDetailsModal');" style="flex: 1; height: 38px; font-size: 12px; font-weight: 600;">Намек</button>
-        <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'chore'); closeModal('choreDetailsModal');" style="flex: 1; height: 38px; font-size: 12px; font-weight: 600;">Сдвиг</button>
-        <button class="btn btn-secondary" onclick="skipFreeChore(${t.id});" style="flex: 1; height: 38px; font-size: 12px; font-weight: 600;">Убрать</button>
+        <button class="btn btn-primary" onclick="claimTask(${t.id}); closeModal('choreDetailsModal');" style="flex: 1.5; height: 42px; font-size: 13px; font-weight: 600; background: var(--success); border-color: var(--success); color: #0d0d14; display: flex; align-items: center; justify-content: center; gap: 4px;">🤝 Взять</button>
+        <button class="btn btn-secondary" onclick="nudgeTask(${t.id}); closeModal('choreDetailsModal');" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 4px;">🔔 Напомнить</button>
+        <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'chore'); closeModal('choreDetailsModal');" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 4px;">📅 Сдвиг</button>
+        <button class="btn btn-secondary" onclick="skipFreeChore(${t.id});" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 4px;">🗑️ Убрать</button>
       </div>
       <div style="display: flex; gap: 6px; width: 100%;">
-        <button class="btn btn-secondary" onclick="editChoreTemplateDirectly(${JSON.stringify(t).replace(/"/g, '&quot;')}); closeModal('choreDetailsModal');" style="flex: 1; height: 38px; font-size: 12px; font-weight: 600;">Изменить шаблон</button>
-        <button class="btn btn-secondary" onclick="deleteChoreTemplate(${t.template_id}); closeModal('choreDetailsModal');" style="flex: 1; height: 38px; font-size: 12px; font-weight: 600; background: var(--danger); border-color: var(--danger); color: white;">Удалить шаблон</button>
+        <button class="btn btn-secondary" onclick="editChoreTemplateDirectly(${JSON.stringify(t).replace(/"/g, '&quot;')}); closeModal('choreDetailsModal');" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 4px;">✏️ Изменить шаблон</button>
+        <button class="btn btn-secondary" onclick="deleteChoreTemplate(${t.template_id}); closeModal('choreDetailsModal');" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; background: var(--danger); border-color: var(--danger); color: white; display: flex; align-items: center; justify-content: center; gap: 4px;">❌ Удалить шаблон</button>
       </div>
     </div>
   `;
@@ -1222,17 +1300,17 @@ function openMyTaskDetails(t, type) {
   if (type === 'household') {
     actions.innerHTML = `
       <div style="display: flex; gap: 6px; width: 100%;">
-        <button class="btn btn-primary" onclick="completeHouseTask(${t.id}, '${escAttr(title)}'); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 4px; font-size: 13px; font-weight: 600;">Выполнить</button>
-        <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'chore'); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 4px; font-size: 13px; font-weight: 600;">Сдвиг</button>
-        <button class="btn btn-secondary" onclick="unclaimChore(${t.id});" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 4px; font-size: 13px; font-weight: 600;">Вернуть</button>
+        <button class="btn btn-primary" onclick="completeHouseTask(${t.id}, '${escAttr(title)}'); closeModal('myTaskDetailsModal');" style="flex: 1.5; height: 42px; font-size: 13px; font-weight: 600; background: var(--success); border-color: var(--success); color: #0d0d14; display: flex; align-items: center; justify-content: center; gap: 4px;">✅ Выполнить</button>
+        <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'chore'); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 4px;">📅 Сдвиг</button>
+        <button class="btn btn-secondary" onclick="unclaimChore(${t.id});" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 4px;">↩ Вернуть</button>
       </div>
     `;
   } else {
     actions.innerHTML = `
       <div style="display: flex; gap: 6px; width: 100%;">
-        <button class="btn btn-primary" onclick="completePersonalTask(${t.id}); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 4px; font-size: 13px; font-weight: 600;">Выполнить</button>
-        <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'personal'); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 4px; font-size: 13px; font-weight: 600;">Сдвиг</button>
-        <button class="btn btn-secondary" onclick="deletePersonalTask(${t.id});" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 4px; font-size: 13px; font-weight: 600; background: var(--danger); border-color: var(--danger);">Удалить</button>
+        <button class="btn btn-primary" onclick="completePersonalTask(${t.id}); closeModal('myTaskDetailsModal');" style="flex: 1.5; height: 42px; font-size: 13px; font-weight: 600; background: var(--success); border-color: var(--success); color: #0d0d14; display: flex; align-items: center; justify-content: center; gap: 4px;">✅ Выполнить</button>
+        <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'personal'); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 4px;">📅 Сдвиг</button>
+        <button class="btn btn-secondary" onclick="deletePersonalTask(${t.id});" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; background: var(--danger); border-color: var(--danger); color: white; display: flex; align-items: center; justify-content: center; gap: 4px;">❌ Удалить</button>
       </div>
     `;
   }
@@ -1397,10 +1475,9 @@ function startEditTemplate(t) {
   document.getElementById('choreTmplPeriodDays').value = d;
   toggleChorePeriodDays(p);
   
-  if (t.start_date) {
-    document.getElementById('choreTmplStartDate').value = t.start_date;
-  } else {
-    document.getElementById('choreTmplStartDate').value = '';
+  const startEl = document.getElementById('choreTmplStartDate');
+  if (startEl) {
+    startEl.value = t.start_date || '';
   }
   document.querySelector('#addChoreModal h3').textContent = 'Изменить шаблон задачи';
   document.getElementById('saveChoreTmplBtn').textContent = 'Сохранить ✓';
@@ -1416,7 +1493,8 @@ function openNewTemplateCreator() {
   document.getElementById('choreTmplPeriodicity').value = 'once';
   document.getElementById('choreTmplPeriodDays').value = '30';
   toggleChorePeriodDays('once');
-  document.getElementById('choreTmplStartDate').value = '';
+  const startEl = document.getElementById('choreTmplStartDate');
+  if (startEl) startEl.value = '';
   document.getElementById('addChoreModal').classList.remove('hidden');
 }
 
@@ -1436,3 +1514,4 @@ window.startEditTemplate = startEditTemplate;
 window.openNewTemplateCreator = openNewTemplateCreator;
 window.deleteTemplate = deleteTemplate;
 window.toggleChorePeriodDays = toggleChorePeriodDays;
+window.openWeeklyGoalExplanation = openWeeklyGoalExplanation;

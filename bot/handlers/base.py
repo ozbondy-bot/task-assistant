@@ -440,12 +440,12 @@ async def generate_daily_chores_if_needed(session, house_id: int):
                 should_create = True
 
         if should_create:
-            # Prevent duplication by checking if there is any active instance of this template
+            # Prevent duplication by checking if there is any instance of this template for today
             exists = await session.scalar(
                 select(TaskInstance).where(
                     and_(
                         TaskInstance.template_id == tmpl.id,
-                        TaskInstance.status.in_(["free", "in_progress"])
+                        TaskInstance.date == today
                     )
                 )
             )
