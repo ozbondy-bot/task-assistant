@@ -87,6 +87,19 @@
             <h3>Новая задача</h3>
             <p class="modal-hint">Напиши что угодно — я разберу дату, повторение и приоритет</p>
             <textarea id="newTaskInput" placeholder="Например: позвонить врачу завтра или выпить воду каждый день" rows="3"></textarea>
+            <div class="form-group" style="margin-top: 8px">
+              <label>Дата выполнения (необязательно)</label>
+              <input id="newTaskDate" type="date" style="width:100%" />
+            </div>
+            <div class="form-group" style="margin-top: 8px">
+              <label>Повторение (необязательно)</label>
+              <select id="newTaskRecurrence" style="width:100%">
+                <option value="">Без повторения</option>
+                <option value="daily">Каждый день</option>
+                <option value="weekly">Каждую неделю</option>
+                <option value="monthly">Каждый месяц</option>
+              </select>
+            </div>
             <div class="modal-actions">
               <button class="btn btn-ghost" id="cancelTaskBtn">Отмена</button>
               <button class="btn btn-primary" id="saveTaskBtn">Добавить ✓</button>
@@ -129,9 +142,13 @@
           <h2>Магазин наград</h2>
           <p class="section-sub">Трать очки на приятные бонусы 💫</p>
         </div>
-        <div class="points-banner" id="pointsBanner">
-          <div class="points-value" id="shopPoints">0</div>
-          <div class="points-label">твоих очков</div>
+        <div class="points-banner-compact" id="pointsBanner">
+          <div class="points-left">
+            <span class="points-icon">🍪</span>
+            <span class="points-lbl">Очки:</span>
+            <strong class="points-val-small" id="shopPoints">0</strong>
+          </div>
+          <button class="btn btn-secondary btn-xs" id="viewPurchasesArchiveBtn">📜 История покупок</button>
         </div>
         <div id="rewardsList" class="rewards-list"></div>
 
@@ -199,6 +216,26 @@
             <!-- Rewards templates will be loaded here -->
           </div>
         </div>
+
+        <!-- Archives -->
+        <div class="settings-card">
+          <h3>📜 Архивы истории</h3>
+          <p class="modal-hint" style="margin-bottom: 10px;">Просматривайте историю выполненных дел, завершенных задач и совершенных покупок</p>
+          <div class="archive-buttons-grid">
+            <button class="btn btn-secondary btn-sm" id="viewChoresArchiveBtn" style="margin-bottom: 8px; width: 100%; text-align: left; display: flex; justify-content: space-between;">
+              <span>🏠 Выполненные домашние дела</span>
+              <span>➡️</span>
+            </button>
+            <button class="btn btn-secondary btn-sm" id="viewTasksArchiveBtn" style="margin-bottom: 8px; width: 100%; text-align: left; display: flex; justify-content: space-between;">
+              <span>👤 Завершенные личные задачи</span>
+              <span>➡️</span>
+            </button>
+            <button class="btn btn-secondary btn-sm" id="viewPurchasesArchiveBtnFromSettings" style="width: 100%; text-align: left; display: flex; justify-content: space-between;">
+              <span>🛍 История покупок в магазине</span>
+              <span>➡️</span>
+            </button>
+          </div>
+        </div>
       </section>
 
     </main>
@@ -255,6 +292,43 @@
           <button class="btn btn-primary" id="saveShiftBtn">Перенести ✓</button>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- Chores Archive Modal -->
+  <div class="modal-overlay hidden" id="choresArchiveModal">
+    <div class="modal-card modal-large">
+      <div class="modal-header-row">
+        <h3>🏠 Архив домашних дел</h3>
+        <button class="btn-close-modal" onclick="closeModal('choresArchiveModal')">✕</button>
+      </div>
+      <div id="choresArchiveList" class="archive-list"></div>
+      <div class="archive-pagination" id="choresArchivePagination"></div>
+    </div>
+  </div>
+
+  <!-- Tasks Archive Modal -->
+  <div class="modal-overlay hidden" id="tasksArchiveModal">
+    <div class="modal-card modal-large">
+      <div class="modal-header-row">
+        <h3>👤 Архив личных задач</h3>
+        <button class="btn-close-modal" onclick="closeModal('tasksArchiveModal')">✕</button>
+      </div>
+      <p class="modal-hint" style="margin-bottom: 10px;">Тапните на задачу, чтобы восстановить её на сегодня</p>
+      <div id="tasksArchiveList" class="archive-list"></div>
+      <div class="archive-pagination" id="tasksArchivePagination"></div>
+    </div>
+  </div>
+
+  <!-- Purchases Archive Modal -->
+  <div class="modal-overlay hidden" id="purchasesArchiveModal">
+    <div class="modal-card modal-large">
+      <div class="modal-header-row">
+        <h3>🛍 История покупок</h3>
+        <button class="btn-close-modal" onclick="closeModal('purchasesArchiveModal')">✕</button>
+      </div>
+      <div id="purchasesArchiveList" class="archive-list"></div>
+      <div class="archive-pagination" id="purchasesArchivePagination"></div>
     </div>
   </div>
 

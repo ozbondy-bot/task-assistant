@@ -131,17 +131,22 @@ function renderHouseTasks(tasks) {
     return;
   }
   list.innerHTML = tasks.map(t => `
-    <div class="task-card house-task" id="htask-${t.id}">
-      <div class="task-icon">🏠</div>
-      <div class="task-body">
-        <div class="task-title">${escHtml(t.title)}</div>
-        <div class="task-meta">
-          <span class="task-badge badge-points">+${t.points} ✨</span>
-          <span class="task-badge">${periodLabel(t.periodicity)}</span>
+    <div class="task-card house-task flex-col" id="htask-${t.id}">
+      <div class="task-row">
+        <div class="task-icon">🏠</div>
+        <div class="task-body">
+          <div class="task-title">${escHtml(t.title)}</div>
+          <div class="task-meta">
+            <span class="task-badge badge-points">+${t.points} ✨</span>
+            <span class="task-badge">${periodLabel(t.periodicity)}</span>
+          </div>
         </div>
       </div>
-      <div class="task-action">
-        <button class="btn-take" onclick="claimTask(${t.id})">Взять</button>
+      <div class="task-action-row" onclick="event.stopPropagation();">
+        <button class="btn-done btn-xs" onclick="claimTask(${t.id})">Взять</button>
+        <button class="btn-unclaim btn-xs" onclick="nudgeTask(${t.id})">Намекнуть 🔔</button>
+        <button class="btn-skip btn-xs" onclick="skipFreeChore(${t.id})">Пропустить 🗑</button>
+        <button class="btn-shift btn-xs" onclick="openShiftModal(${t.id}, 'chore')">Сдвиг 🗓</button>
       </div>
     </div>
   `).join('');
@@ -284,10 +289,14 @@ function setupModals() {
   document.getElementById('saveTaskBtn').addEventListener('click', async () => {
     const text = document.getElementById('newTaskInput').value.trim();
     if (!text) return;
+    const date = document.getElementById('newTaskDate').value || null;
+    const recurrence = document.getElementById('newTaskRecurrence').value || null;
     try {
-      await api('POST', '/api/tasks', { text });
+      await api('POST', '/api/tasks', { text, date, recurrence });
       document.getElementById('addTaskModal').classList.add('hidden');
       document.getElementById('newTaskInput').value = '';
+      document.getElementById('newTaskDate').value = '';
+      document.getElementById('newTaskRecurrence').value = '';
       showToast('✅ Задача добавлена!');
       loadPersonalTab();
     } catch (e) {
@@ -377,12 +386,13 @@ function setupModals() {
     try {
       if (shiftTaskType === 'chore') {
         await api('POST', `/api/house/tasks/${shiftTaskId}/shift`, { new_date: newDate });
+        loadHouseTab();
       } else {
         await api('POST', `/api/tasks/${shiftTaskId}/shift`, { new_date: newDate });
+        loadPersonalTab();
       }
       document.getElementById('shiftTaskModal').classList.add('hidden');
       showToast('🗓 Задача перенесена!');
-      loadPersonalTab();
     } catch (e) {
       showToast(`⚠️ ${e.message}`);
     }
@@ -437,6 +447,12 @@ function setupFABs() {
       showToast(`⚠️ ${e.message}`);
     }
   });
+
+  // Archive buttons listeners
+  document.getElementById('viewChoresArchiveBtn').addEventListener('click', openChoresArchive);
+  document.getElementById('viewTasksArchiveBtn').addEventListener('click', openTasksArchive);
+  document.getElementById('viewPurchasesArchiveBtn').addEventListener('click', openPurchasesArchive);
+  document.getElementById('viewPurchasesArchiveBtnFromSettings').addEventListener('click', openPurchasesArchive);
 }
 
 // ── Shopping Tab ──────────────────────────────────────────────────────────────
@@ -701,7 +717,189 @@ async function skipChore(id) {
   }
 }
 
+function openShiftModal(id, type) {
+  shiftTaskId = id;
+  shiftTaskType = type;
+  document.getElementById('shiftTaskModal').classList.remove('hidden');
+  document.getElementById('shiftTaskDate').value = new Date().toISOString().split('T')[0];
+}
+
+
+/* ── Free Chores & Nudge ── */
+async function nudgeTask(instanceId) {
+  try {
+    await api('POST', `/api/house/tasks/${instanceId}/nudge`);
+    showToast('🔔 Намек отправлен партнеру!');
+  } catch (e) {
+    showToast(`⚠️ ${e.message}`);
+  }
+}
+
+async function skipFreeChore(instanceId) {
+  if (!confirm('Пропустить это дело на сегодня?')) return;
+  try {
+    await api('POST', `/api/house/tasks/${instanceId}/skip`);
+    showToast('🗑 Дело пропущено на сегодня');
+    loadHouseTab();
+  } catch (e) {
+    showToast(`⚠️ ${e.message}`);
+  }
+}
+
+
+/* ── Archives Managers ── */
+let choresArchivePage = 0;
+let tasksArchivePage = 0;
+let purchasesArchivePage = 0;
+
+function closeModal(modalId) {
+  document.getElementById(modalId).classList.add('hidden');
+}
+
+async function openChoresArchive() {
+  choresArchivePage = 0;
+  document.getElementById('choresArchiveModal').classList.remove('hidden');
+  await loadChoresArchive(0);
+}
+
+async function loadChoresArchive(page) {
+  choresArchivePage = page;
+  const list = document.getElementById('choresArchiveList');
+  const pag = document.getElementById('choresArchivePagination');
+  list.innerHTML = `<div class="loading-spinner"><div class="spinner"></div><p>Загрузка...</p></div>`;
+  pag.innerHTML = '';
+  
+  try {
+    const items = await api('GET', `/api/archive/chores?page=${page}&limit=10`);
+    if (!items.length) {
+      list.innerHTML = `<p style="color:var(--text3);text-align:center;padding:24px">Архив пуст</p>`;
+      return;
+    }
+    
+    list.innerHTML = items.map(c => {
+      const dt = new Date(c.date);
+      const dtStr = dt.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+      return `
+        <div class="archive-item">
+          <div class="archive-item-info">
+            <span class="archive-item-title">${escHtml(c.title)}</span>
+            <span class="archive-item-meta">${dtStr} • Выполнил: ${escHtml(c.user)}</span>
+          </div>
+          <span class="task-badge badge-points" style="font-size:11px;">+${c.points} ✨</span>
+        </div>
+      `;
+    }).join('');
+    
+    pag.innerHTML = `
+      <button class="btn btn-secondary btn-xs" ${page === 0 ? 'disabled' : ''} onclick="loadChoresArchive(${page - 1})">⏪ Назад</button>
+      <span style="font-size:12px;color:var(--text2)">Страница ${page + 1}</span>
+      <button class="btn btn-secondary btn-xs" ${items.length < 10 ? 'disabled' : ''} onclick="loadChoresArchive(${page + 1})">Вперед ⏩</button>
+    `;
+  } catch (e) {
+    list.innerHTML = `<p style="color:var(--danger);text-align:center;padding:24px">${e.message}</p>`;
+  }
+}
+
+async function openTasksArchive() {
+  tasksArchivePage = 0;
+  document.getElementById('tasksArchiveModal').classList.remove('hidden');
+  await loadTasksArchive(0);
+}
+
+async function loadTasksArchive(page) {
+  tasksArchivePage = page;
+  const list = document.getElementById('tasksArchiveList');
+  const pag = document.getElementById('tasksArchivePagination');
+  list.innerHTML = `<div class="loading-spinner"><div class="spinner"></div><p>Загрузка...</p></div>`;
+  pag.innerHTML = '';
+  
+  try {
+    const items = await api('GET', `/api/archive/tasks?page=${page}&limit=10`);
+    if (!items.length) {
+      list.innerHTML = `<p style="color:var(--text3);text-align:center;padding:24px">Архив пуст</p>`;
+      return;
+    }
+    
+    list.innerHTML = items.map(t => {
+      const rec = t.recurrence ? `🔁 ${recLabel(t.recurrence)}` : '';
+      return `
+        <div class="archive-item">
+          <div class="archive-item-info">
+            <span class="archive-item-title" style="text-decoration: line-through;color:var(--text3);">${escHtml(t.text)}</span>
+            <span class="archive-item-meta">${escHtml(t.date)} ${rec}</span>
+          </div>
+          <button class="btn btn-primary btn-xs" style="font-size:11px;padding:3px 8px;" onclick="restoreTaskFromArchive(${t.id})">Восстановить ↩</button>
+        </div>
+      `;
+    }).join('');
+    
+    pag.innerHTML = `
+      <button class="btn btn-secondary btn-xs" ${page === 0 ? 'disabled' : ''} onclick="loadTasksArchive(${page - 1})">⏪ Назад</button>
+      <span style="font-size:12px;color:var(--text2)">Страница ${page + 1}</span>
+      <button class="btn btn-secondary btn-xs" ${items.length < 10 ? 'disabled' : ''} onclick="loadTasksArchive(${page + 1})">Вперед ⏩</button>
+    `;
+  } catch (e) {
+    list.innerHTML = `<p style="color:var(--danger);text-align:center;padding:24px">${e.message}</p>`;
+  }
+}
+
+async function restoreTaskFromArchive(id) {
+  try {
+    await api('POST', `/api/archive/tasks/${id}/restore`);
+    showToast('↩ Задача восстановлена на сегодня!');
+    loadTasksArchive(tasksArchivePage);
+    loadPersonalTab();
+  } catch (e) {
+    showToast(`⚠️ ${e.message}`);
+  }
+}
+
+async function openPurchasesArchive() {
+  purchasesArchivePage = 0;
+  document.getElementById('purchasesArchiveModal').classList.remove('hidden');
+  await loadPurchasesArchive(0);
+}
+
+async function loadPurchasesArchive(page) {
+  purchasesArchivePage = page;
+  const list = document.getElementById('purchasesArchiveList');
+  const pag = document.getElementById('purchasesArchivePagination');
+  list.innerHTML = `<div class="loading-spinner"><div class="spinner"></div><p>Загрузка...</p></div>`;
+  pag.innerHTML = '';
+  
+  try {
+    const items = await api('GET', `/api/archive/purchases?page=${page}&limit=10`);
+    if (!items.length) {
+      list.innerHTML = `<p style="color:var(--text3);text-align:center;padding:24px">Покупок пока не было</p>`;
+      return;
+    }
+    
+    list.innerHTML = items.map(p => {
+      const dt = new Date(p.date);
+      const dtStr = dt.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+      return `
+        <div class="archive-item">
+          <div class="archive-item-info">
+            <span class="archive-item-title">${escHtml(p.reward_title)}</span>
+            <span class="archive-item-meta">${dtStr} • Купил: ${escHtml(p.user)}</span>
+          </div>
+          <span class="task-badge badge-points" style="background:rgba(251,191,36,0.15);color:var(--warning);font-size:11px;">-${p.price} 🍪</span>
+        </div>
+      `;
+    }).join('');
+    
+    pag.innerHTML = `
+      <button class="btn btn-secondary btn-xs" ${page === 0 ? 'disabled' : ''} onclick="loadPurchasesArchive(${page - 1})">⏪ Назад</button>
+      <span style="font-size:12px;color:var(--text2)">Страница ${page + 1}</span>
+      <button class="btn btn-secondary btn-xs" ${items.length < 10 ? 'disabled' : ''} onclick="loadPurchasesArchive(${page + 1})">Вперед ⏩</button>
+    `;
+  } catch (e) {
+    list.innerHTML = `<p style="color:var(--danger);text-align:center;padding:24px">${e.message}</p>`;
+  }
+}
+
 async function deletePersonalTask(id) {
+  if (!confirm('Удалить эту задачу?')) return;
   try {
     await api('DELETE', `/api/tasks/${id}`);
     showToast('🗑 Задача удалена');
@@ -711,9 +909,15 @@ async function deletePersonalTask(id) {
   }
 }
 
-function openShiftModal(id, type) {
-  shiftTaskId = id;
-  shiftTaskType = type;
-  document.getElementById('shiftTaskModal').classList.remove('hidden');
-  document.getElementById('shiftTaskDate').value = new Date().toISOString().split('T')[0];
-}
+// Expose to window object for inline onclick event handlers
+window.loadChoresArchive = loadChoresArchive;
+window.loadTasksArchive = loadTasksArchive;
+window.loadPurchasesArchive = loadPurchasesArchive;
+window.restoreTaskFromArchive = restoreTaskFromArchive;
+window.closeModal = closeModal;
+window.openChoresArchive = openChoresArchive;
+window.openTasksArchive = openTasksArchive;
+window.openPurchasesArchive = openPurchasesArchive;
+window.nudgeTask = nudgeTask;
+window.skipFreeChore = skipFreeChore;
+window.deletePersonalTask = deletePersonalTask;

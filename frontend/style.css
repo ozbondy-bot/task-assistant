@@ -550,7 +550,7 @@ body {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 14px 16px;
+  padding: 10px 12px;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1112,3 +1112,109 @@ body {
   background: var(--accent);
   color: white;
 }
+
+
+/* ── Compact Points Banner ── */
+.points-banner-compact {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.points-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.points-val-small {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--warning);
+}
+
+/* ── Archive Modals & Lists ── */
+.modal-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.btn-close-modal {
+  background: transparent;
+  border: none;
+  font-size: 20px;
+  color: var(--text2);
+  cursor: pointer;
+  padding: 4px;
+  transition: color 0.2s;
+}
+
+.btn-close-modal:hover {
+  color: var(--danger);
+}
+
+.modal-large {
+  max-width: 500px;
+  width: 95%;
+}
+
+.archive-list {
+  max-height: 280px;
+  overflow-y: auto;
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 4px;
+}
+
+.archive-item {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  transition: background-color 0.2s;
+}
+
+.archive-item:hover {
+  background: var(--surface3);
+}
+
+.archive-item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.archive-item-title {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.archive-item-meta {
+  font-size: 11px;
+  color: var(--text2);
+}
+
+.archive-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+

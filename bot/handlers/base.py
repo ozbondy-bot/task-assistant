@@ -541,11 +541,6 @@ async def cmd_start(message: types.Message, db_user: User = None):
         )
     )
     sent_msg = await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
-    try:
-        await message.bot.pin_chat_message(chat_id=message.chat.id, message_id=sent_msg.message_id)
-        logger.info("Pinned onboarding message.")
-    except Exception as e:
-        logger.error(f"Failed to pin onboarding: {e}")
 
 
 

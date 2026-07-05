@@ -690,8 +690,17 @@ async def unclaim_chore(instance_id: int, user: User = Depends(get_current_user)
 async def skip_chore(instance_id: int, user: User = Depends(get_current_user)):
     async with AsyncSessionLocal() as session:
         inst = await session.get(TaskInstance, instance_id)
-        if not inst or inst.done_by_user_id != user.id:
-            raise HTTPException(status_code=403, detail="Not your task")
+        if not inst:
+            raise HTTPException(status_code=404, detail="Task not found")
+            
+        tmpl = await session.get(TaskTemplate, inst.template_id)
+        if not tmpl or tmpl.house_id != user.house_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+            
+        # Must be claimed by user OR must be free
+        if inst.done_by_user_id != user.id and inst.status != "free":
+            raise HTTPException(status_code=403, detail="Access denied")
+            
         inst.status = "skipped"
         await session.commit()
     return {"ok": True}
@@ -708,8 +717,15 @@ async def shift_chore_instance(instance_id: int, req: ShiftRequest, user: User =
         
     async with AsyncSessionLocal() as session:
         inst = await session.get(TaskInstance, instance_id)
-        if not inst or inst.done_by_user_id != user.id:
-            raise HTTPException(status_code=403, detail="Not your task")
+        if not inst:
+            raise HTTPException(status_code=404, detail="Task not found")
+            
+        tmpl = await session.get(TaskTemplate, inst.template_id)
+        if not tmpl or tmpl.house_id != user.house_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+            
+        if inst.done_by_user_id != user.id and inst.status != "free":
+            raise HTTPException(status_code=403, detail="Access denied")
             
         inst.status = "shifted"
         exists = await session.scalar(
@@ -746,6 +762,161 @@ async def shift_personal_task(task_id: int, req: ShiftRequest, user: User = Depe
         task.date_execution = new_date
         await session.commit()
     return {"ok": True}
+
+
+# ── Nudge and Archives Endpoints ──────────────────────────────────────────────
+
+NUDGE_PHRASES = [
+    "Домовой жалуется на беспорядок! Тут плачет без внимания: <b>{task_title}</b> 🥺",
+    "Печеньки 🍪 сами себя не заработают! Тебя ждет отличный контракт: <b>{task_title}</b>",
+    "Кажется, кто-то очень хочет, чтобы эта задача решилась. Герой, твой выход: <b>{task_title}</b> 🦸‍♂️",
+    "Министерство уюта напоминает! Открыта горячая вакансия на дело: <b>{task_title}</b> 🔥",
+    "Освободилось немного времени? Идеальный момент, чтобы закрыть: <b>{task_title}</b> ✨"
+]
+nudge_cache = {}
+
+@app.post("/api/house/tasks/{instance_id}/nudge")
+async def nudge_house_task(instance_id: int, user: User = Depends(get_current_user)):
+    from bot.handlers.base import get_house_today_date, bot
+    import random
+    
+    async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
+        if nudge_cache.get(instance_id) == today:
+            raise HTTPException(status_code=429, detail="Намек уже отправлен")
+            
+        inst = await session.get(TaskInstance, instance_id)
+        if not inst:
+            raise HTTPException(status_code=404, detail="Task not found")
+            
+        tmpl = await session.get(TaskTemplate, inst.template_id)
+        if not tmpl or tmpl.house_id != user.house_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+            
+        phrase = random.choice(NUDGE_PHRASES).format(task_title=tmpl.title)
+        nudge_cache[instance_id] = today
+        
+        result = await session.execute(
+            select(User).where(
+                and_(
+                    User.house_id == user.house_id,
+                    User.id != user.id
+                )
+            )
+        )
+        others = result.scalars().all()
+        
+        for other in others:
+            try:
+                await bot.send_message(
+                    chat_id=other.telegram_id,
+                    text=f"🔔 *Намек от {user.display_name or user.username}*\n\n{phrase}",
+                    parse_mode="HTML"
+                )
+            except Exception as e:
+                logger.error(f"Failed to send nudge to {other.telegram_id}: {e}")
+                
+    return {"ok": True}
+
+@app.get("/api/archive/chores")
+async def get_chores_archive(page: int = 0, limit: int = 10, user: User = Depends(get_current_user)):
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Completion, User, TaskInstance, TaskTemplate)
+            .join(User, Completion.user_id == User.id)
+            .join(TaskInstance, Completion.task_instance_id == TaskInstance.id)
+            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
+            .where(TaskTemplate.house_id == ACTIVE_HOUSE_ID)
+            .order_by(Completion.created_at.desc())
+            .offset(page * limit)
+            .limit(limit)
+        )
+        rows = result.all()
+        
+    return [
+        {
+            "id": comp.id,
+            "user": usr.display_name or usr.username or "Участник",
+            "title": tmpl.title,
+            "points": comp.points or 0,
+            "date": comp.created_at.isoformat(),
+        }
+        for comp, usr, inst, tmpl in rows
+    ]
+
+@app.get("/api/archive/tasks")
+async def get_tasks_archive(page: int = 0, limit: int = 10, user: User = Depends(get_current_user)):
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(PersonalTask)
+            .where(and_(
+                PersonalTask.user_id == user.id,
+                PersonalTask.is_completed == True,
+                PersonalTask.is_deleted == False
+            ))
+            .order_by(PersonalTask.date_execution.desc(), PersonalTask.id.desc())
+            .offset(page * limit)
+            .limit(limit)
+        )
+        tasks = result.scalars().all()
+    return [
+        {
+            "id": t.id,
+            "text": t.text,
+            "date": str(t.date_execution),
+            "recurrence": t.recurrence,
+        }
+        for t in tasks
+    ]
+
+@app.post("/api/archive/tasks/{task_id}/restore")
+async def restore_task_from_archive(task_id: int, user: User = Depends(get_current_user)):
+    async with AsyncSessionLocal() as session:
+        from bot.handlers.base import get_house_today_date
+        today = await get_house_today_date(session)
+        old = await session.get(PersonalTask, task_id)
+        if not old or old.user_id != user.id:
+            raise HTTPException(status_code=404, detail="Task not found")
+            
+        new_task = PersonalTask(
+            user_id=user.id,
+            house_id=ACTIVE_HOUSE_ID,
+            text=old.text,
+            date_execution=today,
+            is_completed=False,
+            is_deleted=False,
+            recurrence=old.recurrence
+        )
+        session.add(new_task)
+        await session.commit()
+    return {"ok": True}
+
+@app.get("/api/archive/purchases")
+async def get_purchases_archive(page: int = 0, limit: int = 10, user: User = Depends(get_current_user)):
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(RewardPurchase, User)
+            .join(User, RewardPurchase.user_id == User.id)
+            .where(User.house_id == ACTIVE_HOUSE_ID)
+            .order_by(RewardPurchase.created_at.desc())
+            .offset(page * limit)
+            .limit(limit)
+        )
+        rows = result.all()
+    return [
+        {
+            "id": p.id,
+            "user": usr.display_name or usr.username or "Участник",
+            "reward_title": p.reward_title,
+            "price": p.price,
+            "date": p.created_at.isoformat(),
+            "status": p.status
+        }
+        for p, usr in rows
+    ]
+
+
+
 
 
 # ── Static files for Mini App ─────────────────────────────────────────────────
