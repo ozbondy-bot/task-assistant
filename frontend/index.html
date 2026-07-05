@@ -59,9 +59,12 @@
 
       <!-- HOUSEHOLD TASKS TAB -->
       <section class="tab-pane active" id="pane-house">
-        <div class="section-header">
-          <h2>Домашние дела</h2>
-          <p class="section-sub">Свободные задачи — возьми в работу!</p>
+        <div class="section-header flex-between" style="align-items: center; width: 100%;">
+          <div>
+            <h2>Домашние дела</h2>
+            <p class="section-sub">Свободные задачи — возьми в работу!</p>
+          </div>
+          <button class="btn btn-primary btn-xs" id="addChoreBtn">Добавить</button>
         </div>
         <div id="houseTasksList" class="task-list">
           <div class="loading-spinner">
@@ -180,16 +183,10 @@
           <p class="section-sub">Управление шаблонами дел и магазина</p>
         </div>
         
-        <!-- Chores Generation -->
-        <div class="settings-card">
-          <button class="btn btn-secondary btn-sm" style="width: 100%" id="forceGenerateBtn">🔄 Обновить дела на сегодня</button>
-        </div>
-
         <!-- Chores Templates -->
         <div class="settings-card">
           <div class="card-header-action">
             <h3>📋 Шаблоны домашних дел</h3>
-            <button class="btn btn-primary btn-xs" id="addChoreTmplBtn">Добавить</button>
           </div>
           <div id="settingsChoresList" class="settings-list">
             <!-- Chores templates will be loaded here -->
@@ -322,15 +319,78 @@
     </div>
   </div>
 
-  <!-- Purchases Archive Modal -->
-  <div class="modal-overlay hidden" id="purchasesArchiveModal">
-    <div class="modal-card modal-large">
-      <div class="modal-header-row">
-        <h3>🛍 История покупок</h3>
-        <button class="btn-close-modal" onclick="closeModal('purchasesArchiveModal')">✕</button>
+  <!-- Cooking Duration Modal -->
+  <div class="modal-overlay hidden" id="cookingDurationModal">
+    <div class="modal-card">
+      <h3 style="margin-bottom: 8px;">🍳 Время готовки</h3>
+      <p class="modal-hint" style="margin-bottom: 16px;">Выберите, сколько времени ушло на приготовление еды, чтобы рассчитать баллы:</p>
+      <div class="duration-buttons-grid" style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
+        <button class="btn btn-secondary" onclick="submitCookingDone(2)" style="width: 100%; text-align: left; display: flex; justify-content: space-between; padding: 12px 16px;">
+          <span>⚡ Менее 15 минут</span>
+          <strong>+2 ✨</strong>
+        </button>
+        <button class="btn btn-secondary" onclick="submitCookingDone(3)" style="width: 100%; text-align: left; display: flex; justify-content: space-between; padding: 12px 16px;">
+          <span>🥪 15–30 минут</span>
+          <strong>+3 ✨</strong>
+        </button>
+        <button class="btn btn-secondary" onclick="submitCookingDone(5)" style="width: 100%; text-align: left; display: flex; justify-content: space-between; padding: 12px 16px;">
+          <span>🍝 30–60 минут</span>
+          <strong>+5 ✨</strong>
+        </button>
+        <button class="btn btn-secondary" onclick="submitCookingDone(8)" style="width: 100%; text-align: left; display: flex; justify-content: space-between; padding: 12px 16px;">
+          <span>🍲 1–2 часа</span>
+          <strong>+8 ✨</strong>
+        </button>
+        <button class="btn btn-secondary" onclick="submitCookingDone(10)" style="width: 100%; text-align: left; display: flex; justify-content: space-between; padding: 12px 16px;">
+          <span>🎂 Более 2 часов</span>
+          <strong>+10 ✨</strong>
+        </button>
       </div>
-      <div id="purchasesArchiveList" class="archive-list"></div>
-      <div class="archive-pagination" id="purchasesArchivePagination"></div>
+      <button class="btn btn-ghost" onclick="closeModal('cookingDurationModal')" style="margin-top: 12px; width: 100%;">Отмена</button>
+    </div>
+  </div>
+
+  <!-- My Task Details Modal -->
+  <div class="modal-overlay hidden" id="myTaskDetailsModal">
+    <div class="modal-card">
+      <div class="modal-header-row" style="margin-bottom: 16px;">
+        <h3 id="myTaskDetailsTitle">Детали задачи</h3>
+        <button class="btn-close-modal" onclick="closeModal('myTaskDetailsModal')">✕</button>
+      </div>
+      <div id="myTaskDetailsBody" style="margin-bottom: 20px; font-size: 14px; color: var(--text2); display: flex; flex-direction: column; gap: 8px;">
+        <!-- Dynamic task info will be injected here -->
+      </div>
+      <div class="modal-actions-stacked" id="myTaskDetailsActions">
+        <!-- Stacked action buttons will occupy the full width -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Chore Choice Modal -->
+  <div class="modal-overlay hidden" id="addChoreChoiceModal">
+    <div class="modal-card">
+      <div class="modal-header-row" style="margin-bottom: 16px;">
+        <h3>Добавить домашнее дело</h3>
+        <button class="btn-close-modal" onclick="closeModal('addChoreChoiceModal')">✕</button>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 10px; width: 100%;">
+        <button class="btn btn-primary" onclick="closeModal('addChoreChoiceModal'); document.getElementById('addChoreModal').classList.remove('hidden');" style="width: 100%; padding: 12px; font-weight: 600;">Создать новое дело</button>
+        <button class="btn btn-secondary" onclick="openAddFromDatabaseModal();" style="width: 100%; padding: 12px; font-weight: 600;">Добавить из базы (шаблоны)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add from Database Preset Modal -->
+  <div class="modal-overlay hidden" id="addFromDbModal">
+    <div class="modal-card modal-large">
+      <div class="modal-header-row" style="margin-bottom: 12px;">
+        <h3>Добавить из базы</h3>
+        <button class="btn-close-modal" onclick="closeModal('addFromDbModal')">✕</button>
+      </div>
+      <p class="modal-hint" style="margin-bottom: 12px;">Выберите шаблон дела, чтобы активировать его на сегодня:</p>
+      <div id="dbTemplatesList" class="archive-list" style="max-height: 250px; overflow-y: auto;">
+        <!-- Inactive templates list -->
+      </div>
     </div>
   </div>
 

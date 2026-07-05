@@ -190,8 +190,11 @@ async def delete_task(task_id: int, user: User = Depends(get_current_user)):
 # -- Household tasks --
 @app.get("/api/house/tasks")
 async def get_house_tasks(user: User = Depends(get_current_user)):
-    from bot.handlers.base import get_house_today_date
+    from bot.handlers.base import get_house_today_date, generate_daily_chores_if_needed
     async with AsyncSessionLocal() as session:
+        # Auto-generate today's chores if needed
+        await generate_daily_chores_if_needed(session, ACTIVE_HOUSE_ID)
+        
         today = await get_house_today_date(session)
         result = await session.execute(
             select(TaskInstance, TaskTemplate).join(
@@ -206,18 +209,42 @@ async def get_house_tasks(user: User = Depends(get_current_user)):
             ).order_by(TaskTemplate.points.desc())
         )
         rows = result.all()
-
-    return [
-        {
-            "id": inst.id,
-            "template_id": tmpl.id,
-            "title": tmpl.title,
-            "points": tmpl.points,
-            "periodicity": tmpl.periodicity,
-            "status": inst.status,
-        }
-        for inst, tmpl in rows
-    ]
+        
+        res_list = []
+        for inst, tmpl in rows:
+            # Query last completion date
+            last_date = await session.scalar(
+                select(Completion.created_at)
+                .join(TaskInstance, Completion.task_instance_id == TaskInstance.id)
+                .where(TaskInstance.template_id == tmpl.id)
+                .order_by(Completion.created_at.desc())
+                .limit(1)
+            )
+            # Find next scheduled instance date
+            next_date = await session.scalar(
+                select(TaskInstance.date)
+                .where(
+                    and_(
+                        TaskInstance.template_id == tmpl.id,
+                        TaskInstance.status == "free",
+                        TaskInstance.date > today
+                    )
+                )
+                .order_by(TaskInstance.date.asc())
+                .limit(1)
+            )
+            res_list.append({
+                "id": inst.id,
+                "template_id": tmpl.id,
+                "title": tmpl.title,
+                "points": tmpl.points,
+                "periodicity": tmpl.periodicity,
+                "status": inst.status,
+                "last_completed": last_date.isoformat() if last_date else None,
+                "next_execution": next_date.isoformat() if next_date else None
+            })
+            
+    return res_list
 
 
 @app.post("/api/house/tasks/{instance_id}/claim")
@@ -922,16 +949,27 @@ async def restore_task_from_archive(task_id: int, user: User = Depends(get_curre
         if not old or old.user_id != user.id:
             raise HTTPException(status_code=404, detail="Task not found")
             
-        new_task = PersonalTask(
-            user_id=user.id,
-            house_id=ACTIVE_HOUSE_ID,
-            text=old.text,
-            date_execution=today,
-            is_completed=False,
-            is_deleted=False,
-            recurrence=old.recurrence
-        )
-        session.add(new_task)
+        old.is_completed = False
+        old.date_execution = today
+        await session.commit()
+    return {"ok": True}
+
+@app.post("/api/archive/chores/{completion_id}/restore")
+async def restore_chore_from_archive(completion_id: int, user: User = Depends(get_current_user)):
+    async with AsyncSessionLocal() as session:
+        comp = await session.get(Completion, completion_id)
+        if not comp or comp.user_id != user.id:
+            raise HTTPException(status_code=404, detail="Completion record not found")
+            
+        inst = await session.get(TaskInstance, comp.task_instance_id)
+        if not inst:
+            raise HTTPException(status_code=404, detail="Task instance not found")
+            
+        inst.status = "in_progress"
+        inst.done_by_user_id = user.id
+        inst.done_at = None
+        
+        await session.delete(comp)
         await session.commit()
     return {"ok": True}
 
@@ -1022,6 +1060,40 @@ async def startup_db_cleanup():
 
 
 
+
+
+class SpawnChoreRequest(BaseModel):
+    template_id: int
+
+@app.post("/api/house/tasks/spawn")
+async def spawn_chore_instance(req: SpawnChoreRequest, user: User = Depends(get_current_user)):
+    from bot.handlers.base import get_house_today_date
+    async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
+        tmpl = await session.get(TaskTemplate, req.template_id)
+        if not tmpl or tmpl.house_id != user.house_id:
+            raise HTTPException(status_code=404, detail="Template not found")
+            
+        # Check if already has free/in_progress instance today
+        exists = await session.scalar(
+            select(TaskInstance).where(
+                and_(
+                    TaskInstance.template_id == tmpl.id,
+                    TaskInstance.date == today,
+                    TaskInstance.status.in_(["free", "in_progress"])
+                )
+            )
+        )
+        if not exists:
+            inst = TaskInstance(
+                template_id=tmpl.id,
+                date=today,
+                status="free",
+                priority=0
+            )
+            session.add(inst)
+            await session.commit()
+    return {"ok": True}
 
 
 # ── Static files for Mini App ─────────────────────────────────────────────────

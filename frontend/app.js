@@ -195,69 +195,62 @@ function renderPersonalTasks(personal, household) {
   list.innerHTML = all.map(t => {
     if (t.isHousehold) {
       return `
-        <div class="task-card household-claimed flex-col" id="ptask-h-${t.id}">
-          <div class="task-row">
-            <div class="task-icon">🏠</div>
-            <div class="task-body">
-              <div class="task-title">${escHtml(t.text)}</div>
-              <div class="task-meta">
-                <span class="task-badge badge-house">Домашнее</span>
-                <span class="task-badge badge-points">+${t.points} ✨</span>
-              </div>
-            </div>
+        <div class="task-card house-task flex-between" onclick="openMyTaskDetails(${JSON.stringify(t).replace(/"/g, '&quot;')}, 'household')" style="padding: 10px 12px; cursor: pointer; margin-bottom: 8px;">
+          <div class="task-left flex-row" style="align-items: center; gap: 8px;">
+            <span style="font-size: 16px;">🏠</span>
+            <span class="task-title" style="font-weight: 500; font-size: 14px;">${escHtml(stripEmoji(t.text))}</span>
           </div>
-          <div class="task-action-row" onclick="event.stopPropagation();">
-            <button class="btn-done btn-xs" onclick="completeHouseTask(${t.id})">Готово</button>
-            <button class="btn-unclaim btn-xs" onclick="unclaimChore(${t.id})">Вернуть ↩</button>
-            <button class="btn-skip btn-xs" onclick="skipChore(${t.id})">Пропустить 🗑</button>
-            <button class="btn-shift btn-xs" onclick="openShiftModal(${t.id}, 'chore')">Сдвиг 🗓</button>
-          </div>
+          <span class="task-badge badge-points" style="font-size: 12px; margin-left: auto;">+${t.points} ✨</span>
         </div>`;
     } else {
-      const icon = getTaskIcon(t.text);
-      const cleanText = stripEmoji(t.text);
       return `
-        <div class="task-card personal-task flex-between" id="ptask-${t.id}">
-          <div class="task-left flex-row" style="flex: 1; align-items: center; gap: 8px; overflow: hidden;">
-            <div class="task-check-circle" onclick="completePersonalTask(${t.id}, document.getElementById('ptask-${t.id}'))" style="cursor: pointer; font-size: 18px; user-select: none;">⚪</div>
-            <div class="task-body">
-              <div class="task-title" style="font-size: 14px;">${escHtml(cleanText)}</div>
-              <div class="task-meta">
-                ${t.recurrence ? `<span class="task-badge badge-rec">🔁 ${recLabel(t.recurrence)}</span>` : ''}
-                ${t.category === 'routine' ? '<span class="task-badge">Ежедневное</span>' : ''}
-              </div>
-            </div>
+        <div class="task-card personal-task flex-between" onclick="openMyTaskDetails(${JSON.stringify(t).replace(/"/g, '&quot;')}, 'personal')" style="padding: 10px 12px; cursor: pointer; margin-bottom: 8px;">
+          <div class="task-left flex-row" style="align-items: center; gap: 8px;">
+            <span style="font-size: 16px;">👤</span>
+            <span class="task-title" style="font-weight: 500; font-size: 14px;">${escHtml(stripEmoji(t.text))}</span>
           </div>
-          <div class="task-actions-compact flex-row" style="gap: 8px; align-items: center; pointer-events: auto;" onclick="event.stopPropagation();">
-            <button class="btn-action-icon" onclick="openShiftModal(${t.id}, 'personal')" style="background: none; border: none; font-size: 16px; cursor: pointer; padding: 4px;">🗓</button>
-            <button class="btn-action-icon icon-danger" onclick="deletePersonalTask(${t.id})" style="background: none; border: none; font-size: 16px; cursor: pointer; padding: 4px;">🗑</button>
-          </div>
+          ${t.recurrence ? `<span class="task-badge badge-rec" style="font-size: 11px; margin-left: auto;">🔁</span>` : ''}
         </div>`;
     }
   }).join('');
 }
 
-async function completePersonalTask(id, el) {
-  el.classList.add('completed-anim');
+async function completePersonalTask(id) {
   try {
     await api('POST', `/api/tasks/${id}/complete`);
-    setTimeout(() => {
-      el.remove();
-      checkEmptyPersonal();
-    }, 400);
     showToast('✅ Выполнено!');
+    loadPersonalTab();
   } catch (e) {
-    el.classList.remove('completed-anim');
     showToast(`⚠️ ${e.message}`);
   }
 }
 
-async function completeHouseTask(id) {
+let pendingCookingTaskId = null;
+
+async function completeHouseTask(id, title) {
+  if (title && (title.toLowerCase().includes('готов') || title.toLowerCase().includes('cook'))) {
+    pendingCookingTaskId = id;
+    document.getElementById('cookingDurationModal').classList.remove('hidden');
+    return;
+  }
   try {
     const res = await api('POST', `/api/house/tasks/${id}/done`);
     showToast(`✅ Готово! +${res.points_earned} ✨`);
-    document.getElementById(`ptask-h-${id}`)?.remove();
-    checkEmptyPersonal();
+    loadPersonalTab();
+    loadHouseTab();
+  } catch (e) {
+    showToast(`⚠️ ${e.message}`);
+  }
+}
+
+async function submitCookingDone(points) {
+  const id = pendingCookingTaskId;
+  document.getElementById('cookingDurationModal').classList.add('hidden');
+  if (!id) return;
+  try {
+    const res = await api('POST', `/api/house/tasks/${id}/done?points=${points}`);
+    showToast(`✅ Готово! +${res.points_earned} ✨`);
+    loadPersonalTab();
     loadHouseTab();
   } catch (e) {
     showToast(`⚠️ ${e.message}`);
@@ -412,25 +405,13 @@ function setupFABs() {
     document.getElementById('shopItemName').focus();
   });
 
-  // Settings tab buttons
-  document.getElementById('addChoreTmplBtn').addEventListener('click', () => {
-    document.getElementById('addChoreModal').classList.remove('hidden');
+  // House tab add button
+  document.getElementById('addChoreBtn').addEventListener('click', () => {
+    document.getElementById('addChoreChoiceModal').classList.remove('hidden');
   });
 
   document.getElementById('addRewardBtn').addEventListener('click', () => {
     document.getElementById('createRewardModal').classList.remove('hidden');
-  });
-
-
-
-  document.getElementById('forceGenerateBtn').addEventListener('click', async () => {
-    try {
-      await api('POST', '/api/house/generate');
-      showToast('🔄 Дела на сегодня обновлены!');
-      loadSettingsTab();
-    } catch (e) {
-      showToast(`⚠️ ${e.message}`);
-    }
   });
 
   // Archive buttons listeners
@@ -520,13 +501,10 @@ function renderRewards(rewards, myPoints) {
     return;
   }
   list.innerHTML = rewards.map(r => `
-    <div class="reward-card">
-      <div class="reward-body">
-        <div class="reward-title">${escHtml(stripEmoji(r.title))}</div>
-        <div class="reward-price">${r.price} ✨ <span>очков</span></div>
-      </div>
-      <button class="btn-buy" ${myPoints < r.price ? 'disabled' : ''} onclick="buyReward(${r.id}, '${escAttr(r.title)}')">
-        ${myPoints >= r.price ? 'Купить' : `-${r.price - myPoints}`}
+    <div class="reward-card" style="display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; width: 100%;">
+      <div class="reward-title" style="font-weight: 500; font-size: 14px; text-align: left;">${escHtml(stripEmoji(r.title))}</div>
+      <button class="btn-buy" ${myPoints < r.price ? 'disabled' : ''} onclick="buyReward(${r.id}, '${escAttr(r.title)}')" style="font-size: 13px; padding: 6px 12px; font-weight: 600; border-radius: 12px; border: none; cursor: pointer; white-space: nowrap;">
+        ${r.price} ✨
       </button>
     </div>
   `).join('');
@@ -775,7 +753,10 @@ async function loadChoresArchive(page) {
             <span class="archive-item-title">${escHtml(c.title)}</span>
             <span class="archive-item-meta">${dtStr} • Выполнил: ${escHtml(c.user)}</span>
           </div>
-          <span class="task-badge badge-points" style="font-size:11px;">+${c.points} ✨</span>
+          <div class="flex-row" style="gap: 8px; align-items: center;">
+            <span class="task-badge badge-points" style="font-size:11px;">+${c.points} ✨</span>
+            <button class="btn btn-primary btn-xs" style="font-size:11px;padding:3px 8px;" onclick="restoreChoreFromArchive(${c.id})">Вернуть</button>
+          </div>
         </div>
       `;
     }).join('');
@@ -818,7 +799,7 @@ async function loadTasksArchive(page) {
             <span class="archive-item-title" style="text-decoration: line-through;color:var(--text3);">${escHtml(t.text)}</span>
             <span class="archive-item-meta">${escHtml(t.date)} ${rec}</span>
           </div>
-          <button class="btn btn-primary btn-xs" style="font-size:11px;padding:3px 8px;" onclick="restoreTaskFromArchive(${t.id})">Восстановить ↩</button>
+          <button class="btn btn-primary btn-xs" style="font-size:11px;padding:3px 8px;" onclick="restoreTaskFromArchive(${t.id})">Вернуть</button>
         </div>
       `;
     }).join('');
@@ -836,7 +817,7 @@ async function loadTasksArchive(page) {
 async function restoreTaskFromArchive(id) {
   try {
     await api('POST', `/api/archive/tasks/${id}/restore`);
-    showToast('↩ Задача восстановлена на сегодня!');
+    showToast('↩ Задача вернулась в Мои дела!');
     loadTasksArchive(tasksArchivePage);
     loadPersonalTab();
   } catch (e) {
@@ -990,3 +971,113 @@ window.openChoreDetails = openChoreDetails;
 window.switchTab = switchTab;
 window.openShoppingArchive = openShoppingArchive;
 window.loadShoppingArchive = loadShoppingArchive;
+
+/* ── My Task Details Modal (Personal/Claimed) ── */
+function openMyTaskDetails(t, type) {
+  const title = t.text;
+  document.getElementById('myTaskDetailsTitle').textContent = stripEmoji(title);
+  
+  let body = '';
+  if (type === 'household') {
+    body = `
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <div>🏠 <strong>Тип:</strong> Домашнее дело</div>
+        <div>✨ <strong>Награда:</strong> ${t.points} очков</div>
+      </div>
+    `;
+  } else {
+    const rec = t.recurrence ? recLabel(t.recurrence) : 'Без повторения';
+    body = `
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <div>👤 <strong>Тип:</strong> Личная задача</div>
+        <div>🔁 <strong>Повторение:</strong> ${rec}</div>
+      </div>
+    `;
+  }
+  document.getElementById('myTaskDetailsBody').innerHTML = body;
+  
+  const actions = document.getElementById('myTaskDetailsActions');
+  if (type === 'household') {
+    actions.innerHTML = `
+      <button class="btn btn-primary" onclick="completeHouseTask(${t.id}, '${escAttr(title)}'); closeModal('myTaskDetailsModal');" style="margin-bottom: 4px; width: 100%; padding: 12px; font-weight: 600;">Выполнить</button>
+      <div style="display: flex; gap: 6px; width: 100%;">
+        <button class="btn btn-secondary" onclick="unclaimChore(${t.id}); closeModal('myTaskDetailsModal');" style="flex: 1; padding: 10px; font-weight: 600;">Вернуть</button>
+        <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'chore'); closeModal('myTaskDetailsModal');" style="flex: 1; padding: 10px; font-weight: 600;">Сдвиг</button>
+      </div>
+    `;
+  } else {
+    actions.innerHTML = `
+      <button class="btn btn-primary" onclick="completePersonalTask(${t.id}); closeModal('myTaskDetailsModal');" style="margin-bottom: 4px; width: 100%; padding: 12px; font-weight: 600;">Выполнить</button>
+      <div style="display: flex; gap: 6px; width: 100%;">
+        <button class="btn btn-secondary" onclick="deletePersonalTask(${t.id}); closeModal('myTaskDetailsModal');" style="flex: 1; padding: 10px; font-weight: 600;">Удалить</button>
+        <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'personal'); closeModal('myTaskDetailsModal');" style="flex: 1; padding: 10px; font-weight: 600;">Сдвиг</button>
+      </div>
+    `;
+  }
+  
+  document.getElementById('myTaskDetailsModal').classList.remove('hidden');
+}
+
+/* ── Restore Chore From Archive ── */
+async function restoreChoreFromArchive(id) {
+  try {
+    await api('POST', `/api/archive/chores/${id}/restore`);
+    showToast('↩ Дело вернулось в Мои дела!');
+    loadChoresArchive(choresArchivePage);
+    loadPersonalTab();
+  } catch (e) {
+    showToast(`⚠️ ${e.message}`);
+  }
+}
+
+/* ── Spawn/Database Preset Add Flow ── */
+async function openAddFromDatabaseModal() {
+  closeModal('addChoreChoiceModal');
+  document.getElementById('addFromDbModal').classList.remove('hidden');
+  const list = document.getElementById('dbTemplatesList');
+  list.innerHTML = `<div class="loading-spinner"><div class="spinner"></div><p>Загрузка...</p></div>`;
+  
+  try {
+    const [templates, activeTasks] = await Promise.all([
+      api('GET', '/api/chores/templates'),
+      api('GET', '/api/house/tasks')
+    ]);
+    
+    const activeTemplateIds = new Set(activeTasks.map(t => t.template_id));
+    const inactive = templates.filter(t => !activeTemplateIds.has(t.id));
+    
+    if (!inactive.length) {
+      list.innerHTML = `<p style="color:var(--text3);text-align:center;padding:24px">Все шаблоны уже активны на сегодня</p>`;
+      return;
+    }
+    
+    list.innerHTML = inactive.map(t => `
+      <div class="archive-item" style="cursor:pointer;" onclick="spawnChoreFromTemplate(${t.id})">
+        <div class="archive-item-info">
+          <span class="archive-item-title">${escHtml(stripEmoji(t.title))}</span>
+          <span class="archive-item-meta">${periodLabel(t.periodicity)}</span>
+        </div>
+        <button class="btn btn-primary btn-xs" style="font-size:11px;padding:3px 8px;">Активировать</button>
+      </div>
+    `).join('');
+  } catch (e) {
+    list.innerHTML = `<p style="color:var(--danger);text-align:center;padding:24px">${e.message}</p>`;
+  }
+}
+
+async function spawnChoreFromTemplate(tmplId) {
+  try {
+    await api('POST', `/api/house/tasks/spawn`, { template_id: tmplId });
+    showToast('✅ Дело активировано на сегодня!');
+    closeModal('addFromDbModal');
+    loadHouseTab();
+  } catch (e) {
+    showToast(`⚠️ ${e.message}`);
+  }
+}
+
+window.openMyTaskDetails = openMyTaskDetails;
+window.restoreChoreFromArchive = restoreChoreFromArchive;
+window.openAddFromDatabaseModal = openAddFromDatabaseModal;
+window.spawnChoreFromTemplate = spawnChoreFromTemplate;
+window.submitCookingDone = submitCookingDone;
