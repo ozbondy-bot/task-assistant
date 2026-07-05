@@ -216,11 +216,12 @@ body {
   inset: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  padding: 16px;
+  padding: 16px 16px 80px 16px;
   display: none;
   flex-direction: column;
   gap: 12px;
   scroll-behavior: smooth;
+  box-sizing: border-box;
 }
 
 .tab-pane::-webkit-scrollbar { width: 4px; }
@@ -260,6 +261,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  flex: 1;
 }
 
 .task-card {

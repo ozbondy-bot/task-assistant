@@ -379,7 +379,7 @@ async def unclaim_house_task(instance_id: int, user: User = Depends(get_current_
 # -- House info & members --
 @app.get("/api/house/members")
 async def get_house_members(user: User = Depends(get_current_user)):
-    from bot.handlers.base import get_house_today_date, get_template_next_date_val
+    from bot.handlers.base import get_house_today_date, get_template_next_date
     import zoneinfo
     from datetime import date, datetime, timedelta, timezone
     
@@ -399,6 +399,54 @@ async def get_house_members(user: User = Depends(get_current_user)):
         end_msk = datetime.combine(sunday_date, datetime.max.time()).replace(tzinfo=msk_tz)
         end_utc = end_msk.astimezone(timezone.utc).replace(tzinfo=None)
         
+        # Bulk pre-fetch all handled/done dates to avoid database query roundtrips in loop
+        last_done_result = await session.execute(
+            select(TaskInstance.template_id, func.max(TaskInstance.date))
+            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
+            .where(and_(TaskTemplate.house_id == ACTIVE_HOUSE_ID, TaskInstance.status == "done"))
+            .group_by(TaskInstance.template_id)
+        )
+        last_done_map = {row[0]: row[1] for row in last_done_result.all()}
+        
+        last_handled_result = await session.execute(
+            select(TaskInstance.template_id, func.max(TaskInstance.date))
+            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
+            .where(and_(TaskTemplate.house_id == ACTIVE_HOUSE_ID, TaskInstance.status.in_(["done", "skipped"])))
+            .group_by(TaskInstance.template_id)
+        )
+        last_handled_map = {row[0]: row[1] for row in last_handled_result.all()}
+        
+        active_inst_result = await session.execute(
+            select(TaskInstance.template_id, func.min(TaskInstance.date))
+            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
+            .where(and_(TaskTemplate.house_id == ACTIVE_HOUSE_ID, TaskInstance.status.in_(["free", "in_progress"])))
+            .group_by(TaskInstance.template_id)
+        )
+        active_inst_map = {row[0]: row[1] for row in active_inst_result.all()}
+        
+        house = await session.get(House, ACTIVE_HOUSE_ID)
+        
+        today_inst_result = await session.execute(
+            select(TaskInstance.template_id, func.count(TaskInstance.id))
+            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
+            .where(and_(TaskTemplate.house_id == ACTIVE_HOUSE_ID, TaskInstance.date == monday_date))
+            .group_by(TaskInstance.template_id)
+        )
+        today_inst_map = {row[0]: row[1] for row in today_inst_result.all()}
+        
+        def get_next_date_local(tmpl, base_date):
+            l_done = last_done_map.get(tmpl.id)
+            l_handled = last_handled_map.get(tmpl.id)
+            act_inst = active_inst_map.get(tmpl.id)
+            
+            gen_done = (house.last_summary_date >= base_date) if (house and house.last_summary_date) else False
+            if gen_done:
+                inst_count = today_inst_map.get(tmpl.id, 0)
+                if inst_count == 0:
+                    l_handled = base_date
+            
+            return get_template_next_date(tmpl, l_handled, act_inst, base_date)
+            
         # 1. Total weekly target points for the house
         templates = (await session.execute(
             select(TaskTemplate).where(
@@ -410,44 +458,46 @@ async def get_house_members(user: User = Depends(get_current_user)):
         )).scalars().all()
         
         total_weekly_target_points = 0
-        for i in range(7):
-            current_day = monday_date + timedelta(days=i)
-            weekday = current_day.weekday()
-            day = current_day.day
-            month = current_day.month
+        for tmpl in templates:
+            occurrences = 0
+            p = tmpl.periodicity
             
-            for tmpl in templates:
-                if tmpl.start_date and current_day < tmpl.start_date:
+            next_occ = get_next_date_local(tmpl, monday_date)
+            
+            for d_idx in range(7):
+                curr_d = monday_date + timedelta(days=d_idx)
+                if tmpl.start_date and curr_d < tmpl.start_date:
                     continue
                     
-                p = tmpl.periodicity
                 should_occur = False
                 if p == "daily":
                     should_occur = True
                 elif p == "weekly":
-                    should_occur = (weekday == (tmpl.weekday if tmpl.weekday is not None else 0))
+                    should_occur = (curr_d.weekday() == (tmpl.weekday if tmpl.weekday is not None else 0))
                 elif p == "twice_weekly":
-                    should_occur = (weekday in (0, 3))
+                    should_occur = (curr_d.weekday() in (0, 3))
                 elif p == "monthly":
-                    should_occur = (day == (tmpl.month_day if tmpl.month_day is not None else 1))
+                    should_occur = (curr_d.day == (tmpl.month_day if tmpl.month_day is not None else 1))
                 elif p == "twice_monthly":
-                    should_occur = (day in (5, 20))
+                    should_occur = (curr_d.day in (5, 20))
                 elif p == "quarterly":
-                    if day == (tmpl.month_day if tmpl.month_day is not None else 1):
-                        pos = ((month - 1) % 3) + 1
+                    if curr_d.day == (tmpl.month_day if tmpl.month_day is not None else 1):
+                        pos = ((curr_d.month - 1) % 3) + 1
                         if pos == (tmpl.weekday if tmpl.weekday is not None else 1):
                             should_occur = True
                 elif p == "every_x_days":
-                    _, nd = await get_template_next_date_val(session, tmpl, current_day)
-                    if nd == current_day:
+                    if curr_d == next_occ:
                         should_occur = True
+                        next_occ += timedelta(days=tmpl.period_days or 1)
                 elif p == "once":
-                    _, nd = await get_template_next_date_val(session, tmpl, current_day)
-                    if nd == current_day:
+                    if curr_d == next_occ:
                         should_occur = True
+                        next_occ = date(2099, 12, 31)
                         
                 if should_occur:
-                    total_weekly_target_points += tmpl.points
+                    occurrences += 1
+                    
+            total_weekly_target_points += occurrences * tmpl.points
                     
         # 2. Get members
         result = await session.execute(
@@ -462,7 +512,6 @@ async def get_house_members(user: User = Depends(get_current_user)):
             
         res_list = []
         for m in members:
-            # Sum completions points for m in this week
             earned = await session.scalar(
                 select(func.sum(Completion.points))
                 .where(
@@ -489,7 +538,7 @@ async def get_house_members(user: User = Depends(get_current_user)):
 
 @app.get("/api/house/weekly_goal_explanation")
 async def get_weekly_goal_explanation(user: User = Depends(get_current_user)):
-    from bot.handlers.base import get_house_today_date, get_template_next_date_val
+    from bot.handlers.base import get_house_today_date, get_template_next_date
     import zoneinfo
     from datetime import date, datetime, timedelta, timezone
     
@@ -497,6 +546,54 @@ async def get_weekly_goal_explanation(user: User = Depends(get_current_user)):
         today = await get_house_today_date(session)
         monday_date = today - timedelta(days=today.weekday())
         
+        # Bulk pre-fetch all handled/done dates to avoid database query roundtrips in loop
+        last_done_result = await session.execute(
+            select(TaskInstance.template_id, func.max(TaskInstance.date))
+            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
+            .where(and_(TaskTemplate.house_id == ACTIVE_HOUSE_ID, TaskInstance.status == "done"))
+            .group_by(TaskInstance.template_id)
+        )
+        last_done_map = {row[0]: row[1] for row in last_done_result.all()}
+        
+        last_handled_result = await session.execute(
+            select(TaskInstance.template_id, func.max(TaskInstance.date))
+            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
+            .where(and_(TaskTemplate.house_id == ACTIVE_HOUSE_ID, TaskInstance.status.in_(["done", "skipped"])))
+            .group_by(TaskInstance.template_id)
+        )
+        last_handled_map = {row[0]: row[1] for row in last_handled_result.all()}
+        
+        active_inst_result = await session.execute(
+            select(TaskInstance.template_id, func.min(TaskInstance.date))
+            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
+            .where(and_(TaskTemplate.house_id == ACTIVE_HOUSE_ID, TaskInstance.status.in_(["free", "in_progress"])))
+            .group_by(TaskInstance.template_id)
+        )
+        active_inst_map = {row[0]: row[1] for row in active_inst_result.all()}
+        
+        house = await session.get(House, ACTIVE_HOUSE_ID)
+        
+        today_inst_result = await session.execute(
+            select(TaskInstance.template_id, func.count(TaskInstance.id))
+            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
+            .where(and_(TaskTemplate.house_id == ACTIVE_HOUSE_ID, TaskInstance.date == monday_date))
+            .group_by(TaskInstance.template_id)
+        )
+        today_inst_map = {row[0]: row[1] for row in today_inst_result.all()}
+        
+        def get_next_date_local(tmpl, base_date):
+            l_done = last_done_map.get(tmpl.id)
+            l_handled = last_handled_map.get(tmpl.id)
+            act_inst = active_inst_map.get(tmpl.id)
+            
+            gen_done = (house.last_summary_date >= base_date) if (house and house.last_summary_date) else False
+            if gen_done:
+                inst_count = today_inst_map.get(tmpl.id, 0)
+                if inst_count == 0:
+                    l_handled = base_date
+            
+            return get_template_next_date(tmpl, l_handled, act_inst, base_date)
+            
         # Get all active templates
         templates = (await session.execute(
             select(TaskTemplate).where(
@@ -512,40 +609,39 @@ async def get_weekly_goal_explanation(user: User = Depends(get_current_user)):
         
         for tmpl in templates:
             occurrences = 0
-            for i in range(7):
-                current_day = monday_date + timedelta(days=i)
-                weekday = current_day.weekday()
-                day = current_day.day
-                month = current_day.month
-                
-                if tmpl.start_date and current_day < tmpl.start_date:
+            p = tmpl.periodicity
+            
+            next_occ = get_next_date_local(tmpl, monday_date)
+            
+            for d_idx in range(7):
+                curr_d = monday_date + timedelta(days=d_idx)
+                if tmpl.start_date and curr_d < tmpl.start_date:
                     continue
                     
-                p = tmpl.periodicity
                 should_occur = False
                 if p == "daily":
                     should_occur = True
                 elif p == "weekly":
-                    should_occur = (weekday == (tmpl.weekday if tmpl.weekday is not None else 0))
+                    should_occur = (curr_d.weekday() == (tmpl.weekday if tmpl.weekday is not None else 0))
                 elif p == "twice_weekly":
-                    should_occur = (weekday in (0, 3))
+                    should_occur = (curr_d.weekday() in (0, 3))
                 elif p == "monthly":
-                    should_occur = (day == (tmpl.month_day if tmpl.month_day is not None else 1))
+                    should_occur = (curr_d.day == (tmpl.month_day if tmpl.month_day is not None else 1))
                 elif p == "twice_monthly":
-                    should_occur = (day in (5, 20))
+                    should_occur = (curr_d.day in (5, 20))
                 elif p == "quarterly":
-                    if day == (tmpl.month_day if tmpl.month_day is not None else 1):
-                        pos = ((month - 1) % 3) + 1
-                        if pos == (tmpl.weekday if tmpl.weekday is not None else 1):
+                    if curr_d.day == (tmpl.month_day if tmpl.month_day is not None else 1):
+                        pos = ((curr_d.month - 1) % 3) + 1
+                        if pos == (curr_d.weekday() if tmpl.weekday is not None else 1):
                             should_occur = True
                 elif p == "every_x_days":
-                    _, nd = await get_template_next_date_val(session, tmpl, current_day)
-                    if nd == current_day:
+                    if curr_d == next_occ:
                         should_occur = True
+                        next_occ += timedelta(days=tmpl.period_days or 1)
                 elif p == "once":
-                    _, nd = await get_template_next_date_val(session, tmpl, current_day)
-                    if nd == current_day:
+                    if curr_d == next_occ:
                         should_occur = True
+                        next_occ = date(2099, 12, 31)
                         
                 if should_occur:
                     occurrences += 1
@@ -1532,6 +1628,35 @@ async def startup_db_cleanup():
                 .where(Completion.user_id == u.id)
             ) or 0
             u.points = sum_points
+            
+        # 4. Clean duplicate task instances (same template_id and date)
+        from collections import defaultdict
+        inst_res = await session.execute(select(TaskInstance))
+        instances = inst_res.scalars().all()
+        
+        groups = defaultdict(list)
+        for inst in instances:
+            groups[(inst.template_id, inst.date)].append(inst)
+            
+        duplicates = {k: v for k, v in groups.items() if len(v) > 1}
+        for (tmpl_id, d), inst_list in duplicates.items():
+            inst_ids = [inst.id for inst in inst_list]
+            comp_res = await session.execute(
+                select(Completion.task_instance_id).where(Completion.task_instance_id.in_(inst_ids))
+            )
+            completed_inst_ids = set(comp_res.scalars().all())
+            
+            def sort_key(inst):
+                is_completed = 1 if inst.id in completed_inst_ids else 0
+                is_done = 1 if inst.status == 'done' else 0
+                return (is_completed, is_done, -inst.id)
+                
+            sorted_insts = sorted(inst_list, key=sort_key, reverse=True)
+            keep_inst = sorted_insts[0]
+            delete_insts = sorted_insts[1:]
+            
+            for inst in delete_insts:
+                await session.delete(inst)
             
         await session.commit()
 
