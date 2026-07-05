@@ -527,12 +527,7 @@ async def cmd_start(message: types.Message, db_user: User = None):
     except Exception as e:
         logger.error(f"Failed to set chat menu button: {e}")
 
-    # Remove reply keyboard quietly
-    try:
-        tmp = await message.answer("🧹", reply_markup=types.ReplyKeyboardRemove())
-        await tmp.delete()
-    except Exception:
-        pass
+    # Remove reply keyboard quietly (optional, disabled to prevent flash)
     
     text = (
         "👋 Привет!\n\n"

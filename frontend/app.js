@@ -103,11 +103,16 @@ function setupTabs() {
   });
 }
 
+function showSpinnerIfNeeded(container, selector = '.task-card, .reward-card, .shopping-card, .archive-item') {
+  if (!container.querySelector(selector) && !container.querySelector('.empty-state')) {
+    container.innerHTML = `<div class="loading-spinner"><div class="spinner"></div><p>Загрузка...</p></div>`;
+  }
+}
+
 // ── House Tab ─────────────────────────────────────────────────────────────────
 async function loadHouseTab() {
   const list = document.getElementById('houseTasksList');
-  const mList = document.getElementById('membersList');
-  list.innerHTML = `<div class="loading-spinner"><div class="spinner"></div><p>Загрузка...</p></div>`;
+  showSpinnerIfNeeded(list, '.task-card');
 
   try {
     const [tasks, members] = await Promise.all([
@@ -171,16 +176,27 @@ function renderMembers(members) {
   if (!container) return;
   const sorted = [...members].sort((a, b) => b.points - a.points);
   
-  container.innerHTML = sorted.map(m => {
-    const isMeStyle = m.is_me ? 'font-weight: 700; color: var(--accent);' : 'color: var(--text2);';
-    return `<span style="${isMeStyle}">${escHtml(m.display_name || 'Участник')}: ${m.points} ✨</span>`;
-  }).join('<span style="color:var(--text3); margin: 0 4px;">•</span>');
+  const m1 = sorted[0];
+  const m2 = sorted[1];
+  
+  let html = '';
+  if (m1) {
+    const isMeStyle = m1.is_me ? 'font-weight: 700; color: var(--accent);' : 'color: var(--text1);';
+    html += `<span style="${isMeStyle} text-align: left; flex: 1;">${escHtml(m1.display_name || 'Участник')}: ${m1.points} ✨</span>`;
+  }
+  if (m2) {
+    const isMeStyle = m2.is_me ? 'font-weight: 700; color: var(--accent);' : 'color: var(--text1);';
+    html += `<span style="${isMeStyle} text-align: right; flex: 1;">${escHtml(m2.display_name || 'Участник')}: ${m2.points} ✨</span>`;
+  } else {
+    html += `<span style="flex: 1;"></span>`;
+  }
+  container.innerHTML = html;
 }
 
 // ── Personal Tab ──────────────────────────────────────────────────────────────
 async function loadPersonalTab() {
   const list = document.getElementById('personalTasksList');
-  list.innerHTML = `<div class="loading-spinner"><div class="spinner"></div><p>Загрузка...</p></div>`;
+  showSpinnerIfNeeded(list, '.task-card');
 
   try {
     const data = await api('GET', '/api/tasks/today');
@@ -453,7 +469,7 @@ function setupFABs() {
 // ── Shopping Tab ──────────────────────────────────────────────────────────────
 async function loadShoppingTab() {
   const list = document.getElementById('shoppingList');
-  list.innerHTML = `<div class="loading-spinner"><div class="spinner"></div><p>Загрузка...</p></div>`;
+  showSpinnerIfNeeded(list, '.shop-item-card');
 
   try {
     const items = await api('GET', '/api/shopping');
@@ -505,7 +521,7 @@ async function markBought(id, el) {
 async function loadShopTab() {
   const rList = document.getElementById('rewardsList');
   const lb = document.getElementById('leaderboard');
-  rList.innerHTML = `<div class="loading-spinner"><div class="spinner"></div><p>Загрузка...</p></div>`;
+  showSpinnerIfNeeded(rList, '.reward-card');
 
   try {
     const [rewardsData, statsData] = await Promise.all([
@@ -615,8 +631,8 @@ function recLabel(r) {
 async function loadSettingsTab() {
   const choresList = document.getElementById('settingsChoresList');
   const rewardsList = document.getElementById('settingsRewardsList');
-  choresList.innerHTML = `<div class="loading-spinner"><div class="spinner"></div><p>Загрузка...</p></div>`;
-  rewardsList.innerHTML = `<div class="loading-spinner"><div class="spinner"></div><p>Загрузка...</p></div>`;
+  showSpinnerIfNeeded(choresList, '.task-card');
+  showSpinnerIfNeeded(rewardsList, '.reward-card');
 
   try {
     const [templates, rewardsData] = await Promise.all([
@@ -648,11 +664,17 @@ function renderChoresTemplates(templates) {
   });
 
   list.innerHTML = templates.map(t => {
-    const nextStr = t.next_execution ? new Date(t.next_execution).toLocaleDateString('ru-RU') : 'Нет даты';
+    let nextStr = 'Нет';
+    if (t.next_execution) {
+      const dt = new Date(t.next_execution);
+      const day = String(dt.getDate()).padStart(2, '0');
+      const month = String(dt.getMonth() + 1).padStart(2, '0');
+      nextStr = `${day}.${month}.`;
+    }
     return `
-      <div class="task-card house-task flex-between" onclick="openTemplateDetailsModal(${JSON.stringify(t).replace(/"/g, '&quot;')})" style="padding: 10px 12px; cursor: pointer; margin-bottom: 8px;">
+      <div class="task-card house-task flex-between" onclick="openTemplateDetailsModal(${JSON.stringify(t).replace(/"/g, '&quot;')})" style="padding: 0 12px; cursor: pointer; margin-bottom: 8px; height: 52px; align-items: center; display: flex;">
         <span style="font-weight: 500; font-size: 14px;">${escHtml(stripEmoji(t.title))}</span>
-        <span class="task-badge" style="font-size: 11px; background: var(--bg3); color: var(--text3); border-radius: 4px; padding: 2px 4px;">📅 ${nextStr}</span>
+        <span class="task-badge" style="font-size: 13px; font-weight: 600; background: var(--bg3); color: var(--text2); border-radius: 8px; width: 80px; height: 42px; display: flex; align-items: center; justify-content: center; box-sizing: border-box; flex-shrink: 0; margin-left: auto;">📅 ${nextStr}</span>
       </div>
     `;
   }).join('');
@@ -957,11 +979,11 @@ function openChoreDetails(t) {
   const actions = document.getElementById('choreDetailsActions');
   actions.innerHTML = `
     <div style="display: flex; gap: 6px; width: 100%; align-items: center;">
-      <button class="btn btn-primary" onclick="claimTask(${t.id}); closeModal('choreDetailsModal');" style="flex: 1; padding: 10px 2px; font-size: 13px; font-weight: 600; background: var(--success); border-color: var(--success);">Взять</button>
-      <button class="btn btn-secondary" onclick="nudgeTask(${t.id}); closeModal('choreDetailsModal');" style="flex: 1; padding: 10px 2px; font-size: 13px; font-weight: 600;">Намек</button>
-      <button class="btn btn-secondary" onclick="skipFreeChore(${t.id}); closeModal('choreDetailsModal');" style="flex: 1; padding: 10px 2px; font-size: 13px; font-weight: 600;">Копия</button>
-      <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'chore'); closeModal('choreDetailsModal');" style="flex: 1; padding: 10px 2px; font-size: 13px; font-weight: 600;">Сдвиг</button>
-      <button class="btn btn-secondary" onclick="goToChoreTemplateSettings(${t.template_id}); closeModal('choreDetailsModal');" style="width: 42px; height: 42px; padding: 0; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0;">⚙️</button>
+      <button class="btn btn-primary" onclick="claimTask(${t.id}); closeModal('choreDetailsModal');" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 2px; font-size: 13px; font-weight: 600; background: var(--success); border-color: var(--success);">Взять</button>
+      <button class="btn btn-secondary" onclick="nudgeTask(${t.id}); closeModal('choreDetailsModal');" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 2px; font-size: 13px; font-weight: 600;">Намек</button>
+      <button class="btn btn-secondary" onclick="skipFreeChore(${t.id}); closeModal('choreDetailsModal');" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 2px; font-size: 13px; font-weight: 600;">Убрать</button>
+      <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'chore'); closeModal('choreDetailsModal');" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 2px; font-size: 13px; font-weight: 600;">Сдвиг</button>
+      <button class="btn btn-secondary" onclick="goToChoreTemplateSettings(${t.template_id}, '${escAttr(t.title)}', ${t.points}, '${t.periodicity}', ${t.period_days || 'null'}, ${t.last_completed ? `'${t.last_completed}'` : 'null'}, ${t.next_execution ? `'${t.next_execution}'` : 'null'}); closeModal('choreDetailsModal');" style="width: 42px; height: 42px; box-sizing: border-box; padding: 0; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0;">⚙️</button>
     </div>
   `;
   document.getElementById('choreDetailsModal').classList.remove('hidden');
@@ -1054,17 +1076,17 @@ function openMyTaskDetails(t, type) {
   if (type === 'household') {
     actions.innerHTML = `
       <div style="display: flex; gap: 6px; width: 100%;">
-        <button class="btn btn-primary" onclick="completeHouseTask(${t.id}, '${escAttr(title)}'); closeModal('myTaskDetailsModal');" style="flex: 1; padding: 10px 4px; font-size: 13px; font-weight: 600;">Выполнить</button>
-        <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'chore'); closeModal('myTaskDetailsModal');" style="flex: 1; padding: 10px 4px; font-size: 13px; font-weight: 600;">Сдвиг</button>
-        <button class="btn btn-secondary" onclick="unclaimChore(${t.id}); closeModal('myTaskDetailsModal');" style="flex: 1; padding: 10px 4px; font-size: 13px; font-weight: 600;">Вернуть</button>
+        <button class="btn btn-primary" onclick="completeHouseTask(${t.id}, '${escAttr(title)}'); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 4px; font-size: 13px; font-weight: 600;">Выполнить</button>
+        <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'chore'); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 4px; font-size: 13px; font-weight: 600;">Сдвиг</button>
+        <button class="btn btn-secondary" onclick="unclaimChore(${t.id}); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 4px; font-size: 13px; font-weight: 600;">Вернуть</button>
       </div>
     `;
   } else {
     actions.innerHTML = `
       <div style="display: flex; gap: 6px; width: 100%;">
-        <button class="btn btn-primary" onclick="completePersonalTask(${t.id}); closeModal('myTaskDetailsModal');" style="flex: 1; padding: 10px 4px; font-size: 13px; font-weight: 600;">Выполнить</button>
-        <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'personal'); closeModal('myTaskDetailsModal');" style="flex: 1; padding: 10px 4px; font-size: 13px; font-weight: 600;">Сдвиг</button>
-        <button class="btn btn-secondary" onclick="deletePersonalTask(${t.id}); closeModal('myTaskDetailsModal');" style="flex: 1; padding: 10px 4px; font-size: 13px; font-weight: 600; background: var(--danger); border-color: var(--danger);">Удалить</button>
+        <button class="btn btn-primary" onclick="completePersonalTask(${t.id}); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 4px; font-size: 13px; font-weight: 600;">Выполнить</button>
+        <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'personal'); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 4px; font-size: 13px; font-weight: 600;">Сдвиг</button>
+        <button class="btn btn-secondary" onclick="deletePersonalTask(${t.id}); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; box-sizing: border-box; padding: 0 4px; font-size: 13px; font-weight: 600; background: var(--danger); border-color: var(--danger);">Удалить</button>
       </div>
     `;
   }
@@ -1113,12 +1135,18 @@ async function openAddFromDatabaseModal() {
     });
     
     list.innerHTML = inactive.map(t => {
-      const nextStr = t.next_execution ? new Date(t.next_execution).toLocaleDateString('ru-RU') : 'Нет даты';
+      let nextStr = 'Нет';
+      if (t.next_execution) {
+        const dt = new Date(t.next_execution);
+        const day = String(dt.getDate()).padStart(2, '0');
+        const month = String(dt.getMonth() + 1).padStart(2, '0');
+        nextStr = `${day}.${month}.`;
+      }
       return `
         <div class="archive-item" style="display: flex; justify-content: space-between; align-items: center; padding: 10px; border-bottom: 1px solid var(--border);">
           <div class="archive-item-info" style="text-align: left; flex: 1; padding-right: 8px;">
             <span class="archive-item-title" style="font-weight: 500; font-size: 14px; display: block; margin-bottom: 2px;">${escHtml(stripEmoji(t.title))}</span>
-            <span class="archive-item-meta" style="font-size: 11px; color: var(--text3);">📅 Ближайший: ${nextStr}</span>
+            <span class="archive-item-meta" style="font-size: 11px; color: var(--text3);">📅 ${nextStr}</span>
           </div>
           <button class="btn btn-primary btn-xs" onclick="spawnChoreFromTemplate(${t.id})" style="width: 80px; padding: 6px 0; text-align: center; font-size: 12px; flex-shrink: 0;">Добавить</button>
         </div>
@@ -1249,17 +1277,18 @@ function deleteTemplate(id) {
   deleteChoreTemplate(id);
 }
 
-async function goToChoreTemplateSettings(templateId) {
+function goToChoreTemplateSettings(templateId, title, points, periodicity, periodDays, lastCompleted, nextExecution) {
   switchTab('settings');
-  try {
-    const templates = await api('GET', '/api/chores/templates');
-    const t = templates.find(item => item.id === templateId);
-    if (t) {
-      openTemplateDetailsModal(t);
-    }
-  } catch (e) {
-    showToast(`⚠️ ${e.message}`);
-  }
+  const t = {
+    id: templateId,
+    title: title,
+    points: points,
+    periodicity: periodicity,
+    period_days: periodDays,
+    last_completed: lastCompleted,
+    next_execution: nextExecution
+  };
+  openTemplateDetailsModal(t);
 }
 
 window.openMyTaskDetails = openMyTaskDetails;

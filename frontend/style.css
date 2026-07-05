@@ -48,7 +48,7 @@ body {
 .app-header {
   background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
   border-bottom: 1px solid var(--border);
-  padding: 12px 16px;
+  padding: 6px 12px;
   flex-shrink: 0;
   position: relative;
   overflow: hidden;
@@ -679,10 +679,13 @@ body {
   color: white;
   border: none;
   cursor: pointer;
-  font-size: 28px;
+  font-size: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
+  line-height: 1;
+  padding-bottom: 5px;
+  box-sizing: border-box;
   box-shadow: 0 4px 20px rgba(124, 111, 247, 0.5);
   transition: all 0.2s;
   font-family: var(--font);
