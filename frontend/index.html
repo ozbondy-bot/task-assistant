@@ -145,12 +145,9 @@
 
       <!-- SHOP / REWARDS TAB -->
       <section class="tab-pane" id="pane-shop">
-        <div class="section-header flex-between" style="align-items: center; width: 100%;">
-          <div>
-            <h2>Магазин наград</h2>
-            <p class="section-sub">Трать очки на приятные бонусы</p>
-          </div>
-          <button class="btn btn-secondary btn-xs" id="viewPurchasesArchiveBtn">История</button>
+        <div class="section-header">
+          <h2>Магазин наград</h2>
+          <p class="section-sub">Трать очки на приятные бонусы</p>
         </div>
         <div id="rewardsList" class="rewards-list"></div>
 
@@ -276,6 +273,66 @@
     </div>
   </div>
 
+  <!-- Purchases Archive Modal -->
+  <div class="modal-overlay hidden" id="purchasesArchiveModal">
+    <div class="modal-card modal-large">
+      <div class="modal-header-row">
+        <h3>🛍 История покупок</h3>
+        <button class="btn-close-modal" onclick="closeModal('purchasesArchiveModal')">✕</button>
+      </div>
+      <div id="purchasesArchiveList" class="archive-list"></div>
+      <div class="archive-pagination" id="purchasesArchivePagination"></div>
+    </div>
+  </div>
+
+  <!-- Archived Chore Details Modal -->
+  <div class="modal-overlay hidden" id="archivedChoreDetailsModal">
+    <div class="modal-card">
+      <div class="modal-header-row" style="margin-bottom: 16px;">
+        <h3 id="archivedChoreTitle">Детали дела</h3>
+        <button class="btn-close-modal" onclick="closeModal('archivedChoreDetailsModal')">✕</button>
+      </div>
+      <div id="archivedChoreBody" style="margin-bottom: 20px; font-size: 14px; color: var(--text2); display: flex; flex-direction: column; gap: 8px;">
+        <!-- Injected details -->
+      </div>
+      <div id="archivedChoreActions">
+        <!-- Action button -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Archived Task Details Modal -->
+  <div class="modal-overlay hidden" id="archivedTaskDetailsModal">
+    <div class="modal-card">
+      <div class="modal-header-row" style="margin-bottom: 16px;">
+        <h3 id="archivedTaskTitle">Детали задачи</h3>
+        <button class="btn-close-modal" onclick="closeModal('archivedTaskDetailsModal')">✕</button>
+      </div>
+      <div id="archivedTaskBody" style="margin-bottom: 20px; font-size: 14px; color: var(--text2); display: flex; flex-direction: column; gap: 8px;">
+        <!-- Injected details -->
+      </div>
+      <div id="archivedTaskActions">
+        <!-- Action button -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Template Details Modal -->
+  <div class="modal-overlay hidden" id="templateDetailsModal">
+    <div class="modal-card">
+      <div class="modal-header-row" style="margin-bottom: 16px;">
+        <h3 id="templateDetailsTitle">Детали шаблона</h3>
+        <button class="btn-close-modal" onclick="closeModal('templateDetailsModal')">✕</button>
+      </div>
+      <div id="templateDetailsBody" style="margin-bottom: 20px; font-size: 14px; color: var(--text2); display: flex; flex-direction: column; gap: 8px;">
+        <!-- Injected details -->
+      </div>
+      <div class="modal-actions-stacked" id="templateDetailsActions">
+        <!-- Edit/Shift/Delete buttons -->
+      </div>
+    </div>
+  </div>
+
   <!-- Tasks Archive Modal -->
   <div class="modal-overlay hidden" id="tasksArchiveModal">
     <div class="modal-card modal-large">
@@ -374,7 +431,7 @@
         <button class="btn-close-modal" onclick="closeModal('addChoreChoiceModal')">✕</button>
       </div>
       <div style="display: flex; flex-direction: column; gap: 10px; width: 100%;">
-        <button class="btn btn-primary" onclick="closeModal('addChoreChoiceModal'); document.getElementById('addChoreModal').classList.remove('hidden');" style="width: 100%; padding: 12px; font-weight: 600;">Создать новое дело</button>
+        <button class="btn btn-primary" onclick="openNewTemplateCreator();" style="width: 100%; padding: 12px; font-weight: 600;">Создать новое дело</button>
         <button class="btn btn-secondary" onclick="openAddFromDatabaseModal();" style="width: 100%; padding: 12px; font-weight: 600;">Добавить из базы (шаблоны)</button>
       </div>
     </div>

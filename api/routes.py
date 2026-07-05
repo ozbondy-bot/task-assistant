@@ -513,26 +513,32 @@ async def get_stats(user: User = Depends(get_current_user)):
 # -- Chores templates --
 @app.get("/api/chores/templates")
 async def get_chores_templates(user: User = Depends(get_current_user)):
+    from bot.handlers.base import get_house_today_date, get_template_next_date_val
     async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
         result = await session.execute(
             select(TaskTemplate).where(
                 and_(
                     TaskTemplate.house_id == ACTIVE_HOUSE_ID,
                     TaskTemplate.deleted == False
                 )
-            ).order_by(TaskTemplate.id)
+            )
         )
         templates = result.scalars().all()
-    return [
-        {
-            "id": t.id,
-            "title": t.title,
-            "points": t.points,
-            "periodicity": t.periodicity,
-            "start_date": str(t.start_date) if t.start_date else None,
-        }
-        for t in templates
-    ]
+        
+        res_list = []
+        for t in templates:
+            last_done, nd = await get_template_next_date_val(session, t, today)
+            res_list.append({
+                "id": t.id,
+                "title": t.title,
+                "points": t.points,
+                "periodicity": t.periodicity,
+                "start_date": str(t.start_date) if t.start_date else None,
+                "last_completed": last_done.isoformat() if last_done else None,
+                "next_execution": nd.isoformat() if nd else None
+            })
+    return res_list
 
 class CreateTemplateRequest(BaseModel):
     title: str
@@ -628,6 +634,27 @@ async def create_chore_template(req: CreateTemplateRequest, user: User = Depends
             await session.commit()
             await session.refresh(tmpl)
             return {"ok": True, "id": tmpl.id, "title": tmpl.title}
+
+@app.put("/api/chores/templates/{template_id}")
+async def update_chore_template(template_id: int, req: CreateTemplateRequest, user: User = Depends(get_current_user)):
+    try:
+        start_date = datetime.strptime(req.start_date, "%Y-%m-%d").date() if req.start_date else None
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid start_date format (YYYY-MM-DD)")
+        
+    async with AsyncSessionLocal() as session:
+        tmpl = await session.get(TaskTemplate, template_id)
+        if not tmpl or tmpl.house_id != ACTIVE_HOUSE_ID:
+            raise HTTPException(status_code=404, detail="Template not found")
+            
+        tmpl.title = req.title
+        tmpl.points = req.points
+        tmpl.periodicity = req.periodicity
+        if start_date:
+            tmpl.start_date = start_date
+            
+        await session.commit()
+    return {"ok": True}
 
 @app.delete("/api/chores/templates/{template_id}")
 async def delete_chore_template(template_id: int, user: User = Depends(get_current_user)):
@@ -834,6 +861,35 @@ async def shift_personal_task(task_id: int, req: ShiftRequest, user: User = Depe
         await session.commit()
     return {"ok": True}
 
+@app.post("/api/chores/templates/{template_id}/shift")
+async def shift_chore_template(template_id: int, req: ShiftRequest, user: User = Depends(get_current_user)):
+    try:
+        new_date = datetime.strptime(req.new_date, "%Y-%m-%d").date()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid date format (YYYY-MM-DD)")
+        
+    async with AsyncSessionLocal() as session:
+        tmpl = await session.get(TaskTemplate, template_id)
+        if not tmpl or tmpl.house_id != user.house_id:
+            raise HTTPException(status_code=404, detail="Template not found")
+            
+        tmpl.start_date = new_date
+        
+        # Update any active instances
+        from sqlalchemy import update
+        await session.execute(
+            update(TaskInstance)
+            .where(
+                and_(
+                    TaskInstance.template_id == tmpl.id,
+                    TaskInstance.status.in_(["free", "in_progress", "shifted"])
+                )
+            )
+            .values(date=new_date)
+        )
+        await session.commit()
+    return {"ok": True}
+
 
 # ── Nudge and Archives Endpoints ──────────────────────────────────────────────
 
@@ -890,18 +946,23 @@ async def nudge_house_task(instance_id: int, user: User = Depends(get_current_us
     return {"ok": True}
 
 @app.get("/api/archive/chores")
-async def get_chores_archive(page: int = 0, limit: int = 10, user: User = Depends(get_current_user)):
+async def get_chores_archive(date: Optional[str] = None, user: User = Depends(get_current_user)):
     async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(Completion, User, TaskInstance, TaskTemplate)
-            .join(User, Completion.user_id == User.id)
-            .join(TaskInstance, Completion.task_instance_id == TaskInstance.id)
-            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
-            .where(TaskTemplate.house_id == ACTIVE_HOUSE_ID)
-            .order_by(Completion.created_at.desc())
-            .offset(page * limit)
-            .limit(limit)
-        )
+        query = select(Completion, User, TaskInstance, TaskTemplate).join(
+            User, Completion.user_id == User.id
+        ).join(
+            TaskInstance, Completion.task_instance_id == TaskInstance.id
+        ).join(
+            TaskTemplate, TaskInstance.template_id == TaskTemplate.id
+        ).where(TaskTemplate.house_id == ACTIVE_HOUSE_ID)
+        
+        if date:
+            from sqlalchemy import cast
+            parsed_date = datetime.strptime(date, "%Y-%m-%d").date()
+            query = query.where(cast(Completion.created_at, Date) == parsed_date)
+            
+        query = query.order_by(Completion.created_at.desc())
+        result = await session.execute(query)
         rows = result.all()
         
     return [
@@ -909,26 +970,26 @@ async def get_chores_archive(page: int = 0, limit: int = 10, user: User = Depend
             "id": comp.id,
             "user": usr.display_name or usr.username or "Участник",
             "title": tmpl.title,
-            "points": comp.points or 0,
+            "points": comp.points or tmpl.points,
             "date": comp.created_at.isoformat(),
         }
         for comp, usr, inst, tmpl in rows
     ]
 
 @app.get("/api/archive/tasks")
-async def get_tasks_archive(page: int = 0, limit: int = 10, user: User = Depends(get_current_user)):
+async def get_tasks_archive(date: Optional[str] = None, user: User = Depends(get_current_user)):
     async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(PersonalTask)
-            .where(and_(
-                PersonalTask.user_id == user.id,
-                PersonalTask.is_completed == True,
-                PersonalTask.is_deleted == False
-            ))
-            .order_by(PersonalTask.date_execution.desc(), PersonalTask.id.desc())
-            .offset(page * limit)
-            .limit(limit)
-        )
+        query = select(PersonalTask).where(and_(
+            PersonalTask.user_id == user.id,
+            PersonalTask.is_completed == True,
+            PersonalTask.is_deleted == False
+        ))
+        if date:
+            parsed_date = datetime.strptime(date, "%Y-%m-%d").date()
+            query = query.where(PersonalTask.date_execution == parsed_date)
+            
+        query = query.order_by(PersonalTask.date_execution.desc(), PersonalTask.id.desc())
+        result = await session.execute(query)
         tasks = result.scalars().all()
     return [
         {

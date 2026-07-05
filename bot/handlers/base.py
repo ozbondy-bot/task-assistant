@@ -7,7 +7,7 @@ from aiogram.filters import CommandStart, Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, Date
+from sqlalchemy import select, and_, Date, func
 
 
 import sys
@@ -677,21 +677,21 @@ def get_template_next_date(t: TaskTemplate, last_done_date: date, active_inst_da
 async def get_template_next_date_val(session: AsyncSession, t: TaskTemplate, today_date: date):
     # Find last done date (for display)
     last_done_result = await session.execute(
-        select(sa.func.max(TaskInstance.date))
+        select(func.max(TaskInstance.date))
         .where(and_(TaskInstance.template_id == t.id, TaskInstance.status == "done"))
     )
     last_done = last_done_result.scalar()
 
     # Find last handled date (treating skipped as done for next date calculation)
     last_handled_result = await session.execute(
-        select(sa.func.max(TaskInstance.date))
+        select(func.max(TaskInstance.date))
         .where(and_(TaskInstance.template_id == t.id, TaskInstance.status.in_(["done", "skipped"])))
     )
     last_handled = last_handled_result.scalar()
     
     # Find active today/future instance
     active_inst_result = await session.execute(
-        select(sa.func.min(TaskInstance.date))
+        select(func.min(TaskInstance.date))
         .where(
             and_(
                 TaskInstance.template_id == t.id,
@@ -707,11 +707,10 @@ async def get_template_next_date_val(session: AsyncSession, t: TaskTemplate, tod
     generation_done = (house.last_summary_date >= today_date) if (house and house.last_summary_date) else False
     if generation_done:
         today_inst_count = await session.scalar(
-            select(sa.func.count(TaskInstance.id))
+            select(func.count(TaskInstance.id))
             .where(and_(TaskInstance.template_id == t.id, TaskInstance.date == today_date))
         )
-        if today_inst_count == 0:
-            last_handled = today_date
+        last_handled = today_date
     
     nd = get_template_next_date(t, last_handled, active_inst_date, today_date)
     return last_done, nd
