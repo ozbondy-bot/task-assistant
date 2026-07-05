@@ -674,23 +674,34 @@ function recLabel(r) {
 }
 
 // ── Settings Tab & Actions ───────────────────────────────────────────────────
+let currentSettingsSubTab = 'chores';
+
 async function loadSettingsTab() {
+  if (currentSettingsSubTab === 'chores') {
+    await loadSettingsChores();
+  } else {
+    await loadSettingsRewards();
+  }
+}
+
+async function loadSettingsChores() {
   const choresList = document.getElementById('settingsChoresList');
-  const rewardsList = document.getElementById('settingsRewardsList');
   showSpinnerIfNeeded(choresList, '.task-card');
-  showSpinnerIfNeeded(rewardsList, '.reward-card');
-
   try {
-    const [templates, rewardsData] = await Promise.all([
-      api('GET', '/api/chores/templates'),
-      api('GET', '/api/rewards'),
-    ]);
-
-    // Render templates & rewards
+    const templates = await api('GET', '/api/chores/templates');
     renderChoresTemplates(templates);
-    renderRewardsTemplates(rewardsData.rewards);
   } catch (e) {
     choresList.innerHTML = `<p style="color:var(--danger)">${e.message}</p>`;
+  }
+}
+
+async function loadSettingsRewards() {
+  const rewardsList = document.getElementById('settingsRewardsList');
+  showSpinnerIfNeeded(rewardsList, '.reward-card');
+  try {
+    const rewardsData = await api('GET', '/api/rewards');
+    renderRewardsTemplates(rewardsData.rewards);
+  } catch (e) {
     rewardsList.innerHTML = `<p style="color:var(--danger)">${e.message}</p>`;
   }
 }
@@ -1370,6 +1381,8 @@ function switchSettingsSubTab(sub) {
   
   if (!choresBtn || !rewardsBtn || !choresCont || !rewardsCont) return;
   
+  currentSettingsSubTab = sub;
+  
   if (sub === 'chores') {
     choresBtn.className = 'btn btn-primary';
     choresBtn.style.flex = '1';
@@ -1385,6 +1398,7 @@ function switchSettingsSubTab(sub) {
     
     choresCont.classList.remove('hidden');
     rewardsCont.classList.add('hidden');
+    loadSettingsChores();
   } else {
     choresBtn.className = 'btn btn-secondary';
     choresBtn.style.flex = '1';
@@ -1400,6 +1414,7 @@ function switchSettingsSubTab(sub) {
     
     choresCont.classList.add('hidden');
     rewardsCont.classList.remove('hidden');
+    loadSettingsRewards();
   }
 }
 window.switchSettingsSubTab = switchSettingsSubTab;

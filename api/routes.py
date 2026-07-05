@@ -991,9 +991,13 @@ async def get_chores_archive(date: Optional[str] = None, user: User = Depends(ge
         ).where(TaskTemplate.house_id == ACTIVE_HOUSE_ID)
         
         if date:
-            from sqlalchemy import cast
             parsed_date = datetime.strptime(date, "%Y-%m-%d").date()
-            query = query.where(cast(Completion.created_at, Date) == parsed_date)
+            start_dt = datetime.combine(parsed_date, datetime.min.time())
+            end_dt = datetime.combine(parsed_date, datetime.max.time())
+            query = query.where(and_(
+                Completion.created_at >= start_dt,
+                Completion.created_at <= end_dt
+            ))
             
         query = query.order_by(Completion.created_at.desc())
         result = await session.execute(query)
