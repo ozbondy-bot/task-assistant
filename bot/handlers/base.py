@@ -619,9 +619,9 @@ async def cmd_raschet(message: types.Message):
                 ))
             ) or 0
             
-            # Split target 1/3 for participant 1, 2/3 for participant 2
+            # Split target 2/3 for participant 1, 1/3 for participant 2
             if len(sorted_members) >= 2:
-                member_target = int(total_weekly_target_points * 1 / 3) if index == 0 else int(total_weekly_target_points * 2 / 3)
+                member_target = int(total_weekly_target_points * 2 / 3) if index == 0 else int(total_weekly_target_points * 1 / 3)
             else:
                 member_target = total_weekly_target_points
             
@@ -867,6 +867,7 @@ async def calculate_weekly_target_points(session: AsyncSession, house_id: int, t
     from datetime import timedelta
     
     monday_date = today - timedelta(days=today.weekday())
+    sunday_date = monday_date + timedelta(days=6)
     
     # Bulk pre-fetch all handled/done dates to avoid database query roundtrips in loop
     last_done_result = await session.execute(
@@ -925,24 +926,18 @@ async def calculate_weekly_target_points(session: AsyncSession, house_id: int, t
         )
     )).scalars().all()
     
-    # Query all existing non-skipped instances for this week to verify them
-    instances_result = await session.execute(
-        select(TaskInstance)
-        .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
+    # Query skipped instances counts for this week in bulk
+    skipped_result = await session.execute(
+        select(TaskInstance.template_id, func.count(TaskInstance.id))
         .where(and_(
-            TaskTemplate.house_id == house_id,
-            TaskTemplate.deleted == False,
             TaskInstance.date >= monday_date,
-            TaskInstance.date <= today,
-            TaskInstance.status != "skipped"
+            TaskInstance.date <= sunday_date,
+            TaskInstance.status == "skipped"
         ))
+        .group_by(TaskInstance.template_id)
     )
-    # Map (template_id, date) -> count of non-skipped instances
-    actual_instances_map = {}
-    for inst in instances_result.scalars().all():
-        key = (inst.template_id, inst.date)
-        actual_instances_map[key] = actual_instances_map.get(key, 0) + 1
-        
+    skipped_map = {row[0]: row[1] for row in skipped_result.all()}
+    
     total_weekly_target_points = 0
     templates_detail = []
     
@@ -957,39 +952,38 @@ async def calculate_weekly_target_points(session: AsyncSession, house_id: int, t
             if tmpl.start_date and curr_d < tmpl.start_date:
                 continue
                 
-            if curr_d <= today:
-                # Count actual non-skipped instances from database
-                occurrences += actual_instances_map.get((tmpl.id, curr_d), 0)
-            else:
-                # Simulate future days
-                should_occur = False
-                if p == "daily":
+            should_occur = False
+            if p == "daily":
+                should_occur = True
+            elif p == "weekly":
+                should_occur = (curr_d.weekday() == (tmpl.weekday if tmpl.weekday is not None else 0))
+            elif p == "twice_weekly":
+                should_occur = (curr_d.weekday() in (0, 3))
+            elif p == "monthly":
+                should_occur = (curr_d.day == (tmpl.month_day if tmpl.month_day is not None else 1))
+            elif p == "twice_monthly":
+                should_occur = (curr_d.day in (5, 20))
+            elif p == "quarterly":
+                if curr_d.day == (tmpl.month_day if tmpl.month_day is not None else 1):
+                    pos = ((curr_d.month - 1) % 3) + 1
+                    if pos == (tmpl.weekday if tmpl.weekday is not None else 1):
+                        should_occur = True
+            elif p == "every_x_days":
+                if curr_d == next_occ:
                     should_occur = True
-                elif p == "weekly":
-                    should_occur = (curr_d.weekday() == (tmpl.weekday if tmpl.weekday is not None else 0))
-                elif p == "twice_weekly":
-                    should_occur = (curr_d.weekday() in (0, 3))
-                elif p == "monthly":
-                    should_occur = (curr_d.day == (tmpl.month_day if tmpl.month_day is not None else 1))
-                elif p == "twice_monthly":
-                    should_occur = (curr_d.day in (5, 20))
-                elif p == "quarterly":
-                    if curr_d.day == (tmpl.month_day if tmpl.month_day is not None else 1):
-                        pos = ((curr_d.month - 1) % 3) + 1
-                        if pos == (tmpl.weekday if tmpl.weekday is not None else 1):
-                            should_occur = True
-                elif p == "every_x_days":
-                    if curr_d == next_occ:
-                        should_occur = True
-                        next_occ += timedelta(days=tmpl.period_days or 1)
-                elif p == "once":
-                    if curr_d == next_occ:
-                        should_occur = True
-                        next_occ = date(2099, 12, 31)
-                        
-                if should_occur:
-                    occurrences += 1
+                    next_occ += timedelta(days=tmpl.period_days or 1)
+            elif p == "once":
+                if curr_d == next_occ:
+                    should_occur = True
+                    next_occ = date(2099, 12, 31)
                     
+            if should_occur:
+                occurrences += 1
+                
+        # Subtract skipped instances
+        skipped_count = skipped_map.get(tmpl.id, 0)
+        occurrences = max(0, occurrences - skipped_count)
+        
         if occurrences > 0:
             total_weekly_target_points += occurrences * tmpl.points
             templates_detail.append({

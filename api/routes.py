@@ -1,6 +1,6 @@
 import os
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Header, Depends, Request
@@ -555,9 +555,9 @@ async def get_house_members(user: User = Depends(get_current_user)):
                 )
             ) or 0
             
-            # Split target 1/3 for first, 2/3 for second member
+            # Split target 2/3 for first, 1/3 for second member
             if len(sorted_members) >= 2:
-                member_target = int(total_weekly_target_points * 1 / 3) if index == 0 else int(total_weekly_target_points * 2 / 3)
+                member_target = int(total_weekly_target_points * 2 / 3) if index == 0 else int(total_weekly_target_points * 1 / 3)
             else:
                 member_target = total_weekly_target_points
                 

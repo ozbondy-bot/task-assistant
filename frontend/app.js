@@ -81,7 +81,7 @@ async function loadWeeklyGoal() {
   try {
     const members = await api('GET', '/api/house/members');
     headerEl.innerHTML = members.map(m => {
-      return `<span style="font-weight: 600; font-size: 13px;">${escHtml(m.display_name)}: ${m.weekly_earned}/${m.weekly_target} ⭐</span>`;
+      return `<span style="font-weight: 600; font-size: 13px;">${escHtml(m.display_name)}: ${m.weekly_earned}/${m.weekly_target} ✨</span>`;
     }).join('<span style="color: var(--text3); margin: 0 10px;">|</span>');
   } catch (e) {
     console.error('Failed to load weekly goal:', e);
@@ -126,7 +126,7 @@ async function openWeeklyGoalExplanation() {
         <div style="display: flex; justify-content: space-between;"><span>Общая сумма очков дома:</span><strong>${data.total_points} ✨</strong></div>
         <div style="display: flex; justify-content: space-between;"><span>Количество участников:</span><strong>${data.num_members}</strong></div>
         <div style="font-size: 14px; margin-top: 6px; border-top: 1px solid var(--border); padding-top: 6px; display: flex; justify-content: space-between; color: var(--accent2);">
-          <span>Цель на каждого:</span><strong>${data.target_points} ⭐</strong>
+          <span>Цель на каждого:</span><strong>${data.target_points} ✨</strong>
         </div>
       </div>
       <h4 style="margin: 8px 0 2px 0; color: var(--text); font-size: 14px;">Список планируемых задач:</h4>
@@ -897,7 +897,7 @@ function renderRewardsTemplates(rewards) {
   list.innerHTML = rewards.map(r => `
     <div class="settings-item" onclick="openRewardTemplateDetails(${JSON.stringify(r).replace(/"/g, '&quot;')})" style="cursor:pointer;">
       <span class="settings-item-title" style="flex:1; font-size:13px;">${escHtml(stripEmoji(r.title))}</span>
-      <span style="font-size:12px; font-weight:600; color:var(--warning); white-space:nowrap;">${r.price} ⭐</span>
+      <span style="font-size:12px; font-weight:600; color:var(--warning); white-space:nowrap;">${r.price} ✨</span>
     </div>
   `).join('');
 }
@@ -905,7 +905,7 @@ function renderRewardsTemplates(rewards) {
 function openRewardTemplateDetails(r) {
   document.getElementById('templateDetailsTitle').textContent = stripEmoji(r.title);
   document.getElementById('templateDetailsBody').innerHTML = `
-    <div>⭐ <strong>Стоимость:</strong> <span>${r.price} ⭐</span></div>
+    <div>✨ <strong>Стоимость:</strong> <span>${r.price} ✨</span></div>
     ${r.base_days ? `<div>📅 <strong>База (дней):</strong> <span>${r.base_days}</span></div>` : ''}
   `;
   const actions = document.getElementById('templateDetailsActions');
@@ -1153,7 +1153,7 @@ async function loadPurchasesArchive(page) {
             <span class="archive-item-title">${escHtml(p.reward_title)}</span>
             <span class="archive-item-meta">${dtStr} • Купил: ${escHtml(p.user)}</span>
           </div>
-          <span class="task-badge badge-points" style="background:rgba(251,191,36,0.15);color:var(--warning);font-size:11px;">-${p.price} ⭐</span>
+          <span class="task-badge badge-points" style="background:rgba(251,191,36,0.15);color:var(--warning);font-size:11px;">-${p.price} ✨</span>
         </div>
       `;
     }).join('');
