@@ -216,16 +216,11 @@ async def send_morning_message():
         return
         
     if chores:
-        total_cookies = sum(tmpl.points for inst, tmpl in chores)
         text = (
             "🌅 *Доброе утро!*\n\n"
-            f"🎯 Сегодня можно залутать *{total_cookies}* 🍪\n\n"
-            "Список свободных задач на сегодня:\n"
+            "Новый день начался, задачи уже ждут в приложении. Выполняй дела и отдыхай! ☕️\n\n"
+            "👉 Откройте Mini App, чтобы посмотреть список задач!"
         )
-        for inst, tmpl in chores:
-            pts_str = "2-8" if tmpl.title == "Готовка" else str(tmpl.points)
-            text += f"• *{tmpl.title}* (`+{pts_str} 🍪`)\n"
-        text += "\n👉 Откройте Mini App, чтобы взять задачу в работу!"
     else:
         text = "🌅 *Доброе утро!*\n\nНа сегодня свободных домашних дел нет. Отдыхаем! ☕️"
         

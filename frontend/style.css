@@ -214,7 +214,7 @@ body {
 .tab-pane {
   position: absolute;
   inset: 0;
-  overflow-y: auto;
+  overflow: hidden;
   -webkit-overflow-scrolling: touch;
   padding: 12px 12px 0 12px;
   display: none;
@@ -262,14 +262,14 @@ body {
   flex-direction: column;
   gap: 8px;
   flex: 1;
+  overflow-y: auto;
   min-height: 0;
+  padding-bottom: 12px;
 }
 
 /* Pagination bar — always at bottom, sticky during scroll */
 .pagination-sticky {
-  position: sticky;
-  bottom: 0;
-  z-index: 10;
+  flex-shrink: 0;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -292,6 +292,7 @@ body {
   transition: all 0.2s ease;
   position: relative;
   overflow: hidden;
+  flex-shrink: 0;
 }
 
 .task-card::before {
@@ -719,7 +720,7 @@ body {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 12px 16px;
+  padding: 14px 16px;
   background: var(--surface);
   border: 1.5px dashed var(--border);
   border-radius: var(--radius);
@@ -732,6 +733,7 @@ body {
   width: 100%;
   box-sizing: border-box;
   letter-spacing: 0.3px;
+  flex-shrink: 0;
 }
 
 .add-inline-btn:active {

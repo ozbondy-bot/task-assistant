@@ -97,35 +97,34 @@ async def get_today_tasks(date: Optional[str] = None, user: User = Depends(get_c
         )
         tasks = result.scalars().all()
         
+        # Bulk queries for personal tasks
+        last_completed_res = await session.execute(
+            select(PersonalTask.text, func.max(PersonalTask.date_execution))
+            .where(and_(
+                PersonalTask.user_id == user.id,
+                PersonalTask.is_completed == True,
+                PersonalTask.is_deleted == False
+            ))
+            .group_by(PersonalTask.text)
+        )
+        last_completed_dates = dict(last_completed_res.all())
+
+        next_exec_res = await session.execute(
+            select(PersonalTask.text, func.min(PersonalTask.date_execution))
+            .where(and_(
+                PersonalTask.user_id == user.id,
+                PersonalTask.is_completed == False,
+                PersonalTask.is_deleted == False,
+                PersonalTask.date_execution > today
+            ))
+            .group_by(PersonalTask.text)
+        )
+        next_exec_dates = dict(next_exec_res.all())
+
         res_personal = []
         for t in tasks:
-            from bot.parser import clean_task_text
-            clean_txt = clean_task_text(t.text)
-            # Find last completion of a task with this text
-            last_date = await session.scalar(
-                select(PersonalTask.date_execution)
-                .where(and_(
-                    PersonalTask.user_id == user.id,
-                    PersonalTask.is_completed == True,
-                    PersonalTask.is_deleted == False,
-                    PersonalTask.text.ilike(f"%{clean_txt}%")
-                ))
-                .order_by(PersonalTask.date_execution.desc())
-                .limit(1)
-            )
-            # Find next execution date of a task with this text
-            next_date = await session.scalar(
-                select(PersonalTask.date_execution)
-                .where(and_(
-                    PersonalTask.user_id == user.id,
-                    PersonalTask.is_completed == False,
-                    PersonalTask.is_deleted == False,
-                    PersonalTask.date_execution > today,
-                    PersonalTask.text.ilike(f"%{clean_txt}%")
-                ))
-                .order_by(PersonalTask.date_execution.asc())
-                .limit(1)
-            )
+            last_date = last_completed_dates.get(t.text)
+            next_date = next_exec_dates.get(t.text)
             res_personal.append({
                 "id": t.id,
                 "text": t.text,
@@ -153,36 +152,42 @@ async def get_today_tasks(date: Optional[str] = None, user: User = Depends(get_c
                 )
             )
             house_tasks = house_result.all()
-            for inst, tmpl in house_tasks:
-                last_date = await session.scalar(
-                    select(Completion.created_at)
-                    .join(TaskInstance, Completion.task_instance_id == TaskInstance.id)
-                    .where(TaskInstance.template_id == tmpl.id)
-                    .order_by(Completion.created_at.desc())
-                    .limit(1)
+            
+            if house_tasks:
+                # Bulk queries for household tasks
+                tmpl_ids = [tmpl.id for inst, tmpl in house_tasks]
+                completions_result = await session.execute(
+                    select(TaskInstance.template_id, func.max(Completion.created_at))
+                    .join(Completion, Completion.task_instance_id == TaskInstance.id)
+                    .where(TaskInstance.template_id.in_(tmpl_ids))
+                    .group_by(TaskInstance.template_id)
                 )
-                next_date = await session.scalar(
-                    select(TaskInstance.date)
-                    .where(
-                        and_(
-                            TaskInstance.template_id == tmpl.id,
-                            TaskInstance.status == "free",
-                            TaskInstance.date > today
-                        )
-                    )
-                    .order_by(TaskInstance.date.asc())
-                    .limit(1)
+                last_completions = dict(completions_result.all())
+
+                next_exec_res_house = await session.execute(
+                    select(TaskInstance.template_id, func.min(TaskInstance.date))
+                    .where(and_(
+                        TaskInstance.template_id.in_(tmpl_ids),
+                        TaskInstance.status == "free",
+                        TaskInstance.date > today
+                    ))
+                    .group_by(TaskInstance.template_id)
                 )
-                res_household.append({
-                    "id": inst.id,
-                    "text": tmpl.title,
-                    "points": tmpl.points,
-                    "template_id": tmpl.id,
-                    "type": "household",
-                    "status": "in_progress",
-                    "last_completed": last_date.isoformat() if last_date else None,
-                    "next_execution": next_date.isoformat() if next_date else None,
-                })
+                next_exec_dates_house = dict(next_exec_res_house.all())
+
+                for inst, tmpl in house_tasks:
+                    last_date = last_completions.get(tmpl.id)
+                    next_date = next_exec_dates_house.get(tmpl.id)
+                    res_household.append({
+                        "id": inst.id,
+                        "text": tmpl.title,
+                        "points": tmpl.points,
+                        "template_id": tmpl.id,
+                        "type": "household",
+                        "status": "in_progress",
+                        "last_completed": last_date.isoformat() if last_date else None,
+                        "next_execution": next_date.isoformat() if next_date else None,
+                    })
  
     return {
         "personal": res_personal,
@@ -1096,7 +1101,7 @@ async def get_stats(user: User = Depends(get_current_user)):
 # -- Chores templates --
 @app.get("/api/chores/templates")
 async def get_chores_templates(user: User = Depends(get_current_user)):
-    from bot.handlers.base import get_house_today_date, get_template_next_date_val
+    from bot.handlers.base import get_house_today_date, get_template_next_date
     async with AsyncSessionLocal() as session:
         today = await get_house_today_date(session)
         result = await session.execute(
@@ -1109,9 +1114,48 @@ async def get_chores_templates(user: User = Depends(get_current_user)):
         )
         templates = result.scalars().all()
         
+        if not templates:
+            return []
+            
+        tmpl_ids = [t.id for t in templates]
+        
+        # Bulk query for max done date per template
+        done_dates_result = await session.execute(
+            select(TaskInstance.template_id, func.max(TaskInstance.date))
+            .where(and_(TaskInstance.template_id.in_(tmpl_ids), TaskInstance.status == "done"))
+            .group_by(TaskInstance.template_id)
+        )
+        done_dates = dict(done_dates_result.all())
+
+        # Bulk query for max handled date (done or skipped) per template
+        handled_dates_result = await session.execute(
+            select(TaskInstance.template_id, func.max(TaskInstance.date))
+            .where(and_(TaskInstance.template_id.in_(tmpl_ids), TaskInstance.status.in_(["done", "skipped"])))
+            .group_by(TaskInstance.template_id)
+        )
+        handled_dates = dict(handled_dates_result.all())
+
+        # Bulk query for min active date per template
+        active_dates_result = await session.execute(
+            select(TaskInstance.template_id, func.min(TaskInstance.date))
+            .where(and_(TaskInstance.template_id.in_(tmpl_ids), TaskInstance.status.in_(["free", "in_progress"])))
+            .group_by(TaskInstance.template_id)
+        )
+        active_dates = dict(active_dates_result.all())
+        
+        house = await session.get(House, ACTIVE_HOUSE_ID)
+        generation_done = (house.last_summary_date >= today) if (house and house.last_summary_date) else False
+        
         res_list = []
         for t in templates:
-            last_done, nd = await get_template_next_date_val(session, t, today)
+            last_done = done_dates.get(t.id)
+            last_handled = handled_dates.get(t.id)
+            active_inst_date = active_dates.get(t.id)
+            
+            if generation_done:
+                last_handled = today
+                
+            nd = get_template_next_date(t, last_handled, active_inst_date, today)
             res_list.append({
                 "id": t.id,
                 "title": t.title,
