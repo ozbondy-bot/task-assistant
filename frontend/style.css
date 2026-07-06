@@ -313,10 +313,13 @@ body {
 }
 
 .task-card.personal-task {
+  border-left: 3px solid var(--accent2);
+  padding-left: 9px;
 }
 
 .task-card.household-claimed {
   border-left: 3px solid var(--accent3);
+  padding-left: 9px;
 }
 
 .task-card.completed-anim {
@@ -507,8 +510,10 @@ body {
 .shop-item-card {
   background: var(--surface);
   border: 1px solid var(--border);
+  border-left: 3px solid var(--warning);
   border-radius: var(--radius);
   padding: 10px 12px;
+  padding-left: 9px;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -519,8 +524,13 @@ body {
 }
 
 .shop-item-card.urgent {
-  border-left: 3px solid var(--danger);
-  padding-left: 9px;
+  border-left: 3px solid var(--danger) !important;
+  padding-left: 9px !important;
+}
+
+.shop-item-card.completed-gray .shop-check {
+  border-color: var(--text3) !important;
+  color: var(--text3) !important;
 }
 
 .shop-item-card:active { transform: scale(0.98); }

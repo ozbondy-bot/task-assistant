@@ -52,9 +52,11 @@
           </div>
         </div>
         <!-- Date Pagination Bar for House Chores -->
-        <div class="pagination-sticky">
+        <div class="pagination-sticky" style="position: relative;">
           <button class="btn-pagination" onclick="shiftHouseDay(-1)">◀</button>
-          <span id="houseActiveDateDisplay" style="font-weight: 600; font-size: 14px; color: var(--text);">06.07.</span>
+          <div style="position: absolute; left: 50%; transform: translateX(-50%); font-weight: 600; font-size: 14px; color: var(--text); white-space: nowrap;">
+            <span id="houseActiveDateDisplay">06.07.</span>
+          </div>
           <button class="btn-pagination" onclick="shiftHouseDay(1)">▶</button>
         </div>
       </section>
@@ -63,9 +65,11 @@
       <section class="tab-pane" id="pane-personal">
         <div id="personalTasksList" class="task-list"></div>
         <!-- Date Pagination Bar -->
-        <div class="pagination-sticky">
+        <div class="pagination-sticky" style="position: relative;">
           <button class="btn-pagination" onclick="shiftPersonalDay(-1)">◀</button>
-          <span id="personalActiveDateDisplay" style="font-weight: 600; font-size: 14px; color: var(--text);">06.07.</span>
+          <div style="position: absolute; left: 50%; transform: translateX(-50%); font-weight: 600; font-size: 14px; color: var(--text); white-space: nowrap;">
+            <span id="personalActiveDateDisplay">06.07.</span>
+          </div>
           <button class="btn-pagination" onclick="shiftPersonalDay(1)">▶</button>
         </div>
         <!-- Add Task Modal -->
@@ -99,11 +103,15 @@
       <section class="tab-pane" id="pane-shopping">
         <div id="shoppingList" class="task-list"></div>
         <!-- Date Pagination Bar for Shopping List -->
-        <div class="pagination-sticky">
+        <div class="pagination-sticky" style="position: relative;">
           <button class="btn-pagination" onclick="shiftShoppingDay(-1)">◀</button>
-          <span id="shoppingActiveDateDisplay" style="font-weight: 600; font-size: 14px; color: var(--text);">06.07.</span>
-          <span id="shoppingTotal" style="font-size: 12px; font-weight: bold; color: var(--accent2);">Сумма: 0 ₽</span>
-          <button class="btn-pagination" onclick="shiftShoppingDay(1)">▶</button>
+          <div style="position: absolute; left: 50%; transform: translateX(-50%); font-weight: 600; font-size: 14px; color: var(--text); white-space: nowrap;">
+            <span id="shoppingActiveDateDisplay">06.07.</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px; margin-left: auto;">
+            <span id="shoppingTotal" style="font-size: 12px; font-weight: bold; color: var(--accent2); margin-right: 4px;">Сумма: 0 ₽</span>
+            <button class="btn-pagination" onclick="shiftShoppingDay(1)">▶</button>
+          </div>
         </div>
         <!-- Add shopping modal -->
         <div class="modal-overlay hidden" id="addShopModal">

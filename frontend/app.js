@@ -411,7 +411,7 @@ function renderPersonalTasks(personal, household) {
     
     if (t.isHousehold) {
       return `
-        <div class="task-card house-task flex-between ${grayClass}" onclick="openMyTaskDetails(${JSON.stringify(t).replace(/"/g, '&quot;')}, 'household')" style="margin-bottom: 8px;">
+        <div class="task-card house-task flex-between ${grayClass}" onclick="openMyTaskDetails(${JSON.stringify(t).replace(/"/g, '&quot;')}, 'household')">
           <div class="task-left flex-row" style="align-items: center; gap: 8px;">
             <span style="font-size: 16px;">🏠</span>
             <span class="task-title" style="font-weight: 500; font-size: 14px;">${escHtml(stripEmoji(t.text))}</span>
@@ -424,7 +424,7 @@ function renderPersonalTasks(personal, household) {
         : `openMyTaskDetails(${JSON.stringify(t).replace(/"/g, '&quot;')}, 'personal')`;
 
       return `
-        <div class="task-card personal-task flex-between ${grayClass}" onclick="${clickHandler}" style="margin-bottom: 8px;">
+        <div class="task-card personal-task flex-between ${grayClass}" onclick="${clickHandler}">
           <div class="task-left flex-row" style="align-items: center; gap: 8px;">
             <span style="font-size: 16px;">👤</span>
             <span class="task-title" style="font-weight: 500; font-size: 14px;">${escHtml(stripEmoji(t.text))}</span>
