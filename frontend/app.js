@@ -279,11 +279,11 @@ function renderMembers(members) {
   let html = '';
   if (m1) {
     const isMeStyle = m1.is_me ? 'font-weight: 700; color: var(--accent);' : 'color: var(--text1);';
-    html += `<span style="${isMeStyle} text-align: left; flex: 1;">${escHtml(m1.display_name || 'Участник')}: ${m1.weekly_earned}/${m1.weekly_target} ⭐</span>`;
+    html += `<span style="${isMeStyle} text-align: left; flex: 1;">${escHtml(m1.display_name || 'Участник')}: ${m1.weekly_earned}/${m1.weekly_target} ✨</span>`;
   }
   if (m2) {
     const isMeStyle = m2.is_me ? 'font-weight: 700; color: var(--accent);' : 'color: var(--text1);';
-    html += `<span style="${isMeStyle} text-align: right; flex: 1;">${escHtml(m2.display_name || 'Участник')}: ${m2.weekly_earned}/${m2.weekly_target} ⭐</span>`;
+    html += `<span style="${isMeStyle} text-align: right; flex: 1;">${escHtml(m2.display_name || 'Участник')}: ${m2.weekly_earned}/${m2.weekly_target} ✨</span>`;
   } else {
     html += `<span style="flex: 1;"></span>`;
   }

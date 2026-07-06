@@ -281,6 +281,7 @@ async def get_house_tasks(date: Optional[str] = None, user: User = Depends(get_c
         await generate_daily_chores_if_needed(session, ACTIVE_HOUSE_ID)
         
         today = await get_house_today_date(session)
+        house = await session.get(House, ACTIVE_HOUSE_ID)
         target_date = today
         if date:
             try:
@@ -511,7 +512,7 @@ async def unclaim_house_task(instance_id: int, user: User = Depends(get_current_
 # -- House info & members --
 @app.get("/api/house/members")
 async def get_house_members(user: User = Depends(get_current_user)):
-    from bot.handlers.base import get_house_today_date, get_template_next_date
+    from bot.handlers.base import get_house_today_date, calculate_weekly_target_points
     import zoneinfo
     from datetime import date, datetime, timedelta, timezone
     
@@ -531,119 +532,18 @@ async def get_house_members(user: User = Depends(get_current_user)):
         end_msk = datetime.combine(sunday_date, datetime.max.time()).replace(tzinfo=msk_tz)
         end_utc = end_msk.astimezone(timezone.utc).replace(tzinfo=None)
         
-        # Bulk pre-fetch all handled/done dates to avoid database query roundtrips in loop
-        last_done_result = await session.execute(
-            select(TaskInstance.template_id, func.max(TaskInstance.date))
-            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
-            .where(and_(TaskTemplate.house_id == ACTIVE_HOUSE_ID, TaskInstance.status == "done"))
-            .group_by(TaskInstance.template_id)
-        )
-        last_done_map = {row[0]: row[1] for row in last_done_result.all()}
+        total_weekly_target_points, _ = await calculate_weekly_target_points(session, ACTIVE_HOUSE_ID, today)
         
-        last_handled_result = await session.execute(
-            select(TaskInstance.template_id, func.max(TaskInstance.date))
-            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
-            .where(and_(TaskTemplate.house_id == ACTIVE_HOUSE_ID, TaskInstance.status.in_(["done", "skipped"])))
-            .group_by(TaskInstance.template_id)
-        )
-        last_handled_map = {row[0]: row[1] for row in last_handled_result.all()}
-        
-        active_inst_result = await session.execute(
-            select(TaskInstance.template_id, func.min(TaskInstance.date))
-            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
-            .where(and_(TaskTemplate.house_id == ACTIVE_HOUSE_ID, TaskInstance.status.in_(["free", "in_progress"])))
-            .group_by(TaskInstance.template_id)
-        )
-        active_inst_map = {row[0]: row[1] for row in active_inst_result.all()}
-        
-        house = await session.get(House, ACTIVE_HOUSE_ID)
-        
-        today_inst_result = await session.execute(
-            select(TaskInstance.template_id, func.count(TaskInstance.id))
-            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
-            .where(and_(TaskTemplate.house_id == ACTIVE_HOUSE_ID, TaskInstance.date == monday_date))
-            .group_by(TaskInstance.template_id)
-        )
-        today_inst_map = {row[0]: row[1] for row in today_inst_result.all()}
-        
-        def get_next_date_local(tmpl, base_date):
-            l_done = last_done_map.get(tmpl.id)
-            l_handled = last_handled_map.get(tmpl.id)
-            act_inst = active_inst_map.get(tmpl.id)
-            
-            gen_done = (house.last_summary_date >= base_date) if (house and house.last_summary_date) else False
-            if gen_done:
-                inst_count = today_inst_map.get(tmpl.id, 0)
-                if inst_count == 0:
-                    l_handled = base_date
-            
-            return get_template_next_date(tmpl, l_handled, act_inst, base_date)
-            
-        # 1. Total weekly target points for the house
-        templates = (await session.execute(
-            select(TaskTemplate).where(
-                and_(
-                    TaskTemplate.house_id == ACTIVE_HOUSE_ID,
-                    TaskTemplate.deleted == False
-                )
-            )
-        )).scalars().all()
-        
-        total_weekly_target_points = 0
-        for tmpl in templates:
-            occurrences = 0
-            p = tmpl.periodicity
-            
-            next_occ = get_next_date_local(tmpl, monday_date)
-            
-            for d_idx in range(7):
-                curr_d = monday_date + timedelta(days=d_idx)
-                if tmpl.start_date and curr_d < tmpl.start_date:
-                    continue
-                    
-                should_occur = False
-                if p == "daily":
-                    should_occur = True
-                elif p == "weekly":
-                    should_occur = (curr_d.weekday() == (tmpl.weekday if tmpl.weekday is not None else 0))
-                elif p == "twice_weekly":
-                    should_occur = (curr_d.weekday() in (0, 3))
-                elif p == "monthly":
-                    should_occur = (curr_d.day == (tmpl.month_day if tmpl.month_day is not None else 1))
-                elif p == "twice_monthly":
-                    should_occur = (curr_d.day in (5, 20))
-                elif p == "quarterly":
-                    if curr_d.day == (tmpl.month_day if tmpl.month_day is not None else 1):
-                        pos = ((curr_d.month - 1) % 3) + 1
-                        if pos == (tmpl.weekday if tmpl.weekday is not None else 1):
-                            should_occur = True
-                elif p == "every_x_days":
-                    if curr_d == next_occ:
-                        should_occur = True
-                        next_occ += timedelta(days=tmpl.period_days or 1)
-                elif p == "once":
-                    if curr_d == next_occ:
-                        should_occur = True
-                        next_occ = date(2099, 12, 31)
-                        
-                if should_occur:
-                    occurrences += 1
-                    
-            total_weekly_target_points += occurrences * tmpl.points
-                    
-        # 2. Get members
+        # Get members
         result = await session.execute(
             select(User).where(User.house_id == ACTIVE_HOUSE_ID)
         )
         members = result.scalars().all()
         
-        num_members = len(members)
-        target_points = int(round(total_weekly_target_points / num_members)) if num_members > 0 else 100
-        if target_points < 1:
-            target_points = 1
-            
+        sorted_members = sorted(members, key=lambda x: x.id)
+        
         res_list = []
-        for m in members:
+        for index, m in enumerate(sorted_members):
             earned = await session.scalar(
                 select(func.sum(Completion.points))
                 .where(
@@ -655,6 +555,15 @@ async def get_house_members(user: User = Depends(get_current_user)):
                 )
             ) or 0
             
+            # Split target 1/3 for first, 2/3 for second member
+            if len(sorted_members) >= 2:
+                member_target = int(total_weekly_target_points * 1 / 3) if index == 0 else int(total_weekly_target_points * 2 / 3)
+            else:
+                member_target = total_weekly_target_points
+                
+            if member_target < 1:
+                member_target = 1
+                
             res_list.append({
                 "id": m.id,
                 "display_name": m.display_name or m.full_name or "Участник",
@@ -662,7 +571,7 @@ async def get_house_members(user: User = Depends(get_current_user)):
                 "is_owner": m.is_house_owner,
                 "is_me": m.id == user.id,
                 "weekly_earned": earned,
-                "weekly_target": target_points
+                "weekly_target": member_target
             })
             
     return res_list
@@ -670,7 +579,7 @@ async def get_house_members(user: User = Depends(get_current_user)):
 
 @app.get("/api/house/weekly_goal_explanation")
 async def get_weekly_goal_explanation(user: User = Depends(get_current_user)):
-    from bot.handlers.base import get_house_today_date, get_template_next_date
+    from bot.handlers.base import get_house_today_date, calculate_weekly_target_points
     import zoneinfo
     from datetime import date, datetime, timedelta, timezone
     
@@ -678,127 +587,14 @@ async def get_weekly_goal_explanation(user: User = Depends(get_current_user)):
         today = await get_house_today_date(session)
         monday_date = today - timedelta(days=today.weekday())
         
-        # Bulk pre-fetch all handled/done dates to avoid database query roundtrips in loop
-        last_done_result = await session.execute(
-            select(TaskInstance.template_id, func.max(TaskInstance.date))
-            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
-            .where(and_(TaskTemplate.house_id == ACTIVE_HOUSE_ID, TaskInstance.status == "done"))
-            .group_by(TaskInstance.template_id)
-        )
-        last_done_map = {row[0]: row[1] for row in last_done_result.all()}
+        total_weekly_target_points, breakdown = await calculate_weekly_target_points(session, ACTIVE_HOUSE_ID, today)
         
-        last_handled_result = await session.execute(
-            select(TaskInstance.template_id, func.max(TaskInstance.date))
-            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
-            .where(and_(TaskTemplate.house_id == ACTIVE_HOUSE_ID, TaskInstance.status.in_(["done", "skipped"])))
-            .group_by(TaskInstance.template_id)
-        )
-        last_handled_map = {row[0]: row[1] for row in last_handled_result.all()}
-        
-        active_inst_result = await session.execute(
-            select(TaskInstance.template_id, func.min(TaskInstance.date))
-            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
-            .where(and_(TaskTemplate.house_id == ACTIVE_HOUSE_ID, TaskInstance.status.in_(["free", "in_progress"])))
-            .group_by(TaskInstance.template_id)
-        )
-        active_inst_map = {row[0]: row[1] for row in active_inst_result.all()}
-        
-        house = await session.get(House, ACTIVE_HOUSE_ID)
-        
-        today_inst_result = await session.execute(
-            select(TaskInstance.template_id, func.count(TaskInstance.id))
-            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
-            .where(and_(TaskTemplate.house_id == ACTIVE_HOUSE_ID, TaskInstance.date == monday_date))
-            .group_by(TaskInstance.template_id)
-        )
-        today_inst_map = {row[0]: row[1] for row in today_inst_result.all()}
-        
-        def get_next_date_local(tmpl, base_date):
-            l_done = last_done_map.get(tmpl.id)
-            l_handled = last_handled_map.get(tmpl.id)
-            act_inst = active_inst_map.get(tmpl.id)
-            
-            gen_done = (house.last_summary_date >= base_date) if (house and house.last_summary_date) else False
-            if gen_done:
-                inst_count = today_inst_map.get(tmpl.id, 0)
-                if inst_count == 0:
-                    l_handled = base_date
-            
-            return get_template_next_date(tmpl, l_handled, act_inst, base_date)
-            
-        # Get all active templates
-        templates = (await session.execute(
-            select(TaskTemplate).where(
-                and_(
-                    TaskTemplate.house_id == ACTIVE_HOUSE_ID,
-                    TaskTemplate.deleted == False
-                )
-            )
-        )).scalars().all()
-        
-        breakdown = []
-        total_weekly_target_points = 0
-        
-        for tmpl in templates:
-            occurrences = 0
-            p = tmpl.periodicity
-            
-            next_occ = get_next_date_local(tmpl, monday_date)
-            
-            for d_idx in range(7):
-                curr_d = monday_date + timedelta(days=d_idx)
-                if tmpl.start_date and curr_d < tmpl.start_date:
-                    continue
-                    
-                should_occur = False
-                if p == "daily":
-                    should_occur = True
-                elif p == "weekly":
-                    should_occur = (curr_d.weekday() == (tmpl.weekday if tmpl.weekday is not None else 0))
-                elif p == "twice_weekly":
-                    should_occur = (curr_d.weekday() in (0, 3))
-                elif p == "monthly":
-                    should_occur = (curr_d.day == (tmpl.month_day if tmpl.month_day is not None else 1))
-                elif p == "twice_monthly":
-                    should_occur = (curr_d.day in (5, 20))
-                elif p == "quarterly":
-                    if curr_d.day == (tmpl.month_day if tmpl.month_day is not None else 1):
-                        pos = ((curr_d.month - 1) % 3) + 1
-                        if pos == (curr_d.weekday() if tmpl.weekday is not None else 1):
-                            should_occur = True
-                elif p == "every_x_days":
-                    if curr_d == next_occ:
-                        should_occur = True
-                        next_occ += timedelta(days=tmpl.period_days or 1)
-                elif p == "once":
-                    if curr_d == next_occ:
-                        should_occur = True
-                        next_occ = date(2099, 12, 31)
-                        
-                if should_occur:
-                    occurrences += 1
-                    
-            if occurrences > 0:
-                tmpl_total = occurrences * tmpl.points
-                total_weekly_target_points += tmpl_total
-                breakdown.append({
-                    "title": tmpl.title,
-                    "points": tmpl.points,
-                    "periodicity": tmpl.periodicity,
-                    "occurrences": occurrences,
-                    "total": tmpl_total
-                })
-                
-        # Get count of members
         result = await session.execute(
             select(User).where(User.house_id == ACTIVE_HOUSE_ID)
         )
         members = result.scalars().all()
         num_members = len(members)
-        target_points = int(round(total_weekly_target_points / num_members)) if num_members > 0 else 100
-        if target_points < 1:
-            target_points = 1
-            
+        
     return {
         "start_date": str(monday_date),
         "end_date": str(monday_date + timedelta(days=6)),
