@@ -716,28 +716,24 @@ body {
 
 /* ── Inline Add Button (replaces FAB) ───────────────────────────────────────── */
 .add-inline-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
   gap: 8px;
-  padding: 14px 16px;
-  background: var(--surface);
-  border: 1.5px dashed var(--border);
-  border-radius: var(--radius);
-  color: var(--accent2);
-  font-size: 14px;
-  font-weight: 600;
+  background: var(--surface) !important;
+  border: 1.5px dashed var(--border) !important;
+  color: var(--accent2) !important;
+  font-weight: 600 !important;
   cursor: pointer;
-  transition: all 0.2s ease;
-  font-family: var(--font);
   width: 100%;
   box-sizing: border-box;
-  letter-spacing: 0.3px;
   flex-shrink: 0;
+  box-shadow: none !important;
+  border-left: 1.5px dashed var(--border) !important; /* override colored left borders */
 }
 
 .add-inline-btn:active {
-  background: var(--surface2);
+  background: var(--surface2) !important;
   transform: scale(0.98);
 }
 

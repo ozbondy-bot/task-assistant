@@ -167,8 +167,8 @@ function setupTabs() {
   });
 }
 
-function showSpinnerIfNeeded(container, selector = '.task-card, .reward-card, .shopping-card, .archive-item') {
-  if (!container.querySelector(selector) && !container.querySelector('.empty-state')) {
+function showSpinnerIfNeeded(container, selector = '.task-card, .reward-card, .shopping-card, .archive-item', force = false) {
+  if (force || (!container.querySelector(selector) && !container.querySelector('.empty-state'))) {
     container.innerHTML = `<div class="loading-spinner"><div class="spinner"></div><p>Загрузка...</p></div>`;
   }
 }
@@ -216,7 +216,7 @@ function renderHouseTasks(tasks) {
   if (!tasks.length) {
     list.innerHTML = `<div class="empty-state"><div class="empty-icon">${isFuture ? '📅' : '✨'}</div><div class="empty-title">${isFuture ? 'Задач нет' : 'Задач нет!'}</div><div class="empty-sub">${isFuture ? 'На этот день задач не запланировано' : 'Нет активных или выполненных задач на выбранную дату'}</div></div>`;
     if (isToday) {
-      list.innerHTML += `<div class="add-inline-btn" onclick="document.getElementById('addChoreChoiceModal').classList.remove('hidden')">+ Добавить</div>`;
+      list.innerHTML += `<div class="add-inline-btn task-card house-task" onclick="document.getElementById('addChoreChoiceModal').classList.remove('hidden')">+ Добавить</div>`;
     }
     return;
   }
@@ -253,7 +253,7 @@ function renderHouseTasks(tasks) {
 
 
   if (isToday) {
-    rows.push(`<div class="add-inline-btn" onclick="document.getElementById('addChoreChoiceModal').classList.remove('hidden')">+ Добавить</div>`);
+    rows.push(`<div class="add-inline-btn task-card house-task" onclick="document.getElementById('addChoreChoiceModal').classList.remove('hidden')">+ Добавить</div>`);
   }
   list.innerHTML = rows.join('');
 }
@@ -317,6 +317,8 @@ function getPersonalActiveDateLabel() {
 }
 function shiftPersonalDay(diff) {
   personalActiveOffset += diff;
+  const list = document.getElementById('personalTasksList');
+  showSpinnerIfNeeded(list, '.task-card', true);
   loadPersonalTab();
   loadWeeklyGoal();
 }
@@ -335,6 +337,8 @@ function getHouseActiveDateLabel() {
 }
 function shiftHouseDay(diff) {
   houseActiveOffset += diff;
+  const list = document.getElementById('houseTasksList');
+  showSpinnerIfNeeded(list, '.task-card', true);
   loadHouseTab();
   loadWeeklyGoal();
 }
@@ -353,6 +357,8 @@ function getShoppingActiveDateLabel() {
 }
 function shiftShoppingDay(diff) {
   shoppingActiveOffset += diff;
+  const list = document.getElementById('shoppingList');
+  showSpinnerIfNeeded(list, '.shop-item-card', true);
   loadShoppingTab();
   loadWeeklyGoal();
 }
@@ -385,7 +391,7 @@ function renderPersonalTasks(personal, household) {
   if (!all.length) {
     list.innerHTML = `<div class="empty-state"><div class="empty-icon">🎉</div><div class="empty-title">Всё сделано!</div><div class="empty-sub">На сегодня задач нет</div></div>`;
     if (isToday) {
-      list.innerHTML += `<div class="add-inline-btn" onclick="document.getElementById('addTaskModal').classList.remove('hidden'); document.getElementById('newTaskInput').focus()">+ Добавить</div>`;
+      list.innerHTML += `<div class="add-inline-btn task-card personal-task" onclick="document.getElementById('addTaskModal').classList.remove('hidden'); document.getElementById('newTaskInput').focus()">+ Добавить</div>`;
     }
     return;
   }
@@ -429,7 +435,7 @@ function renderPersonalTasks(personal, household) {
   });
 
   if (isToday) {
-    rows.push(`<div class="add-inline-btn" onclick="document.getElementById('addTaskModal').classList.remove('hidden'); document.getElementById('newTaskInput').focus()">+ Добавить</div>`);
+    rows.push(`<div class="add-inline-btn task-card personal-task" onclick="document.getElementById('addTaskModal').classList.remove('hidden'); document.getElementById('newTaskInput').focus()">+ Добавить</div>`);
   }
   list.innerHTML = rows.join('');
 }
@@ -648,7 +654,7 @@ function renderShoppingList(items) {
   if (!items.length) {
     list.innerHTML = `<div class="empty-state"><div class="empty-icon">🛒</div><div class="empty-title">Список пуст</div><div class="empty-sub">Нажми «Добавить» чтобы добавить товар</div></div>`;
     if (isToday) {
-      list.innerHTML += `<div class="add-inline-btn" onclick="document.getElementById('addShopModal').classList.remove('hidden'); document.getElementById('shopItemName').focus()">+ Добавить</div>`;
+      list.innerHTML += `<div class="add-inline-btn shop-item-card" onclick="document.getElementById('addShopModal').classList.remove('hidden'); document.getElementById('shopItemName').focus()">+ Добавить</div>`;
     }
     return;
   }
@@ -680,7 +686,7 @@ function renderShoppingList(items) {
   });
 
   if (isToday) {
-    rows.push(`<div class="add-inline-btn" onclick="document.getElementById('addShopModal').classList.remove('hidden'); document.getElementById('shopItemName').focus()">+ Добавить</div>`);
+    rows.push(`<div class="add-inline-btn shop-item-card" onclick="document.getElementById('addShopModal').classList.remove('hidden'); document.getElementById('shopItemName').focus()">+ Добавить</div>`);
   }
   list.innerHTML = rows.join('');
 }
@@ -1233,15 +1239,18 @@ function openChoreDetails(t) {
   } else {
     actions.innerHTML = `
       <div style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
+        <!-- Top row: Выполнить (green), Взять (yellow), Убрать (red) -->
         <div style="display: flex; gap: 6px; width: 100%;">
-          <button class="btn btn-primary" onclick="claimTask(${t.id}); closeModal('choreDetailsModal');" style="flex: 1.5; height: 42px; font-size: 13px; font-weight: 600; background: var(--success); border-color: var(--success); color: #0d0d14; display: flex; align-items: center; justify-content: center; gap: 4px;">🤝 Взять</button>
-          <button class="btn btn-secondary" onclick="nudgeTask(${t.id}); closeModal('choreDetailsModal');" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 4px;">🔔 Напомнить</button>
-          <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'chore'); closeModal('choreDetailsModal');" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 4px;">📅 Сдвиг</button>
-          <button class="btn btn-secondary" onclick="skipFreeChore(${t.id});" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 4px;">🗑️ Убрать</button>
+          <button class="btn" onclick="completeHouseTask(${t.id}, '${escAttr(t.title)}'); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 13px; font-weight: 600; background: #10b981; border: none; color: white; display: flex; align-items: center; justify-content: center; gap: 4px; border-radius: 8px; cursor: pointer;">✅ Выполнить</button>
+          <button class="btn" onclick="claimTask(${t.id}); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 13px; font-weight: 600; background: #f59e0b; border: none; color: white; display: flex; align-items: center; justify-content: center; gap: 4px; border-radius: 8px; cursor: pointer;">🤝 Взять</button>
+          <button class="btn" onclick="skipFreeChore(${t.id});" style="flex: 1; height: 40px; font-size: 13px; font-weight: 600; background: #ef4444; border: none; color: white; display: flex; align-items: center; justify-content: center; gap: 4px; border-radius: 8px; cursor: pointer;">🗑️ Убрать</button>
         </div>
+        <!-- Bottom row: Намек, Сдвиг, Изменить, Удалить -->
         <div style="display: flex; gap: 6px; width: 100%;">
-          <button class="btn btn-secondary" onclick="editChoreTemplateDirectly(${JSON.stringify(t).replace(/"/g, '&quot;')}); closeModal('choreDetailsModal');" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 4px;">✏️ Изменить шаблон</button>
-          <button class="btn btn-secondary" onclick="deleteChoreTemplate(${t.template_id}); closeModal('choreDetailsModal');" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; background: var(--danger); border-color: var(--danger); color: white; display: flex; align-items: center; justify-content: center; gap: 4px;">❌ Удалить шаблон</button>
+          <button class="btn btn-secondary" onclick="nudgeTask(${t.id}); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 2px; padding: 0 4px;">🔔 Намек</button>
+          <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'chore'); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 2px; padding: 0 4px;">📅 Сдвиг</button>
+          <button class="btn btn-secondary" onclick="editChoreTemplateDirectly(${JSON.stringify(t).replace(/"/g, '&quot;')}); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 2px; padding: 0 4px;">✏️ Изменить</button>
+          <button class="btn btn-secondary" onclick="deleteChoreTemplate(${t.template_id}); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 12px; font-weight: 600; background: var(--surface3); border: 1px solid var(--border); color: var(--danger); display: flex; align-items: center; justify-content: center; gap: 2px; padding: 0 4px;">❌ Удалить</button>
         </div>
       </div>
     `;

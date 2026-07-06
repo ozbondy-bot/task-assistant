@@ -580,6 +580,170 @@ async def cmd_id(message: types.Message):
     await message.answer(f"Твой Telegram ID: `{message.from_user.id}`", parse_mode="Markdown")
 
 
+@dp.message(Command("raschet"))
+async def cmd_raschet(message: types.Message):
+    from bot.handlers.base import get_house_today_date, get_template_next_date
+    import zoneinfo
+    from datetime import date, datetime, timedelta, timezone
+    
+    async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
+        monday_date = today - timedelta(days=today.weekday())
+        
+        # Bulk pre-fetch all handled/done dates to avoid database query roundtrips in loop
+        last_done_result = await session.execute(
+            select(TaskInstance.template_id, func.max(TaskInstance.date))
+            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
+            .where(and_(TaskTemplate.house_id == ACTIVE_HOUSE_ID, TaskInstance.status == "done"))
+            .group_by(TaskInstance.template_id)
+        )
+        last_done_map = {row[0]: row[1] for row in last_done_result.all()}
+        
+        last_handled_result = await session.execute(
+            select(TaskInstance.template_id, func.max(TaskInstance.date))
+            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
+            .where(and_(TaskTemplate.house_id == ACTIVE_HOUSE_ID, TaskInstance.status.in_(["done", "skipped"])))
+            .group_by(TaskInstance.template_id)
+        )
+        last_handled_map = {row[0]: row[1] for row in last_handled_result.all()}
+        
+        active_inst_result = await session.execute(
+            select(TaskInstance.template_id, func.min(TaskInstance.date))
+            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
+            .where(and_(TaskTemplate.house_id == ACTIVE_HOUSE_ID, TaskInstance.status.in_(["free", "in_progress"])))
+            .group_by(TaskInstance.template_id)
+        )
+        active_inst_map = {row[0]: row[1] for row in active_inst_result.all()}
+        
+        house = await session.get(House, ACTIVE_HOUSE_ID)
+        
+        today_inst_result = await session.execute(
+            select(TaskInstance.template_id, func.count(TaskInstance.id))
+            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
+            .where(and_(TaskTemplate.house_id == ACTIVE_HOUSE_ID, TaskInstance.date == monday_date))
+            .group_by(TaskInstance.template_id)
+        )
+        today_inst_map = {row[0]: row[1] for row in today_inst_result.all()}
+        
+        def get_next_date_local(tmpl, base_date):
+            l_done = last_done_map.get(tmpl.id)
+            l_handled = last_handled_map.get(tmpl.id)
+            act_inst = active_inst_map.get(tmpl.id)
+            
+            gen_done = (house.last_summary_date >= base_date) if (house and house.last_summary_date) else False
+            if gen_done:
+                inst_count = today_inst_map.get(tmpl.id, 0)
+                if inst_count == 0:
+                    l_handled = base_date
+            
+            return get_template_next_date(tmpl, l_handled, act_inst, base_date)
+            
+        templates = (await session.execute(
+            select(TaskTemplate).where(
+                and_(
+                    TaskTemplate.house_id == ACTIVE_HOUSE_ID,
+                    TaskTemplate.deleted == False
+                )
+            )
+        )).scalars().all()
+        
+        total_weekly_target_points = 0
+        templates_detail = []
+        for tmpl in templates:
+            occurrences = 0
+            p = tmpl.periodicity
+            
+            next_occ = get_next_date_local(tmpl, monday_date)
+            
+            for d_idx in range(7):
+                curr_d = monday_date + timedelta(days=d_idx)
+                if tmpl.start_date and curr_d < tmpl.start_date:
+                    continue
+                    
+                should_occur = False
+                if p == "daily":
+                    should_occur = True
+                elif p == "weekly":
+                    should_occur = (curr_d.weekday() == (tmpl.weekday if tmpl.weekday is not None else 0))
+                elif p == "twice_weekly":
+                    should_occur = (curr_d.weekday() in (0, 3))
+                elif p == "monthly":
+                    should_occur = (curr_d.day == (tmpl.month_day if tmpl.month_day is not None else 1))
+                elif p == "twice_monthly":
+                    should_occur = (curr_d.day in (5, 20))
+                elif p == "quarterly":
+                    if curr_d.day == (tmpl.month_day if tmpl.month_day is not None else 1):
+                        pos = ((curr_d.month - 1) % 3) + 1
+                        if pos == (tmpl.weekday if tmpl.weekday is not None else 1):
+                            should_occur = True
+                elif p == "every_x_days":
+                    if curr_d == next_occ:
+                        should_occur = True
+                        next_occ += timedelta(days=tmpl.period_days or 1)
+                elif p == "once":
+                    if curr_d == next_occ:
+                        should_occur = True
+                        next_occ = date(2100, 12, 31)
+                        
+                if should_occur:
+                    occurrences += 1
+            
+            if occurrences > 0:
+                pts = 5 if tmpl.title == "Готовка" else tmpl.points
+                total_weekly_target_points += occurrences * pts
+                templates_detail.append({
+                    "title": tmpl.title,
+                    "periodicity": tmpl.periodicity,
+                    "points": pts,
+                    "occurrences": occurrences,
+                    "total": occurrences * pts
+                })
+                
+        members = (await session.execute(
+            select(User).where(User.house_id == ACTIVE_HOUSE_ID)
+        )).scalars().all()
+        
+        num_members = len(members) or 1
+        target_points = int(total_weekly_target_points / num_members)
+        
+        # Calculate current weekly earned points for each member
+        msk_tz = zoneinfo.ZoneInfo("Europe/Moscow")
+        start_msk = datetime.combine(monday_date, datetime.min.time()).replace(tzinfo=msk_tz)
+        start_utc = start_msk.astimezone(timezone.utc).replace(tzinfo=None)
+        end_sunday = monday_date + timedelta(days=6)
+        end_msk = datetime.combine(end_sunday, datetime.max.time()).replace(tzinfo=msk_tz)
+        end_utc = end_msk.astimezone(timezone.utc).replace(tzinfo=None)
+        
+        members_data = []
+        for m in members:
+            earned = await session.scalar(
+                select(func.sum(Completion.points))
+                .where(and_(
+                    Completion.user_id == m.id,
+                    Completion.created_at >= start_utc,
+                    Completion.created_at <= end_utc
+                ))
+            ) or 0
+            members_data.append(f"• <b>{m.display_name or m.username}</b>: {earned}/{target_points} ⭐")
+            
+        # Format list of planned chores
+        chores_list = []
+        for t in templates_detail:
+            chores_list.append(f"• <b>{t['title']}</b> ({t['occurrences']} раз/нед) — +{t['total']} ✨")
+            
+        text = (
+            "📊 <b>Расчет целей на неделю:</b>\n\n"
+            f"Сумма очков всех задач дома: <b>{total_weekly_target_points}</b> ✨\n"
+            f"Количество участников: <b>{num_members}</b>\n"
+            f"Цель на каждого: <b>{target_points}</b> ⭐\n\n"
+            "<b>Текущий прогресс:</b>\n"
+            + "\n".join(members_data) + "\n\n"
+            "<b>Запланированные задачи на неделю:</b>\n"
+            + "\n".join(chores_list)
+        )
+        await message.answer(text, parse_mode="HTML")
+
+
 
 def find_scheduled_date_on_or_after(t: TaskTemplate, search_date: date) -> date:
     p = t.periodicity

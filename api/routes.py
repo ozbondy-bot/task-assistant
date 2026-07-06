@@ -453,7 +453,12 @@ async def claim_house_task(instance_id: int, user: User = Depends(get_current_us
 async def complete_house_task(instance_id: int, points: Optional[int] = None, user: User = Depends(get_current_user)):
     async with AsyncSessionLocal() as session:
         inst = await session.get(TaskInstance, instance_id)
-        if not inst or inst.done_by_user_id != user.id:
+        if not inst:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if inst.status == "free":
+            inst.status = "in_progress"
+            inst.done_by_user_id = user.id
+        elif inst.done_by_user_id != user.id:
             raise HTTPException(status_code=403, detail="Not your task")
         
         tmpl = await session.get(TaskTemplate, inst.template_id)
