@@ -879,16 +879,45 @@ async def get_template_next_date_val(session: AsyncSession, t: TaskTemplate, tod
     )
     last_handled = last_handled_result.scalar()
     
-    # Find active today/future instance
-    active_inst_result = await session.execute(
-        select(func.min(TaskInstance.date))
-        .where(
-            and_(
+    real_today = await get_house_today_date(session)
+    
+    if today_date > real_today:
+        # Assume any active task instances scheduled before today_date (and on or after real_today)
+        # will be completed on their scheduled date.
+        max_active_before = await session.scalar(
+            select(func.max(TaskInstance.date))
+            .where(and_(
                 TaskInstance.template_id == t.id,
-                TaskInstance.status.in_(["free", "in_progress"])
+                TaskInstance.status.in_(["free", "in_progress"]),
+                TaskInstance.date < today_date,
+                TaskInstance.date >= real_today
+            ))
+        )
+        if max_active_before:
+            last_handled = max(last_handled or date.min, max_active_before)
+            
+        # Only look at active instances on or after today_date
+        active_inst_result = await session.execute(
+            select(func.min(TaskInstance.date))
+            .where(
+                and_(
+                    TaskInstance.template_id == t.id,
+                    TaskInstance.status.in_(["free", "in_progress"]),
+                    TaskInstance.date >= today_date
+                )
             )
         )
-    )
+    else:
+        # Standard query
+        active_inst_result = await session.execute(
+            select(func.min(TaskInstance.date))
+            .where(
+                and_(
+                    TaskInstance.template_id == t.id,
+                    TaskInstance.status.in_(["free", "in_progress"])
+                )
+            )
+        )
     active_inst_date = active_inst_result.scalar()
 
     # If daily generation for today has already run, and no instance exists today,

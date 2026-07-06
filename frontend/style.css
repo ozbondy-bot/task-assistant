@@ -284,7 +284,7 @@ body {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 14px 16px;
+  padding: 10px 12px;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -309,11 +309,10 @@ body {
 
 .task-card.house-task {
   border-left: 3px solid var(--accent);
-  padding: 8px 10px;
+  padding-left: 9px;
 }
 
 .task-card.personal-task {
-  padding: 8px 10px;
 }
 
 .task-card.household-claimed {
@@ -509,16 +508,19 @@ body {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 14px 16px;
+  padding: 10px 12px;
   display: flex;
   align-items: center;
   gap: 12px;
   cursor: pointer;
   transition: all 0.2s ease;
+  flex-shrink: 0;
+  box-sizing: border-box;
 }
 
 .shop-item-card.urgent {
   border-left: 3px solid var(--danger);
+  padding-left: 9px;
 }
 
 .shop-item-card:active { transform: scale(0.98); }

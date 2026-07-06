@@ -413,10 +413,17 @@ async def get_house_tasks(date: Optional[str] = None, user: User = Depends(get_c
             )
             
             completed_by = ""
+            done_at_str = ""
             if inst.status == "done" and inst.done_by_user_id:
                 done_user = await session.get(User, inst.done_by_user_id)
                 if done_user:
                     completed_by = done_user.display_name or done_user.username or "Участник"
+                if inst.done_at:
+                    import zoneinfo
+                    tz = zoneinfo.ZoneInfo(house.timezone if (house and house.timezone) else "Europe/Moscow")
+                    dt_utc = inst.done_at.replace(tzinfo=timezone.utc)
+                    dt_local = dt_utc.astimezone(tz)
+                    done_at_str = dt_local.strftime("%d.%m.%Y в %H:%M")
                     
             res_list.append({
                 "id": inst.id,
@@ -429,7 +436,8 @@ async def get_house_tasks(date: Optional[str] = None, user: User = Depends(get_c
                 "status": inst.status,
                 "last_completed": last_date.isoformat() if last_date else None,
                 "next_execution": next_date.isoformat() if next_date else None,
-                "completed_by": completed_by
+                "completed_by": completed_by,
+                "done_at": done_at_str
             })
             
     return res_list
@@ -1615,16 +1623,25 @@ async def get_chores_archive(date: Optional[str] = None, user: User = Depends(ge
         result = await session.execute(query)
         rows = result.all()
         
-    return [
-        {
-            "id": comp.id,
-            "user": usr.display_name or usr.username or "Участник",
-            "title": tmpl.title,
-            "points": comp.points or tmpl.points,
-            "date": comp.created_at.isoformat(),
-        }
-        for comp, usr, inst, tmpl in rows
-    ]
+        # Localize dates using house timezone
+        house = await session.get(House, ACTIVE_HOUSE_ID)
+        import zoneinfo
+        tz = zoneinfo.ZoneInfo(house.timezone if (house and house.timezone) else "Europe/Moscow")
+        from datetime import timezone
+        
+        res = []
+        for comp, usr, inst, tmpl in rows:
+            dt_utc = comp.created_at.replace(tzinfo=timezone.utc)
+            dt_local = dt_utc.astimezone(tz)
+            dt_str = dt_local.strftime("%d.%m.%Y в %H:%M")
+            res.append({
+                "id": comp.id,
+                "user": usr.display_name or usr.username or "Участник",
+                "title": tmpl.title,
+                "points": comp.points or tmpl.points,
+                "date": dt_str,
+            })
+    return res
 
 @app.get("/api/archive/tasks")
 async def get_tasks_archive(date: Optional[str] = None, user: User = Depends(get_current_user)):

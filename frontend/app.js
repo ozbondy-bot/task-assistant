@@ -241,7 +241,7 @@ function renderHouseTasks(tasks) {
     const pointsBadge = isCooking ? 'до 10 ✨' : `${t.points} ✨`;
 
     return `
-      <div class="task-card house-task flex-between ${grayClass}" onclick="${clickHandler}" style="padding: 10px 12px; cursor: pointer;">
+      <div class="task-card house-task flex-between ${grayClass}" onclick="${clickHandler}">
         <div class="task-left flex-row" style="align-items: center; gap: 8px;">
           <span style="font-size: 16px;">🏠</span>
           <span class="task-title" style="font-weight: 500; font-size: 14px;">${escHtml(stripEmoji(t.title))}</span>
@@ -271,7 +271,7 @@ async function claimTask(instanceId) {
 function renderMembers(members) {
   const container = document.getElementById('membersListHeader');
   if (!container) return;
-  const sorted = [...members].sort((a, b) => b.weekly_earned - a.weekly_earned);
+  const sorted = [...members].sort((a, b) => a.id - b.id);
   
   const m1 = sorted[0];
   const m2 = sorted[1];
@@ -411,7 +411,7 @@ function renderPersonalTasks(personal, household) {
     
     if (t.isHousehold) {
       return `
-        <div class="task-card house-task flex-between ${grayClass}" onclick="openMyTaskDetails(${JSON.stringify(t).replace(/"/g, '&quot;')}, 'household')" style="padding: 10px 12px; cursor: pointer; margin-bottom: 8px;">
+        <div class="task-card house-task flex-between ${grayClass}" onclick="openMyTaskDetails(${JSON.stringify(t).replace(/"/g, '&quot;')}, 'household')" style="margin-bottom: 8px;">
           <div class="task-left flex-row" style="align-items: center; gap: 8px;">
             <span style="font-size: 16px;">🏠</span>
             <span class="task-title" style="font-weight: 500; font-size: 14px;">${escHtml(stripEmoji(t.text))}</span>
@@ -424,7 +424,7 @@ function renderPersonalTasks(personal, household) {
         : `openMyTaskDetails(${JSON.stringify(t).replace(/"/g, '&quot;')}, 'personal')`;
 
       return `
-        <div class="task-card personal-task flex-between ${grayClass}" onclick="${clickHandler}" style="padding: 10px 12px; cursor: pointer; margin-bottom: 8px;">
+        <div class="task-card personal-task flex-between ${grayClass}" onclick="${clickHandler}" style="margin-bottom: 8px;">
           <div class="task-left flex-row" style="align-items: center; gap: 8px;">
             <span style="font-size: 16px;">👤</span>
             <span class="task-title" style="font-weight: 500; font-size: 14px;">${escHtml(stripEmoji(t.text))}</span>
@@ -1464,14 +1464,28 @@ async function spawnChoreFromTemplate(tmplId) {
 
 /* ── Detail Modals for Archive and Templates ── */
 function openArchivedChoreDetails(c) {
-  document.getElementById('archivedChoreTitle').textContent = stripEmoji(c.title);
-  const dt = new Date(c.date);
-  const dtStr = dt.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  document.getElementById('archivedChoreTitle').textContent = stripEmoji(c.title || c.text || 'Детали дела');
   
+  let dtStr = c.done_at || '';
+  if (!dtStr && c.date) {
+    if (c.date.includes(' в ')) {
+      dtStr = c.date; // already formatted from backend
+    } else {
+      const dt = new Date(c.date);
+      if (!isNaN(dt.getTime())) {
+        dtStr = dt.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+      } else {
+        dtStr = c.date;
+      }
+    }
+  }
+
+  const userDisplayName = c.user || c.completed_by || 'Участник';
+
   document.getElementById('archivedChoreBody').innerHTML = `
     <div>📅 <strong>Дата выполнения:</strong> <span>${dtStr}</span></div>
     <div>✨ <strong>Очки:</strong> <span>${c.points} ✨</span></div>
-    <div>👤 <strong>Выполнил:</strong> <span>${escHtml(c.user)}</span></div>
+    <div>👤 <strong>Выполнил:</strong> <span>${escHtml(userDisplayName)}</span></div>
   `;
   document.getElementById('archivedChoreActions').innerHTML = `
     <button class="btn btn-primary" onclick="restoreChoreFromArchive(${c.id}); closeModal('archivedChoreDetailsModal');" style="width: 100%; padding: 12px; font-weight: 600;">Вернуть</button>
