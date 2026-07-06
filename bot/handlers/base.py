@@ -407,6 +407,27 @@ async def generate_daily_chores_if_needed(session, house_id: int):
         # Another request already claimed generation for today — skip
         return
 
+    # Rollover old uncompleted household task instances to today
+    await session.execute(
+        update(TaskInstance)
+        .where(and_(
+            TaskInstance.date < today,
+            TaskInstance.status.in_(["free", "in_progress"])
+        ))
+        .values(date=today)
+    )
+
+    # Rollover old uncompleted personal tasks to today
+    await session.execute(
+        update(PersonalTask)
+        .where(and_(
+            PersonalTask.date_execution < today,
+            PersonalTask.is_completed == False,
+            PersonalTask.is_deleted == False
+        ))
+        .values(date_execution=today)
+    )
+
     result = await session.execute(
         select(TaskTemplate).where(
             and_(

@@ -54,8 +54,11 @@ async def health():
 # -- Personal tasks --
 @app.get("/api/tasks/today")
 async def get_today_tasks(date: Optional[str] = None, user: User = Depends(get_current_user)):
-    from bot.handlers.base import get_house_today_date
+    from bot.handlers.base import get_house_today_date, generate_daily_chores_if_needed
     async with AsyncSessionLocal() as session:
+        # Trigger daily chores generation and rollover on personal tab load too
+        await generate_daily_chores_if_needed(session, ACTIVE_HOUSE_ID)
+
         today = await get_house_today_date(session)
         
         target_date = today
@@ -94,9 +97,50 @@ async def get_today_tasks(date: Optional[str] = None, user: User = Depends(get_c
         )
         tasks = result.scalars().all()
         
+        res_personal = []
+        for t in tasks:
+            from bot.parser import clean_task_text
+            clean_txt = clean_task_text(t.text)
+            # Find last completion of a task with this text
+            last_date = await session.scalar(
+                select(PersonalTask.date_execution)
+                .where(and_(
+                    PersonalTask.user_id == user.id,
+                    PersonalTask.is_completed == True,
+                    PersonalTask.is_deleted == False,
+                    PersonalTask.text.ilike(f"%{clean_txt}%")
+                ))
+                .order_by(PersonalTask.date_execution.desc())
+                .limit(1)
+            )
+            # Find next execution date of a task with this text
+            next_date = await session.scalar(
+                select(PersonalTask.date_execution)
+                .where(and_(
+                    PersonalTask.user_id == user.id,
+                    PersonalTask.is_completed == False,
+                    PersonalTask.is_deleted == False,
+                    PersonalTask.date_execution > today,
+                    PersonalTask.text.ilike(f"%{clean_txt}%")
+                ))
+                .order_by(PersonalTask.date_execution.asc())
+                .limit(1)
+            )
+            res_personal.append({
+                "id": t.id,
+                "text": t.text,
+                "date": str(t.date_execution),
+                "recurrence": t.recurrence,
+                "category": t.category,
+                "type": "personal",
+                "is_completed": t.is_completed,
+                "last_completed": last_date.isoformat() if last_date else None,
+                "next_execution": next_date.isoformat() if next_date else None,
+            })
+
         # Also get in-progress household tasks (claimed by this user)
         # Note: claimed chores only show up on today's dashboard
-        house_tasks = []
+        res_household = []
         if target_date == today:
             house_result = await session.execute(
                 select(TaskInstance, TaskTemplate).join(
@@ -109,31 +153,40 @@ async def get_today_tasks(date: Optional[str] = None, user: User = Depends(get_c
                 )
             )
             house_tasks = house_result.all()
+            for inst, tmpl in house_tasks:
+                last_date = await session.scalar(
+                    select(Completion.created_at)
+                    .join(TaskInstance, Completion.task_instance_id == TaskInstance.id)
+                    .where(TaskInstance.template_id == tmpl.id)
+                    .order_by(Completion.created_at.desc())
+                    .limit(1)
+                )
+                next_date = await session.scalar(
+                    select(TaskInstance.date)
+                    .where(
+                        and_(
+                            TaskInstance.template_id == tmpl.id,
+                            TaskInstance.status == "free",
+                            TaskInstance.date > today
+                        )
+                    )
+                    .order_by(TaskInstance.date.asc())
+                    .limit(1)
+                )
+                res_household.append({
+                    "id": inst.id,
+                    "text": tmpl.title,
+                    "points": tmpl.points,
+                    "template_id": tmpl.id,
+                    "type": "household",
+                    "status": "in_progress",
+                    "last_completed": last_date.isoformat() if last_date else None,
+                    "next_execution": next_date.isoformat() if next_date else None,
+                })
  
     return {
-        "personal": [
-            {
-                "id": t.id,
-                "text": t.text,
-                "date": str(t.date_execution),
-                "recurrence": t.recurrence,
-                "category": t.category,
-                "type": "personal",
-                "is_completed": t.is_completed
-            }
-            for t in tasks
-        ],
-        "household": [
-            {
-                "id": inst.id,
-                "text": tmpl.title,
-                "points": tmpl.points,
-                "template_id": tmpl.id,
-                "type": "household",
-                "status": "in_progress",
-            }
-            for inst, tmpl in house_tasks
-        ],
+        "personal": res_personal,
+        "household": res_household,
     }
 
 
@@ -230,10 +283,78 @@ async def get_house_tasks(date: Optional[str] = None, user: User = Depends(get_c
             except Exception:
                 pass
                 
-        if target_date == today:
-            # Show only today's task instances (generator already sets date=today for new tasks)
-            # Free tasks from past days that weren't done should NOT appear here -
-            # they are old unfinished tasks and stay on their original date.
+        if target_date > today:
+            # Future dates: simulate planned tasks
+            from bot.handlers.base import get_template_next_date_val
+            result = await session.execute(
+                select(TaskTemplate).where(
+                    and_(
+                        TaskTemplate.house_id == ACTIVE_HOUSE_ID,
+                        TaskTemplate.deleted == False
+                    )
+                ).order_by(TaskTemplate.points.desc())
+            )
+            templates = result.scalars().all()
+            res_list = []
+            weekday = target_date.weekday()
+            day = target_date.day
+            month = target_date.month
+            
+            for tmpl in templates:
+                if tmpl.start_date and target_date < tmpl.start_date:
+                    continue
+                    
+                p = tmpl.periodicity
+                should_run = False
+                if p == "daily":
+                    should_run = True
+                elif p == "weekly":
+                    should_run = (weekday == (tmpl.weekday if tmpl.weekday is not None else 0))
+                elif p == "twice_weekly":
+                    should_run = (weekday in (0, 3))
+                elif p == "monthly":
+                    should_run = (day == (tmpl.month_day if tmpl.month_day is not None else 1))
+                elif p == "twice_monthly":
+                    should_run = (day in (5, 20))
+                elif p == "quarterly":
+                    if day == (tmpl.month_day if tmpl.month_day is not None else 1):
+                        pos = ((month - 1) % 3) + 1
+                        if pos == (tmpl.weekday if tmpl.weekday is not None else 1):
+                            should_run = True
+                elif p == "every_x_days":
+                    _, nd = await get_template_next_date_val(session, tmpl, target_date)
+                    if nd == target_date:
+                        should_run = True
+                elif p == "once":
+                    _, nd = await get_template_next_date_val(session, tmpl, target_date)
+                    if nd == target_date:
+                        should_run = True
+                        
+                if should_run:
+                    last_date = await session.scalar(
+                        select(Completion.created_at)
+                        .join(TaskInstance, Completion.task_instance_id == TaskInstance.id)
+                        .where(TaskInstance.template_id == tmpl.id)
+                        .order_by(Completion.created_at.desc())
+                        .limit(1)
+                    )
+                    res_list.append({
+                        "id": 0,
+                        "template_id": tmpl.id,
+                        "title": tmpl.title,
+                        "points": tmpl.points,
+                        "periodicity": tmpl.periodicity,
+                        "period_days": tmpl.period_days,
+                        "date": str(target_date),
+                        "status": "free",
+                        "last_completed": last_date.isoformat() if last_date else None,
+                        "next_execution": str(target_date),
+                        "completed_by": ""
+                    })
+            return res_list
+
+        elif target_date == today:
+            # Show only today's task instances (uncompleted past tasks are rolled over)
             result = await session.execute(
                 select(TaskInstance, TaskTemplate).join(
                     TaskTemplate, TaskInstance.template_id == TaskTemplate.id
@@ -245,13 +366,9 @@ async def get_house_tasks(date: Optional[str] = None, user: User = Depends(get_c
                     )
                 ).order_by(TaskTemplate.points.desc(), TaskInstance.id.asc())
             )
+            rows = result.all()
         else:
-            # Just that specific day's task instances (if in the past, only completed/skipped/shifted)
-            if target_date < today:
-                status_cond = TaskInstance.status.in_(["done", "skipped", "shifted"])
-            else:
-                status_cond = TaskInstance.status.in_(["free", "in_progress", "done", "skipped"])
-                
+            # Past dates: show only completed (done) tasks
             result = await session.execute(
                 select(TaskInstance, TaskTemplate).join(
                     TaskTemplate, TaskInstance.template_id == TaskTemplate.id
@@ -260,12 +377,11 @@ async def get_house_tasks(date: Optional[str] = None, user: User = Depends(get_c
                         TaskTemplate.house_id == ACTIVE_HOUSE_ID,
                         TaskTemplate.deleted == False,
                         TaskInstance.date == target_date,
-                        status_cond
+                        TaskInstance.status == "done"
                     )
                 ).order_by(TaskTemplate.points.desc(), TaskInstance.id.asc())
             )
-            
-        rows = result.all()
+            rows = result.all()
         
         res_list = []
         for inst, tmpl in rows:

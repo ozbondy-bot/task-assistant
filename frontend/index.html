@@ -58,7 +58,6 @@
           <span id="houseActiveDateDisplay" style="font-weight: 600; font-size: 14px; color: var(--text);">06.07.</span>
           <button class="btn-pagination" onclick="shiftHouseDay(1)">▶</button>
         </div>
-        <button class="fab" id="addChoreBtn">+</button>
       </section>
 
       <!-- PERSONAL TASKS TAB -->
@@ -70,7 +69,6 @@
           <span id="personalActiveDateDisplay" style="font-weight: 600; font-size: 14px; color: var(--text);">06.07.</span>
           <button class="btn-pagination" onclick="shiftPersonalDay(1)">▶</button>
         </div>
-        <button class="fab" id="addTaskBtn">+</button>
         <!-- Add Task Modal -->
         <div class="modal-overlay hidden" id="addTaskModal">
           <div class="modal-card">
@@ -108,9 +106,6 @@
           <span id="shoppingTotal" style="font-size: 12px; font-weight: bold; color: var(--accent2);">Сумма: 0 ₽</span>
           <button class="btn-pagination" onclick="shiftShoppingDay(1)">▶</button>
         </div>
-        <button class="fab" id="addShopBtn">
-          <span>+</span>
-        </button>
         <!-- Add shopping modal -->
         <div class="modal-overlay hidden" id="addShopModal">
           <div class="modal-card">
@@ -247,9 +242,11 @@
         <h3 id="choreDetailsTitle">Детали дела</h3>
         <button class="btn-close-modal" onclick="closeModal('choreDetailsModal')">✕</button>
       </div>
-      <div class="chore-details-body" style="margin-bottom: 20px; font-size: 14px; color: var(--text2); display: flex; flex-direction: column; gap: 10px;">
+      <div class="chore-details-body" style="margin-bottom: 20px; font-size: 14px; color: var(--text2); display: flex; flex-direction: column; gap: 8px;">
         <div>📅 <strong>Цикл повторения:</strong> <span id="choreDetailsPeriod">Каждые 30 дней</span></div>
         <div>✨ <strong>Награда:</strong> <span id="choreDetailsPoints">0 очков</span></div>
+        <div>✅ <strong>Последнее выполнение:</strong> <span id="choreDetailsLastCompleted">—</span></div>
+        <div>⏭️ <strong>Следующее:</strong> <span id="choreDetailsNextExecution">—</span></div>
       </div>
       <div class="task-action-row" id="choreDetailsActions" onclick="event.stopPropagation();">
         <!-- Action buttons will be dynamically injected here -->
@@ -320,15 +317,15 @@
     </div>
   </div>
 
-  <!-- Add from Database Preset Modal -->
+  <!-- Add from Database Preset Modal (fullscreen) -->
   <div class="modal-overlay hidden" id="addFromDbModal">
-    <div class="modal-card modal-large">
-      <div class="modal-header-row" style="margin-bottom: 12px;">
+    <div class="modal-card" style="width: 100%; max-width: 100%; height: 100%; max-height: 100%; border-radius: 0; display: flex; flex-direction: column; padding: 16px; box-sizing: border-box;">
+      <div class="modal-header-row" style="margin-bottom: 12px; flex-shrink: 0;">
         <h3>Добавить из базы</h3>
         <button class="btn-close-modal" onclick="closeModal('addFromDbModal')">✕</button>
       </div>
-      <p class="modal-hint" style="margin-bottom: 12px;">Выберите шаблон дела, чтобы активировать его на сегодня:</p>
-      <div id="dbTemplatesList" class="archive-list" style="max-height: 250px; overflow-y: auto;">
+      <p class="modal-hint" style="margin-bottom: 12px; flex-shrink: 0;">Выберите шаблон дела, чтобы активировать его на сегодня:</p>
+      <div id="dbTemplatesList" style="flex: 1; overflow-y: auto;">
         <!-- Inactive templates list -->
       </div>
     </div>
