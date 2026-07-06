@@ -869,11 +869,11 @@ async def calculate_weekly_target_points(session: AsyncSession, house_id: int, t
     monday_date = today - timedelta(days=today.weekday())
     sunday_date = monday_date + timedelta(days=6)
     
-    # Bulk pre-fetch all handled/done dates to avoid database query roundtrips in loop
+    # Bulk pre-fetch all handled/done dates strictly before this week to avoid target changes on completion
     last_done_result = await session.execute(
         select(TaskInstance.template_id, func.max(TaskInstance.date))
         .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
-        .where(and_(TaskTemplate.house_id == house_id, TaskInstance.status == "done"))
+        .where(and_(TaskTemplate.house_id == house_id, TaskInstance.status == "done", TaskInstance.date < monday_date))
         .group_by(TaskInstance.template_id)
     )
     last_done_map = {row[0]: row[1] for row in last_done_result.all()}
@@ -881,7 +881,7 @@ async def calculate_weekly_target_points(session: AsyncSession, house_id: int, t
     last_handled_result = await session.execute(
         select(TaskInstance.template_id, func.max(TaskInstance.date))
         .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
-        .where(and_(TaskTemplate.house_id == house_id, TaskInstance.status.in_(["done", "skipped"])))
+        .where(and_(TaskTemplate.house_id == house_id, TaskInstance.status.in_(["done", "skipped"]), TaskInstance.date < monday_date))
         .group_by(TaskInstance.template_id)
     )
     last_handled_map = {row[0]: row[1] for row in last_handled_result.all()}
@@ -889,7 +889,7 @@ async def calculate_weekly_target_points(session: AsyncSession, house_id: int, t
     active_inst_result = await session.execute(
         select(TaskInstance.template_id, func.min(TaskInstance.date))
         .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
-        .where(and_(TaskTemplate.house_id == house_id, TaskInstance.status.in_(["free", "in_progress"])))
+        .where(and_(TaskTemplate.house_id == house_id, TaskInstance.status.in_(["free", "in_progress"]), TaskInstance.date < monday_date))
         .group_by(TaskInstance.template_id)
     )
     active_inst_map = {row[0]: row[1] for row in active_inst_result.all()}
