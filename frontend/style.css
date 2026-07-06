@@ -216,10 +216,10 @@ body {
   inset: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  padding: 16px 16px 80px 16px;
+  padding: 12px 12px 0 12px;
   display: none;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   scroll-behavior: smooth;
   box-sizing: border-box;
 }
@@ -262,6 +262,22 @@ body {
   flex-direction: column;
   gap: 8px;
   flex: 1;
+  min-height: 0;
+}
+
+/* Pagination bar — always at bottom, sticky during scroll */
+.pagination-sticky {
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 70px 16px 12px;
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+  margin-top: auto;
 }
 
 .task-card {
@@ -700,7 +716,7 @@ body {
 /* ── FAB ─────────────────────────────────────────────────────────────────────── */
 .fab {
   position: fixed;
-  bottom: 80px;
+  bottom: 20px;
   right: 20px;
   width: 52px;
   height: 52px;
@@ -719,7 +735,7 @@ body {
   box-shadow: 0 4px 20px rgba(124, 111, 247, 0.5);
   transition: all 0.2s;
   font-family: var(--font);
-  z-index: 10;
+  z-index: 20;
 }
 
 .fab:active { transform: scale(0.9); }

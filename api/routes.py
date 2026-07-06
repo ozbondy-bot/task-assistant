@@ -231,8 +231,9 @@ async def get_house_tasks(date: Optional[str] = None, user: User = Depends(get_c
                 pass
                 
         if target_date == today:
-            # Rollover free tasks (date <= today and status == "free")
-            # Plus today's task instances of any status (date == today)
+            # Show only today's task instances (generator already sets date=today for new tasks)
+            # Free tasks from past days that weren't done should NOT appear here -
+            # they are old unfinished tasks and stay on their original date.
             result = await session.execute(
                 select(TaskInstance, TaskTemplate).join(
                     TaskTemplate, TaskInstance.template_id == TaskTemplate.id
@@ -240,10 +241,7 @@ async def get_house_tasks(date: Optional[str] = None, user: User = Depends(get_c
                     and_(
                         TaskTemplate.house_id == ACTIVE_HOUSE_ID,
                         TaskTemplate.deleted == False,
-                        or_(
-                            and_(TaskInstance.date <= today, TaskInstance.status == "free"),
-                            TaskInstance.date == today
-                        )
+                        TaskInstance.date == today
                     )
                 ).order_by(TaskTemplate.points.desc(), TaskInstance.id.asc())
             )

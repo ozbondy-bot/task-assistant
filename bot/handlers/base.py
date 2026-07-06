@@ -382,7 +382,7 @@ async def get_house_today_date(session: AsyncSession) -> date:
 
 
 async def generate_daily_chores_if_needed(session, house_id: int):
-    """Generate today's task instances from templates and rollover uncompleted ones."""
+    """Generate today's task instances from templates. Uses atomic UPDATE to prevent race conditions."""
     from sqlalchemy import update
     today = await get_house_today_date(session)
     weekday = today.weekday()
@@ -393,11 +393,19 @@ async def generate_daily_chores_if_needed(session, house_id: int):
     if not house:
         return
 
-    if house.last_summary_date == today:
+    # Atomic claim: only one concurrent request can proceed to generate.
+    # UPDATE returns rows only if last_summary_date != today, preventing race conditions.
+    result = await session.execute(
+        update(House)
+        .where(and_(House.id == house_id, House.last_summary_date != today))
+        .values(last_summary_date=today)
+        .returning(House.id)
+    )
+    await session.flush()  # flush immediately so the lock takes effect
+    claimed = result.fetchone()
+    if not claimed:
+        # Another request already claimed generation for today — skip
         return
-
-    # Rollover old uncompleted tasks is disabled (we keep their original date)
-    # to naturally show them with their original date and yellow circles.
 
     result = await session.execute(
         select(TaskTemplate).where(
@@ -440,9 +448,9 @@ async def generate_daily_chores_if_needed(session, house_id: int):
                 should_create = True
 
         if should_create:
-            # Prevent duplication by checking if there is any instance of this template for today
+            # Final safety check: no instance already exists for today
             exists = await session.scalar(
-                select(TaskInstance).where(
+                select(TaskInstance.id).where(
                     and_(
                         TaskInstance.template_id == tmpl.id,
                         TaskInstance.date == today
