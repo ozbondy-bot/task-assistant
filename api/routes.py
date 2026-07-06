@@ -24,7 +24,17 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 ACTIVE_HOUSE_ID = 81
 
+from fastapi.middleware.cors import CORSMiddleware
+
 app = FastAPI(title="Task Assistant API", docs_url=None, redoc_url=None)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # ── Auth dependency ───────────────────────────────────────────────────────────
@@ -289,8 +299,30 @@ async def get_house_tasks(date: Optional[str] = None, user: User = Depends(get_c
             except Exception:
                 pass
                 
+        # Element format: (inst_id, tmpl_id, title, points, periodicity, period_days, date_str, status, inst_obj)
+        raw_tasks = []
+
         if target_date > today:
-            # Future dates: simulate planned tasks
+            # Future dates: show explicitly scheduled/shifted task instances from DB, plus simulate others
+            result = await session.execute(
+                select(TaskInstance, TaskTemplate).join(
+                    TaskTemplate, TaskInstance.template_id == TaskTemplate.id
+                ).where(
+                    and_(
+                        TaskTemplate.house_id == ACTIVE_HOUSE_ID,
+                        TaskTemplate.deleted == False,
+                        TaskInstance.date == target_date,
+                        TaskInstance.status != "shifted"
+                    )
+                ).order_by(TaskTemplate.points.desc(), TaskInstance.id.asc())
+            )
+            existing_rows = result.all()
+            existing_template_ids = {r[1].id for r in existing_rows}
+
+            for inst, tmpl in existing_rows:
+                raw_tasks.append((inst.id, tmpl.id, tmpl.title, tmpl.points, tmpl.periodicity, tmpl.period_days, str(target_date), inst.status, inst))
+
+            # Simulate templates that don't have an instance in the DB for this target_date
             from bot.handlers.base import get_template_next_date_val
             result = await session.execute(
                 select(TaskTemplate).where(
@@ -301,12 +333,13 @@ async def get_house_tasks(date: Optional[str] = None, user: User = Depends(get_c
                 ).order_by(TaskTemplate.points.desc())
             )
             templates = result.scalars().all()
-            res_list = []
             weekday = target_date.weekday()
             day = target_date.day
             month = target_date.month
             
             for tmpl in templates:
+                if tmpl.id in existing_template_ids:
+                    continue
                 if tmpl.start_date and target_date < tmpl.start_date:
                     continue
                     
@@ -337,30 +370,10 @@ async def get_house_tasks(date: Optional[str] = None, user: User = Depends(get_c
                         should_run = True
                         
                 if should_run:
-                    last_date = await session.scalar(
-                        select(Completion.created_at)
-                        .join(TaskInstance, Completion.task_instance_id == TaskInstance.id)
-                        .where(TaskInstance.template_id == tmpl.id)
-                        .order_by(Completion.created_at.desc())
-                        .limit(1)
-                    )
-                    res_list.append({
-                        "id": 0,
-                        "template_id": tmpl.id,
-                        "title": tmpl.title,
-                        "points": tmpl.points,
-                        "periodicity": tmpl.periodicity,
-                        "period_days": tmpl.period_days,
-                        "date": str(target_date),
-                        "status": "free",
-                        "last_completed": last_date.isoformat() if last_date else None,
-                        "next_execution": str(target_date),
-                        "completed_by": ""
-                    })
-            return res_list
+                    raw_tasks.append((0, tmpl.id, tmpl.title, tmpl.points, tmpl.periodicity, tmpl.period_days, str(target_date), "free", None))
 
         elif target_date == today:
-            # Show only today's task instances (uncompleted past tasks are rolled over)
+            # Show only today's task instances (uncompleted past tasks are rolled over, shifted tasks excluded)
             result = await session.execute(
                 select(TaskInstance, TaskTemplate).join(
                     TaskTemplate, TaskInstance.template_id == TaskTemplate.id
@@ -368,11 +381,15 @@ async def get_house_tasks(date: Optional[str] = None, user: User = Depends(get_c
                     and_(
                         TaskTemplate.house_id == ACTIVE_HOUSE_ID,
                         TaskTemplate.deleted == False,
-                        TaskInstance.date == today
+                        TaskInstance.date == today,
+                        TaskInstance.status != "shifted"
                     )
                 ).order_by(TaskTemplate.points.desc(), TaskInstance.id.asc())
             )
             rows = result.all()
+            for inst, tmpl in rows:
+                raw_tasks.append((inst.id, tmpl.id, tmpl.title, tmpl.points, tmpl.periodicity, tmpl.period_days, str(inst.date), inst.status, inst))
+
         else:
             # Past dates: show only completed (done) tasks
             result = await session.execute(
@@ -388,35 +405,53 @@ async def get_house_tasks(date: Optional[str] = None, user: User = Depends(get_c
                 ).order_by(TaskTemplate.points.desc(), TaskInstance.id.asc())
             )
             rows = result.all()
-        
-        res_list = []
-        for inst, tmpl in rows:
-            # Query last completion date
-            last_date = await session.scalar(
-                select(Completion.created_at)
-                .join(TaskInstance, Completion.task_instance_id == TaskInstance.id)
-                .where(TaskInstance.template_id == tmpl.id)
-                .order_by(Completion.created_at.desc())
-                .limit(1)
+            for inst, tmpl in rows:
+                raw_tasks.append((inst.id, tmpl.id, tmpl.title, tmpl.points, tmpl.periodicity, tmpl.period_days, str(inst.date), inst.status, inst))
+
+        # Perform bulk queries for last completion and next execution dates
+        tmpl_ids = list({t[1] for t in raw_tasks})
+        last_completed_map = {}
+        next_execution_map = {}
+        if tmpl_ids:
+            last_completed_res = await session.execute(
+                select(TaskInstance.template_id, func.max(Completion.created_at))
+                .join(Completion, Completion.task_instance_id == TaskInstance.id)
+                .where(TaskInstance.template_id.in_(tmpl_ids))
+                .group_by(TaskInstance.template_id)
             )
-            # Find next scheduled instance date
-            next_date = await session.scalar(
-                select(TaskInstance.date)
+            last_completed_map = dict(last_completed_res.all())
+            
+            next_execution_res = await session.execute(
+                select(TaskInstance.template_id, func.min(TaskInstance.date))
                 .where(
                     and_(
-                        TaskInstance.template_id == tmpl.id,
+                        TaskInstance.template_id.in_(tmpl_ids),
                         TaskInstance.status == "free",
                         TaskInstance.date > today
                     )
                 )
-                .order_by(TaskInstance.date.asc())
-                .limit(1)
+                .group_by(TaskInstance.template_id)
             )
-            
+            next_execution_map = dict(next_execution_res.all())
+
+        # Get all users in the house to resolve done_by_user_id
+        user_result = await session.execute(
+            select(User).where(User.house_id == ACTIVE_HOUSE_ID)
+        )
+        users_map = {u.id: u for u in user_result.scalars().all()}
+
+        # Build response list
+        res_list = []
+        for inst_id, tmpl_id, title, points, periodicity, period_days, date_str, status, inst in raw_tasks:
+            last_date = last_completed_map.get(tmpl_id)
+            next_date = next_execution_map.get(tmpl_id)
+            if next_date is None and target_date > today:
+                next_date = target_date
+
             completed_by = ""
             done_at_str = ""
-            if inst.status == "done" and inst.done_by_user_id:
-                done_user = await session.get(User, inst.done_by_user_id)
+            if inst and inst.status == "done" and inst.done_by_user_id:
+                done_user = users_map.get(inst.done_by_user_id)
                 if done_user:
                     completed_by = done_user.display_name or done_user.username or "Участник"
                 if inst.done_at:
@@ -425,18 +460,18 @@ async def get_house_tasks(date: Optional[str] = None, user: User = Depends(get_c
                     dt_utc = inst.done_at.replace(tzinfo=timezone.utc)
                     dt_local = dt_utc.astimezone(tz)
                     done_at_str = dt_local.strftime("%d.%m.%Y в %H:%M")
-                    
+
             res_list.append({
-                "id": inst.id,
-                "template_id": tmpl.id,
-                "title": tmpl.title,
-                "points": tmpl.points,
-                "periodicity": tmpl.periodicity,
-                "period_days": tmpl.period_days,
-                "date": str(inst.date),
-                "status": inst.status,
+                "id": inst_id,
+                "template_id": tmpl_id,
+                "title": title,
+                "points": points,
+                "periodicity": periodicity,
+                "period_days": period_days,
+                "date": date_str,
+                "status": status,
                 "last_completed": last_date.isoformat() if last_date else None,
-                "next_execution": next_date.isoformat() if next_date else None,
+                "next_execution": next_date.isoformat() if next_date else (str(next_date) if next_date else None),
                 "completed_by": completed_by,
                 "done_at": done_at_str
             })
@@ -542,18 +577,23 @@ async def get_house_members(user: User = Depends(get_current_user)):
         
         sorted_members = sorted(members, key=lambda x: x.id)
         
+        # Bulk query earned points for all members
+        earned_res = await session.execute(
+            select(Completion.user_id, func.sum(Completion.points))
+            .where(
+                and_(
+                    Completion.user_id.in_([m.id for m in sorted_members]),
+                    Completion.created_at >= start_utc,
+                    Completion.created_at <= end_utc
+                )
+            )
+            .group_by(Completion.user_id)
+        )
+        earned_map = dict(earned_res.all())
+        
         res_list = []
         for index, m in enumerate(sorted_members):
-            earned = await session.scalar(
-                select(func.sum(Completion.points))
-                .where(
-                    and_(
-                        Completion.user_id == m.id,
-                        Completion.created_at >= start_utc,
-                        Completion.created_at <= end_utc
-                    )
-                )
-            ) or 0
+            earned = earned_map.get(m.id, 0)
             
             # Split target 2/3 for first, 1/3 for second member
             if len(sorted_members) >= 2:

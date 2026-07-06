@@ -339,10 +339,27 @@ async def send_midnight_summary():
 
 async def scheduler_loop():
     from zoneinfo import ZoneInfo
+    import time
     sent_events = set()
+    last_ping_time = 0
     
     while True:
         try:
+            # Self-ping keep-alive to prevent Render sleeping
+            current_time = time.time()
+            if current_time - last_ping_time >= 300:  # 5 minutes
+                last_ping_time = current_time
+                external_url = os.getenv("RENDER_EXTERNAL_URL") or os.getenv("MINI_APP_URL")
+                if external_url:
+                    ping_url = external_url.rstrip("/") + "/health"
+                    try:
+                        import aiohttp
+                        async with aiohttp.ClientSession() as client:
+                            async with client.get(ping_url, timeout=10) as resp:
+                                logger.info(f"Self-ping keep-alive to {ping_url} returned status: {resp.status}")
+                    except Exception as ping_err:
+                        logger.warning(f"Self-ping keep-alive failed: {ping_err}")
+
             async with AsyncSessionLocal() as session:
                 house = await session.get(House, ACTIVE_HOUSE_ID)
                 tz_str = house.timezone if house else "Europe/Moscow"
@@ -925,18 +942,22 @@ async def calculate_weekly_target_points(session: AsyncSession, house_id: int, t
             )
         )
     )).scalars().all()
-    
-    # Query skipped instances counts for this week in bulk
-    skipped_result = await session.execute(
-        select(TaskInstance.template_id, func.count(TaskInstance.id))
+    # Bulk query all task instances for this week
+    week_insts_result = await session.execute(
+        select(TaskInstance)
+        .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
         .where(and_(
+            TaskTemplate.house_id == house_id,
             TaskInstance.date >= monday_date,
-            TaskInstance.date <= sunday_date,
-            TaskInstance.status == "skipped"
+            TaskInstance.date <= sunday_date
         ))
-        .group_by(TaskInstance.template_id)
     )
-    skipped_map = {row[0]: row[1] for row in skipped_result.all()}
+    week_instances = week_insts_result.scalars().all()
+    
+    # Map: template_id -> date -> list of TaskInstance
+    inst_by_tmpl_and_date = {}
+    for inst in week_instances:
+        inst_by_tmpl_and_date.setdefault(inst.template_id, {}).setdefault(inst.date, []).append(inst)
     
     total_weekly_target_points = 0
     templates_detail = []
@@ -946,44 +967,66 @@ async def calculate_weekly_target_points(session: AsyncSession, house_id: int, t
         p = tmpl.periodicity
         
         next_occ = get_next_date_local(tmpl, monday_date)
+        tmpl_insts_by_date = inst_by_tmpl_and_date.get(tmpl.id, {})
         
         for d_idx in range(7):
             curr_d = monday_date + timedelta(days=d_idx)
             if tmpl.start_date and curr_d < tmpl.start_date:
                 continue
                 
-            should_occur = False
-            if p == "daily":
-                should_occur = True
-            elif p == "weekly":
-                should_occur = (curr_d.weekday() == (tmpl.weekday if tmpl.weekday is not None else 0))
-            elif p == "twice_weekly":
-                should_occur = (curr_d.weekday() in (0, 3))
-            elif p == "monthly":
-                should_occur = (curr_d.day == (tmpl.month_day if tmpl.month_day is not None else 1))
-            elif p == "twice_monthly":
-                should_occur = (curr_d.day in (5, 20))
-            elif p == "quarterly":
-                if curr_d.day == (tmpl.month_day if tmpl.month_day is not None else 1):
-                    pos = ((curr_d.month - 1) % 3) + 1
-                    if pos == (tmpl.weekday if tmpl.weekday is not None else 1):
-                        should_occur = True
-            elif p == "every_x_days":
-                if curr_d == next_occ:
-                    should_occur = True
-                    next_occ += timedelta(days=tmpl.period_days or 1)
-            elif p == "once":
-                if curr_d == next_occ:
-                    should_occur = True
-                    next_occ = date(2099, 12, 31)
-                    
-            if should_occur:
-                occurrences += 1
-                
-        # Subtract skipped instances
-        skipped_count = skipped_map.get(tmpl.id, 0)
-        occurrences = max(0, occurrences - skipped_count)
-        
+            # If the period is every_x_days or once, track the schedule pointer
+            is_next_occ_day = (curr_d == next_occ)
+            
+            # Check if there are instances in DB for this day
+            day_insts = tmpl_insts_by_date.get(curr_d, [])
+            if day_insts:
+                # Count how many are active/done
+                for inst in day_insts:
+                    if inst.status in ["done", "free", "in_progress"]:
+                        occurrences += 1
+                # Still advance next_occ if today was the scheduled date
+                if is_next_occ_day:
+                    if p == "every_x_days":
+                        next_occ += timedelta(days=tmpl.period_days or 1)
+                    elif p == "once":
+                        next_occ = date(2099, 12, 31)
+            else:
+                # No instances in DB. Determine if we should simulate
+                gen_done = (house.last_summary_date >= curr_d) if (house and house.last_summary_date) else False
+                if curr_d > today or (curr_d == today and not gen_done):
+                    should_run = False
+                    if p == "daily":
+                        should_run = True
+                    elif p == "weekly":
+                        should_run = (curr_d.weekday() == (tmpl.weekday if tmpl.weekday is not None else 0))
+                    elif p == "twice_weekly":
+                        should_run = (curr_d.weekday() in (0, 3))
+                    elif p == "monthly":
+                        should_run = (curr_d.day == (tmpl.month_day if tmpl.month_day is not None else 1))
+                    elif p == "twice_monthly":
+                        should_run = (curr_d.day in (5, 20))
+                    elif p == "quarterly":
+                        if curr_d.day == (tmpl.month_day if tmpl.month_day is not None else 1):
+                            pos = ((curr_d.month - 1) % 3) + 1
+                            if pos == (tmpl.weekday if tmpl.weekday is not None else 1):
+                                should_run = True
+                    elif p == "every_x_days":
+                        if is_next_occ_day:
+                            should_run = True
+                    elif p == "once":
+                        if is_next_occ_day:
+                            should_run = True
+                            
+                    if should_run:
+                        occurrences += 1
+                        
+                # Always advance next_occ for schedule tracking even if we didn't simulate the day
+                if is_next_occ_day:
+                    if p == "every_x_days":
+                        next_occ += timedelta(days=tmpl.period_days or 1)
+                    elif p == "once":
+                        next_occ = date(2099, 12, 31)
+                        
         if occurrences > 0:
             total_weekly_target_points += occurrences * tmpl.points
             templates_detail.append({
