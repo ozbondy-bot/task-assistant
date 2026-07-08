@@ -58,6 +58,13 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ── API Helper ───────────────────────────────────────────────────────────────
+function formatLocalDate(d) {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 let activeRequestsCount = 0;
 let loadingTimerInterval = null;
 let loadingStartSecs = 0;
@@ -260,7 +267,7 @@ async function loadHouseTab() {
 
 function isPastDate(dateStr) {
   if (!dateStr) return false;
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = formatLocalDate(new Date());
   return dateStr < todayStr;
 }
 
@@ -364,7 +371,7 @@ function formatPaginationDate(dateInput) {
 function getPersonalActiveDateStr() {
   const d = new Date();
   d.setDate(d.getDate() + personalActiveOffset);
-  return d.toISOString().split('T')[0];
+  return formatLocalDate(d);
 }
 function getPersonalActiveDateLabel() {
   const d = new Date();
@@ -384,7 +391,7 @@ window.shiftPersonalDay = shiftPersonalDay;
 function getHouseActiveDateStr() {
   const d = new Date();
   d.setDate(d.getDate() + houseActiveOffset);
-  return d.toISOString().split('T')[0];
+  return formatLocalDate(d);
 }
 function getHouseActiveDateLabel() {
   const d = new Date();
@@ -404,7 +411,7 @@ window.shiftHouseDay = shiftHouseDay;
 function getShoppingActiveDateStr() {
   const d = new Date();
   d.setDate(d.getDate() + shoppingActiveOffset);
-  return d.toISOString().split('T')[0];
+  return formatLocalDate(d);
 }
 function getShoppingActiveDateLabel() {
   const d = new Date();
@@ -1024,7 +1031,7 @@ function openShiftModal(id, type) {
   shiftTaskType = type;
   document.getElementById('shiftTaskModal').classList.remove('hidden');
   const input = document.getElementById('shiftTaskDate');
-  input.value = new Date().toISOString().split('T')[0];
+  input.value = formatLocalDate(new Date());
   
   setTimeout(() => {
     if (typeof input.showPicker === 'function') {
@@ -1084,7 +1091,7 @@ async function loadChoresArchive() {
   list.innerHTML = `<div class="loading-spinner"><div class="spinner"></div><p>Загрузка...</p></div>`;
   pag.innerHTML = '';
   
-  const dateStr = choresArchiveDate.toISOString().split('T')[0];
+  const dateStr = formatLocalDate(choresArchiveDate);
   try {
     const items = await api('GET', `/api/archive/chores?date=${dateStr}`);
     if (!items.length) {
@@ -1129,7 +1136,7 @@ async function loadTasksArchive() {
   list.innerHTML = `<div class="loading-spinner"><div class="spinner"></div><p>Загрузка...</p></div>`;
   pag.innerHTML = '';
   
-  const dateStr = tasksArchiveDate.toISOString().split('T')[0];
+  const dateStr = formatLocalDate(tasksArchiveDate);
   try {
     const items = await api('GET', `/api/archive/tasks?date=${dateStr}`);
     if (!items.length) {
@@ -1253,7 +1260,7 @@ window.skipChore = skipChore;
 /* ── Chore Details & Tab Switching ── */
 function isFutureDate(dateStr) {
   if (!dateStr) return false;
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = formatLocalDate(new Date());
   return dateStr > todayStr;
 }
 
