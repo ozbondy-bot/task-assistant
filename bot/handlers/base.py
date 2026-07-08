@@ -228,7 +228,7 @@ async def send_morning_message():
     if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
         app_url = app_url.rstrip("/") + "/app"
     if app_url:
-        app_url = app_url.rstrip("/") + "/?v=15"
+        app_url = app_url.rstrip("/") + "/?v=16"
         
     builder = InlineKeyboardBuilder()
     builder.row(
@@ -323,7 +323,7 @@ async def send_midnight_summary():
     if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
         app_url = app_url.rstrip("/") + "/app"
     if app_url:
-        app_url = app_url.rstrip("/") + "/?v=15"
+        app_url = app_url.rstrip("/") + "/?v=16"
         
     builder = InlineKeyboardBuilder()
     builder.row(
@@ -646,7 +646,7 @@ async def cmd_start(message: types.Message, db_user: User = None):
     if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
         app_url = app_url.rstrip("/") + "/app"
     if app_url:
-        app_url = app_url.rstrip("/") + "/?v=15"
+        app_url = app_url.rstrip("/") + "/?v=16"
     try:
         await message.bot.set_chat_menu_button(
             chat_id=message.chat.id,
@@ -1258,7 +1258,7 @@ async def catch_all_messages(message: types.Message):
     if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
         app_url = app_url.rstrip("/") + "/app"
     if app_url:
-        app_url = app_url.rstrip("/") + "/?v=15"
+        app_url = app_url.rstrip("/") + "/?v=16"
         
     builder = InlineKeyboardBuilder()
     builder.row(

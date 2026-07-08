@@ -28,7 +28,10 @@
     <nav class="tab-nav">
       <button class="tab-btn active" data-tab="house" id="tabHouse">
         <span class="tab-icon">🏠</span>
-        <span class="tab-label">Дом</span>
+        <div class="tab-label" style="display:flex; flex-direction:column; align-items:center; gap:1px; line-height:1.1;">
+          <span>Дом</span>
+          <span id="tabHouseCounter" style="font-size: 9px; font-weight: 600; color: var(--text3); opacity: 0.85;">(0|0)</span>
+        </div>
       </button>
       <button class="tab-btn" data-tab="personal" id="tabPersonal">
         <span class="tab-icon">👤</span>
@@ -371,6 +374,6 @@
   <!-- Toast notification -->
   <div class="toast hidden" id="toast"></div>
 
-  <script src="app.js?v=15"></script>
+  <script src="app.js?v=16"></script>
 </body>
 </html>

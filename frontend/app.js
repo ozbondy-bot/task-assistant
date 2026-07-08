@@ -260,8 +260,42 @@ async function loadHouseTab() {
       if (up) up.textContent = `${me.points} ✨`;
       currentPoints = me.points;
     }
+
+    // Update the tab counter
+    const todayStr = formatLocalDate(new Date());
+    if (dateStr === todayStr) {
+      const activeTasks = tasks.filter(t => t.status === 'free' || t.status === 'in_progress');
+      const count = activeTasks.length;
+      let points = 0;
+      for (const t of activeTasks) {
+        const isCooking = t.title && (t.title.toLowerCase().includes('готов') || t.title.toLowerCase().includes('cook'));
+        points += isCooking ? 10 : (t.points || 0);
+      }
+      const counterEl = document.getElementById('tabHouseCounter');
+      if (counterEl) counterEl.textContent = `(${count}|${points})`;
+    } else {
+      updateHouseTabCounter();
+    }
   } catch (e) {
     list.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-title">Не удалось загрузить</div><div class="empty-sub">${e.message}</div></div>`;
+  }
+}
+
+async function updateHouseTabCounter() {
+  try {
+    const todayStr = formatLocalDate(new Date());
+    const tasks = await api('GET', `/api/house/tasks?date=${todayStr}`);
+    const activeTasks = tasks.filter(t => t.status === 'free' || t.status === 'in_progress');
+    const count = activeTasks.length;
+    let points = 0;
+    for (const t of activeTasks) {
+      const isCooking = t.title && (t.title.toLowerCase().includes('готов') || t.title.toLowerCase().includes('cook'));
+      points += isCooking ? 10 : (t.points || 0);
+    }
+    const counterEl = document.getElementById('tabHouseCounter');
+    if (counterEl) counterEl.textContent = `(${count}|${points})`;
+  } catch (e) {
+    console.error("Failed to update house tab counter", e);
   }
 }
 
