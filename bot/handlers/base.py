@@ -804,7 +804,7 @@ async def cmd_reset(message: types.Message):
             from sqlalchemy import update
             from datetime import date, timedelta
             from db.models import House
-            from bot.handlers.base import _last_generation_check
+            import bot.handlers.base
             
             yesterday = date.today() - timedelta(days=1)
             await session.execute(
@@ -814,7 +814,7 @@ async def cmd_reset(message: types.Message):
             )
             await session.commit()
             
-            _last_generation_check.clear()
+            bot.handlers.base._last_generation_check = None
             
             await message.answer(f"✅ <b>Сброс выполнен успешно!</b>\n\n<code>last_summary_date</code> для дома 81 установлен на {yesterday}. При следующем обновлении Mini App задачи на всю неделю сгенерируются заново.", parse_mode="HTML")
         except Exception as e:

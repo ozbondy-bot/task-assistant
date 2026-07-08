@@ -1903,7 +1903,7 @@ async def spawn_chore_instance(req: SpawnChoreRequest, user: User = Depends(get_
 
 @app.get("/api/debug/inspect")
 async def debug_inspect(reset: Optional[int] = None):
-    from bot.handlers.base import get_house_today_date, calculate_weekly_target_points, _last_generation_check
+    from bot.handlers.base import get_house_today_date, calculate_weekly_target_points
     from sqlalchemy import text
     
     reset_done = False
@@ -1917,7 +1917,8 @@ async def debug_inspect(reset: Optional[int] = None):
                 .values(last_summary_date=yesterday)
             )
             await session.commit()
-            _last_generation_check.clear()
+            import bot.handlers.base
+            bot.handlers.base._last_generation_check = None
             reset_done = True
 
         # 1. Fetch request logs
