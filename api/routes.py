@@ -417,7 +417,7 @@ async def get_house_tasks(date: Optional[str] = None, user: User = Depends(get_c
                     last_handled_date = last_handled_map.get(tmpl.id)
                     active_inst_date = active_inst_map.get(tmpl.id)
                     from bot.handlers.base import get_template_next_date
-                    nd = get_template_next_date(tmpl, last_handled_date, active_inst_date, target_date)
+                    nd = get_template_next_date(tmpl, last_handled_date, active_inst_date, today)
                     if nd < target_date:
                         days = tmpl.period_days or 1
                         diff = (target_date - nd).days
@@ -429,7 +429,7 @@ async def get_house_tasks(date: Optional[str] = None, user: User = Depends(get_c
                     last_handled_date = last_handled_map.get(tmpl.id)
                     active_inst_date = active_inst_map.get(tmpl.id)
                     from bot.handlers.base import get_template_next_date
-                    nd = get_template_next_date(tmpl, last_handled_date, active_inst_date, target_date)
+                    nd = get_template_next_date(tmpl, last_handled_date, active_inst_date, today)
                     if nd == target_date:
                         should_run = True
                         
@@ -1902,11 +1902,24 @@ async def spawn_chore_instance(req: SpawnChoreRequest, user: User = Depends(get_
 
 
 @app.get("/api/debug/inspect")
-async def debug_inspect():
-    from bot.handlers.base import get_house_today_date, calculate_weekly_target_points
+async def debug_inspect(reset: Optional[int] = None):
+    from bot.handlers.base import get_house_today_date, calculate_weekly_target_points, _last_generation_check
     from sqlalchemy import text
     
+    reset_done = False
     async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
+        if reset == 1:
+            yesterday = today - timedelta(days=1)
+            await session.execute(
+                update(House)
+                .where(House.id == ACTIVE_HOUSE_ID)
+                .values(last_summary_date=yesterday)
+            )
+            await session.commit()
+            _last_generation_check.clear()
+            reset_done = True
+
         # 1. Fetch request logs
         logs_res = await session.execute(text("SELECT path, method, duration_ms, created_at FROM request_logs ORDER BY id DESC LIMIT 50"))
         logs = [
@@ -1950,7 +1963,8 @@ async def debug_inspect():
         "weekly_target_points": points,
         "weekly_target_details": details,
         "db_instances_this_week": db_instances,
-        "today_date": today.isoformat()
+        "today_date": today.isoformat(),
+        "reset_done": reset_done
     }
 
 

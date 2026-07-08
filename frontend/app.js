@@ -296,9 +296,7 @@ function renderHouseTasks(tasks) {
   const rows = tasks.map(t => {
     const isCompleted = t.status === 'done' || t.status === 'skipped';
     const grayClass = isCompleted ? 'completed-gray' : '';
-    const clickHandler = isCompleted
-      ? `openArchivedChoreDetails(${JSON.stringify(t).replace(/"/g, '&quot;')})`
-      : `openChoreDetails(${JSON.stringify(t).replace(/"/g, '&quot;')})`;
+    const clickHandler = `openChoreDetails(${JSON.stringify(t).replace(/"/g, '&quot;')})`;
 
     const isCooking = t.title && (t.title.toLowerCase().includes('готов') || t.title.toLowerCase().includes('cook'));
     const pointsBadge = isCooking ? 'до 10 ✨' : `${t.points} ✨`;
@@ -1322,6 +1320,18 @@ async function openChoreDetails(t) {
         <div style="text-align: center; color: var(--text3); padding: 12px; font-size: 13px; font-weight: 500; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; line-height: 1.4;">
           📅 Эта задача запланирована на будущее (${formatPaginationDate(t.date)})
         </div>
+      </div>
+    `;
+  } else if (t.status === 'done' || t.status === 'skipped') {
+    const statusText = t.status === 'done'
+      ? `✓ Выполнено: ${escHtml(t.completed_by || 'Кто-то')} ${t.done_at ? 'в ' + t.done_at : ''}`
+      : `⚠️ Пропущено (skipped)`;
+    actions.innerHTML = `
+      <div style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
+        <div style="text-align: center; color: ${t.status === 'done' ? '#10b981' : 'var(--danger)'}; font-weight: 500; font-size: 13px; margin-bottom: 4px;">
+          ${statusText}
+        </div>
+        <button class="btn btn-secondary" onclick="restoreChoreFromArchive(${t.id}); closeModal('choreDetailsModal');" style="width: 100%; height: 40px; font-weight: 600; border-radius: 8px; cursor: pointer; border: 1px solid var(--border); background: var(--surface2); color: var(--text);">Вернуть в работу</button>
       </div>
     `;
   } else {
