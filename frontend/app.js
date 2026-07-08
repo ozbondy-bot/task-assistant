@@ -1574,11 +1574,11 @@ async function openAddFromDatabaseModal() {
         nextStr = `${dayStr}.${monthStr}.`;
       }
       return `
-        <div class="task-card house-task" style="margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: default; padding: 12px 14px;">
+        <div class="task-card house-task" onclick="openChoreDetails(${JSON.stringify(t).replace(/"/g, '&quot;')})" style="margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; padding: 12px 14px;">
           <div style="font-weight: 500; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1;">
             ${escHtml(stripEmoji(t.title))}
           </div>
-          <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
+          <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;" onclick="event.stopPropagation();">
             <span class="task-badge" style="font-size: 11px; font-weight: 500; background: rgba(147,197,253,0.12); color: #60a5fa; border: 1px solid rgba(147,197,253,0.2); padding: 4px 8px; border-radius: 6px;">
               📅 ${nextStr}
             </span>
