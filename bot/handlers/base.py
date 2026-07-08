@@ -700,6 +700,43 @@ async def cmd_raschet(message: types.Message):
         await message.answer(text, parse_mode="HTML")
 
 
+@dp.message(Command("logs"))
+async def cmd_logs(message: types.Message):
+    from bot.handlers.base import ALLOWED_TELEGRAM_IDS
+    if message.from_user.id not in ALLOWED_TELEGRAM_IDS:
+        await message.answer("Access denied.")
+        return
+        
+    async with AsyncSessionLocal() as session:
+        try:
+            from sqlalchemy import text
+            logs_res = await session.execute(text("""
+                SELECT path, method, duration_ms, created_at 
+                FROM request_logs 
+                ORDER BY id DESC 
+                LIMIT 15
+            """))
+            recent_logs = logs_res.all()
+            
+            avg_res = await session.execute(text("SELECT AVG(duration_ms), COUNT(*) FROM request_logs"))
+            avg_row = avg_res.fetchone()
+            avg_duration = float(avg_row[0]) if avg_row and avg_row[0] is not None else 0.0
+            total_logs_count = int(avg_row[1]) if avg_row and avg_row[1] is not None else 0
+            
+            text_out = "📊 <b>Логи времени ответа (база/сервер):</b>\n\n"
+            text_out += f"Всего записано запросов: <b>{total_logs_count}</b>\n"
+            text_out += f"Среднее время ответа: <b>{avg_duration:.1f} мс</b>\n\n"
+            text_out += "<b>Последние 15 запросов:</b>\n"
+            
+            for row in recent_logs:
+                time_str = row[3].strftime("%H:%M:%S") if row[3] else ""
+                text_out += f"• <code>[{time_str}]</code> <b>{row[1]}</b> {row[0]} — <b>{row[2]} мс</b>\n"
+                
+            await message.answer(text_out, parse_mode="HTML")
+        except Exception as e:
+            await message.answer(f"⚠️ Ошибка при чтении логов из базы: {e}")
+
+
 
 def find_scheduled_date_on_or_after(t: TaskTemplate, search_date: date) -> date:
     p = t.periodicity
