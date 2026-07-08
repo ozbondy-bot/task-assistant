@@ -37,6 +37,31 @@ app.add_middleware(
 )
 
 
+import time
+from fastapi import Request
+from sqlalchemy import text
+
+@app.middleware("http")
+async def log_request_time(request: Request, call_next):
+    start_time = time.time()
+    response = await call_next(request)
+    duration_ms = int((time.time() - start_time) * 1000)
+    
+    if request.url.path.startswith("/api/"):
+        try:
+            from db.models import AsyncSessionLocal
+            async with AsyncSessionLocal() as session:
+                await session.execute(
+                    text("INSERT INTO request_logs (path, method, duration_ms) VALUES (:path, :method, :duration_ms)"),
+                    {"path": request.url.path, "method": request.method, "duration_ms": duration_ms}
+                )
+                await session.commit()
+        except Exception as e:
+            logger.error(f"Failed to save request log: {e}")
+            
+    return response
+
+
 # ── Auth dependency ───────────────────────────────────────────────────────────
 async def get_current_user(x_init_data: str = Header(None)) -> User:
     if not x_init_data:
@@ -1602,6 +1627,18 @@ async def get_shopping_archive(page: int = 0, limit: int = 10, user: User = Depe
 async def startup_db_cleanup():
     from bot.handlers.base import ALLOWED_TELEGRAM_IDS, ACTIVE_HOUSE_ID
     async with AsyncSessionLocal() as session:
+        # Create request_logs table if not exists
+        await session.execute(text("""
+            CREATE TABLE IF NOT EXISTS request_logs (
+                id SERIAL PRIMARY KEY,
+                path VARCHAR NOT NULL,
+                method VARCHAR NOT NULL,
+                duration_ms INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+        await session.commit()
+
         # 1. Clean unauthorized users
         result = await session.execute(select(User))
         users = result.scalars().all()

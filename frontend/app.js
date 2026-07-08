@@ -319,7 +319,7 @@ async function claimTask(instanceId) {
   try {
     await api('POST', `/api/house/tasks/${instanceId}/claim`);
     showToast('🏠 Задача взята! Теперь она в «Мои дела»');
-    loadHouseTab();
+    await Promise.all([loadHouseTab(), loadPersonalTab(), loadWeeklyGoal()]);
   } catch (e) {
     showToast(`⚠️ ${e.message}`);
   }
@@ -519,9 +519,7 @@ async function completeHouseTask(id, title) {
   try {
     const res = await api('POST', `/api/house/tasks/${id}/done`);
     showToast(`✅ Готово! ${res.points_earned} ✨`);
-    loadPersonalTab();
-    loadHouseTab();
-    loadWeeklyGoal();
+    await Promise.all([loadPersonalTab(), loadHouseTab(), loadWeeklyGoal()]);
   } catch (e) {
     showToast(`⚠️ ${e.message}`);
   }
@@ -534,8 +532,7 @@ async function submitCookingDone(points) {
   try {
     const res = await api('POST', `/api/house/tasks/${id}/done?points=${points}`);
     showToast(`✅ Готово! ${res.points_earned} ✨`);
-    loadPersonalTab();
-    loadHouseTab();
+    await Promise.all([loadPersonalTab(), loadHouseTab(), loadWeeklyGoal()]);
   } catch (e) {
     showToast(`⚠️ ${e.message}`);
   }
@@ -1007,7 +1004,7 @@ async function unclaimChore(id) {
   try {
     await api('POST', `/api/house/tasks/${id}/unclaim`);
     showToast('↩ Задача возвращена в свободные');
-    loadPersonalTab();
+    await Promise.all([loadHouseTab(), loadPersonalTab(), loadWeeklyGoal()]);
   } catch (e) {
     showToast(`⚠️ ${e.message}`);
   }
@@ -1017,7 +1014,7 @@ async function skipChore(id) {
   try {
     await api('POST', `/api/house/tasks/${id}/skip`);
     showToast('🗑 Задача пропущена на сегодня');
-    loadPersonalTab();
+    await Promise.all([loadHouseTab(), loadPersonalTab(), loadWeeklyGoal()]);
   } catch (e) {
     showToast(`⚠️ ${e.message}`);
   }
@@ -1060,7 +1057,7 @@ async function skipFreeChore(instanceId) {
   try {
     await api('POST', `/api/house/tasks/${instanceId}/skip`);
     showToast('🗑 Копия дела удалена на сегодня');
-    loadHouseTab();
+    await Promise.all([loadHouseTab(), loadWeeklyGoal()]);
   } catch (e) {
     showToast(`⚠️ ${e.message}`);
   }
@@ -1294,18 +1291,19 @@ function openChoreDetails(t) {
   } else {
     actions.innerHTML = `
       <div style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
-        <!-- Top row: Выполнить (green), Взять (yellow), Убрать (red) -->
+        <!-- Top row: Done, Take, Skip, ... -->
         <div style="display: flex; gap: 6px; width: 100%;">
-          <button class="btn" onclick="completeHouseTask(${t.id}, '${escAttr(t.title)}'); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 13px; font-weight: 600; background: #10b981; border: none; color: white; display: flex; align-items: center; justify-content: center; gap: 4px; border-radius: 8px; cursor: pointer;">✅ Выполнить</button>
-          <button class="btn" onclick="claimTask(${t.id}); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 13px; font-weight: 600; background: #f59e0b; border: none; color: white; display: flex; align-items: center; justify-content: center; gap: 4px; border-radius: 8px; cursor: pointer;">🤝 Взять</button>
-          <button class="btn" onclick="skipFreeChore(${t.id});" style="flex: 1; height: 40px; font-size: 13px; font-weight: 600; background: #ef4444; border: none; color: white; display: flex; align-items: center; justify-content: center; gap: 4px; border-radius: 8px; cursor: pointer;">🗑️ Убрать</button>
+          <button class="btn" onclick="completeHouseTask(${t.id}, '${escAttr(t.title)}'); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 13px; font-weight: 600; background: #10b981; border: none; color: white; display: flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer;">Done</button>
+          <button class="btn" onclick="claimTask(${t.id}); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 13px; font-weight: 600; background: #f59e0b; border: none; color: white; display: flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer;">Take</button>
+          <button class="btn btn-secondary" onclick="skipFreeChore(${t.id});" style="flex: 1; height: 40px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer; border: 1px solid var(--border); background: var(--surface2); color: var(--text);">Skip</button>
+          <button class="btn btn-secondary" onclick="const el = document.getElementById('moreChoreActions'); el.style.display = (el.style.display === 'none' || el.style.display === '') ? 'flex' : 'none';" style="flex: 1; height: 40px; font-size: 13px; font-weight: 700; display: flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer; border: 1px solid var(--border); background: var(--surface2); color: var(--text);">•••</button>
         </div>
-        <!-- Bottom row: Намек, Сдвиг, Изменить, Удалить -->
-        <div style="display: flex; gap: 6px; width: 100%;">
-          <button class="btn btn-secondary" onclick="nudgeTask(${t.id}); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 2px; padding: 0 4px;">🔔 Намек</button>
-          <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'chore'); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 2px; padding: 0 4px;">📅 Сдвиг</button>
-          <button class="btn btn-secondary" onclick="editChoreTemplateDirectly(${JSON.stringify(t).replace(/"/g, '&quot;')}); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 2px; padding: 0 4px;">✏️ Изменить</button>
-          <button class="btn btn-secondary" onclick="deleteChoreTemplate(${t.template_id}); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 12px; font-weight: 600; background: var(--surface3); border: 1px solid var(--border); color: var(--danger); display: flex; align-items: center; justify-content: center; gap: 2px; padding: 0 4px;">❌ Удалить</button>
+        <!-- Bottom row: Nudge, Shift, Edit, Delete (hidden by default) -->
+        <div id="moreChoreActions" style="display: none; gap: 6px; width: 100%;">
+          <button class="btn btn-secondary" onclick="nudgeTask(${t.id}); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; padding: 0 4px;">Nudge</button>
+          <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'chore'); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; padding: 0 4px;">Shift</button>
+          <button class="btn btn-secondary" onclick="editChoreTemplateDirectly(${JSON.stringify(t).replace(/"/g, '&quot;')}); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; padding: 0 4px;">Edit</button>
+          <button class="btn btn-secondary" onclick="deleteChoreTemplate(${t.template_id}); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 12px; font-weight: 600; background: var(--surface3); border: 1px solid var(--border); color: var(--danger); display: flex; align-items: center; justify-content: center; padding: 0 4px;">Delete</button>
         </div>
       </div>
     `;
@@ -1424,17 +1422,17 @@ function openMyTaskDetails(t, type) {
   if (type === 'household') {
     actions.innerHTML = `
       <div style="display: flex; gap: 6px; width: 100%;">
-        <button class="btn btn-primary" onclick="completeHouseTask(${t.id}, '${escAttr(title)}'); closeModal('myTaskDetailsModal');" style="flex: 1.5; height: 42px; font-size: 13px; font-weight: 600; background: var(--success); border-color: var(--success); color: #0d0d14; display: flex; align-items: center; justify-content: center; gap: 4px;">✅ Выполнить</button>
-        <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'chore'); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 4px;">📅 Сдвиг</button>
-        <button class="btn btn-secondary" onclick="unclaimChore(${t.id});" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 4px;">↩ Вернуть</button>
+        <button class="btn btn-secondary" onclick="completeHouseTask(${t.id}, '${escAttr(title)}'); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center;">Done</button>
+        <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'chore'); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center;">Shift</button>
+        <button class="btn btn-secondary" onclick="unclaimChore(${t.id});" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center;">Return</button>
       </div>
     `;
   } else {
     actions.innerHTML = `
       <div style="display: flex; gap: 6px; width: 100%;">
-        <button class="btn btn-primary" onclick="completePersonalTask(${t.id}); closeModal('myTaskDetailsModal');" style="flex: 1.5; height: 42px; font-size: 13px; font-weight: 600; background: var(--success); border-color: var(--success); color: #0d0d14; display: flex; align-items: center; justify-content: center; gap: 4px;">✅ Выполнить</button>
-        <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'personal'); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 4px;">📅 Сдвиг</button>
-        <button class="btn btn-secondary" onclick="deletePersonalTask(${t.id});" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; background: var(--danger); border-color: var(--danger); color: white; display: flex; align-items: center; justify-content: center; gap: 4px;">❌ Удалить</button>
+        <button class="btn btn-secondary" onclick="completePersonalTask(${t.id}); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center;">Done</button>
+        <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'personal'); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center;">Shift</button>
+        <button class="btn btn-secondary" onclick="deletePersonalTask(${t.id});" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center;">Delete</button>
       </div>
     `;
   }
@@ -1492,12 +1490,12 @@ async function openAddFromDatabaseModal() {
         nextStr = `${day}.${month}.`;
       }
       return `
-        <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 12px; border-bottom: 1px solid var(--border); margin: 0;">
+        <div class="task-card house-task" style="margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; cursor: default;">
           <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;">
             <span style="font-weight: 500; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escHtml(stripEmoji(t.title))}</span>
-            <span style="font-size: 11px; color: var(--text3); white-space: nowrap; flex-shrink: 0;">📅 ${nextStr}</span>
+            <span class="task-badge badge-points" style="font-size: 11px; flex-shrink: 0; background: rgba(251,191,36,0.15); color: var(--warning); border-color: rgba(251,191,36,0.25);">📅 ${nextStr}</span>
           </div>
-          <button onclick="spawnChoreFromTemplate(${t.id})" style="width: 28px; height: 28px; border-radius: 6px; border: none; background: var(--accent); color: white; font-size: 18px; font-weight: 600; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; margin-left: 8px; padding: 0; line-height: 1;">+</button>
+          <button onclick="spawnChoreFromTemplate(${t.id})" style="width: 32px; height: 32px; border-radius: 8px; border: none; background: var(--accent); color: white; font-size: 18px; font-weight: 600; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; margin-left: 8px; padding: 0; line-height: 1;">+</button>
         </div>
       `;
     }).join('');
@@ -1511,7 +1509,7 @@ async function spawnChoreFromTemplate(tmplId) {
     await api('POST', `/api/house/tasks/spawn`, { template_id: tmplId });
     showToast('✅ Задача активирована на сегодня!');
     closeModal('addFromDbModal');
-    loadHouseTab();
+    await Promise.all([loadHouseTab(), loadWeeklyGoal()]);
   } catch (e) {
     showToast(`⚠️ ${e.message}`);
   }
