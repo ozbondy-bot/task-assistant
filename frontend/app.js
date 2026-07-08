@@ -59,7 +59,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ── API Helper ───────────────────────────────────────────────────────────────
 let activeRequestsCount = 0;
-let isMutating = false;
 let loadingTimerInterval = null;
 let loadingStartSecs = 0;
 
@@ -82,6 +81,7 @@ function showLoadingOverlay() {
 }
 
 function hideLoadingOverlay() {
+  if (activeRequestsCount > 0) return;
   const overlay = document.getElementById('globalLoadingOverlay');
   if (overlay) {
     overlay.classList.add('hidden');
@@ -93,15 +93,7 @@ function hideLoadingOverlay() {
 }
 
 async function api(method, path, body = null) {
-  const isWrite = method !== 'GET';
-  if (isWrite) {
-    isMutating = true;
-  }
-  
-  if (isMutating) {
-    showLoadingOverlay();
-  }
-  
+  showLoadingOverlay();
   activeRequestsCount++;
   
   const opts = {
@@ -124,10 +116,7 @@ async function api(method, path, body = null) {
     activeRequestsCount--;
     if (activeRequestsCount <= 0) {
       activeRequestsCount = 0;
-      if (isMutating) {
-        isMutating = false;
-        setTimeout(hideLoadingOverlay, 150);
-      }
+      setTimeout(hideLoadingOverlay, 150);
     }
   }
 }
