@@ -676,10 +676,8 @@ function renderShoppingList(items) {
     return `
       <div class="shop-item-card ${item.priority === 'high' ? 'urgent' : ''} ${grayClass}" id="sitem-${item.id}" onclick="${clickHandler}">
         <div class="shop-emoji">${seededEmoji(item.id)}</div>
-        <div class="shop-body">
-          <div class="shop-name">${item.priority === 'high' ? '🔴 ' : ''}${escHtml(item.item_name)}</div>
-          ${item.price > 0 ? `<div class="shop-price">${item.price} ₽</div>` : ''}
-        </div>
+        <div class="shop-name" style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${item.priority === 'high' ? '🔴 ' : ''}${escHtml(item.item_name)}</div>
+        ${item.price > 0 ? `<div class="shop-price">${item.price} ₽</div>` : ''}
         <div class="shop-check">✓</div>
       </div>
     `;
@@ -1413,7 +1411,7 @@ async function openAddFromDatabaseModal() {
       api('GET', '/api/house/tasks')
     ]);
     
-    const activeTemplateIds = new Set(activeTasks.map(t => t.template_id));
+    const activeTemplateIds = new Set(activeTasks.filter(t => t.status === 'free' || t.status === 'in_progress').map(t => t.template_id));
     const inactive = templates.filter(t => !activeTemplateIds.has(t.id));
     
     if (!inactive.length) {

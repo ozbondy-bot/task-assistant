@@ -79,7 +79,7 @@ async def handle_approve_action(call: types.CallbackQuery, db_user: User = None)
             await session.commit()
             
             await call.answer("✅ Задача успешно добавлена!", show_alert=False)
-            await call.message.edit_text(f"✅ Вы одобрили добавление задачи «{tmpl.title}» ({tmpl.points}🍪)!")
+            await call.message.edit_text(f"✅ Вы одобрили добавление задачи «{tmpl.title}» ({tmpl.points}✨)!")
             if initiator:
                 try:
                     await bot.send_message(
@@ -302,7 +302,7 @@ async def send_midnight_summary():
     
     for uid, total_earned in user_pts_list:
         u_name = user_name_map.get(uid, "?")
-        text += f"🦸 *{u_name}* заработал *{total_earned}* 🍪\n"
+        text += f"🦸 *{u_name}* заработал *{total_earned}* искр ✨\n"
         chores_list = user_chores[uid]
         pts_for_user = [pt for pt in pt_comps if pt.user_id == uid]
         
@@ -419,15 +419,44 @@ async def generate_daily_chores_if_needed(session, house_id: int):
         # Another request already claimed generation for today — skip
         return
 
-    # Rollover old uncompleted household task instances to today
-    await session.execute(
-        update(TaskInstance)
-        .where(and_(
+    # Process old uncompleted household task instances
+    old_instances = (await session.execute(
+        select(TaskInstance).where(and_(
             TaskInstance.date < today,
             TaskInstance.status.in_(["free", "in_progress"])
         ))
-        .values(date=today)
-    )
+    )).scalars().all()
+
+    for inst in old_instances:
+        tmpl = await session.get(TaskTemplate, inst.template_id)
+        if not tmpl:
+            await session.delete(inst)
+            continue
+
+        if tmpl.periodicity == "daily":
+            # yesterday's daily task is skipped (deleted and removed from target calculation)
+            await session.delete(inst)
+        else:
+            # check if a copy exists today
+            exists_today = await session.scalar(
+                select(TaskInstance).where(and_(
+                    TaskInstance.template_id == tmpl.id,
+                    TaskInstance.date == today
+                ))
+            )
+            if not exists_today:
+                # rollover to today
+                inst.date = today
+                if inst.status == "in_progress":
+                    # return to general list
+                    inst.status = "free"
+                    inst.done_by_user_id = None
+                    inst.done_at = None
+            else:
+                # delete yesterday's copy since today's copy already exists
+                await session.delete(inst)
+
+    await session.flush()
 
     # Rollover old uncompleted personal tasks to today
     await session.execute(
@@ -688,10 +717,13 @@ def find_scheduled_date_on_or_after(t: TaskTemplate, search_date: date) -> date:
     elif p == "monthly":
         target_d = t.month_day if t.month_day is not None else 1
         d = search_date
-        try:
-            candidate = date(d.year, d.month, target_d)
-        except ValueError:
-            candidate = date(d.year, d.month, 28)
+        
+        def get_clamped_date(y, m, day):
+            import calendar
+            last_day = calendar.monthrange(y, m)[1]
+            return date(y, m, min(day, last_day))
+
+        candidate = get_clamped_date(d.year, d.month, target_d)
         if candidate >= search_date:
             return candidate
         # Next month
@@ -700,17 +732,14 @@ def find_scheduled_date_on_or_after(t: TaskTemplate, search_date: date) -> date:
         if m > 12:
             m = 1
             y += 1
-        try:
-            return date(y, m, target_d)
-        except ValueError:
-            return date(y, m, 28)
+        return get_clamped_date(y, m, target_d)
     elif p == "twice_monthly":
         # 5 and 20
-        d = search_date.day
-        if d <= 5:
-            return date(search_date.year, search_date.month, 5)
-        elif d <= 20:
-            return date(search_date.year, search_date.month, 20)
+        d = search_date
+        if d.day <= 5:
+            return date(d.year, d.month, 5)
+        elif d.day <= 20:
+            return date(d.year, d.month, 20)
         else:
             m = search_date.month + 1
             y = search_date.year
@@ -722,21 +751,126 @@ def find_scheduled_date_on_or_after(t: TaskTemplate, search_date: date) -> date:
         target_d = t.month_day if t.month_day is not None else 1
         target_q_month = t.weekday if t.weekday is not None else 1
         d = search_date
+        
+        def get_clamped_date(y, m, day):
+            import calendar
+            last_day = calendar.monthrange(y, m)[1]
+            return date(y, m, min(day, last_day))
+
         # Check current month and future months in the current year
         for m_offset in range(12):
             m = ((d.month - 1 + m_offset) % 12) + 1
             y = d.year + ((d.month - 1 + m_offset) // 12)
             pos = ((m - 1) % 3) + 1
             if pos == target_q_month:
-                try:
-                    candidate = date(y, m, target_d)
-                except ValueError:
-                    candidate = date(y, m, 28)
+                candidate = get_clamped_date(y, m, target_d)
                 if candidate >= search_date:
                     return candidate
     elif p == "every_x_days":
-        # Handled in val calc, default fallback
+        days = t.period_days or 1
+        anchor = t.start_date or search_date
+        if search_date <= anchor:
+            return anchor
+        diff = (search_date - anchor).days
+        k = (diff + days - 1) // days
+        return anchor + timedelta(days=k * days)
+    elif p == "once":
+        anchor = t.start_date or search_date
+        if search_date <= anchor:
+            return anchor
+        return date(2099, 12, 31)
+        
+    return search_date
+
+
+def find_scheduled_date_before_or_on(t: TaskTemplate, search_date: date) -> date:
+    p = t.periodicity
+    if p == "daily":
         return search_date
+    elif p == "weekly":
+        target_w = t.weekday if t.weekday is not None else 0
+        days_behind = search_date.weekday() - target_w
+        if days_behind < 0:
+            days_behind += 7
+        return search_date - timedelta(days=days_behind)
+    elif p == "twice_weekly":
+        w = search_date.weekday()
+        if w == 0:
+            return search_date
+        elif w < 3:
+            return search_date - timedelta(days=w)
+        elif w == 3:
+            return search_date
+        else:
+            return search_date - timedelta(days=w - 3)
+    elif p == "monthly":
+        target_d = t.month_day if t.month_day is not None else 1
+        d = search_date
+        
+        def get_clamped_date(y, m, day):
+            import calendar
+            last_day = calendar.monthrange(y, m)[1]
+            return date(y, m, min(day, last_day))
+
+        candidate = get_clamped_date(d.year, d.month, target_d)
+        if candidate <= search_date:
+            return candidate
+        # Previous month
+        m = d.month - 1
+        y = d.year
+        if m < 1:
+            m = 12
+            y -= 1
+        return get_clamped_date(y, m, target_d)
+    elif p == "twice_monthly":
+        d = search_date
+        if d.day >= 20:
+            return date(d.year, d.month, 20)
+        elif d.day >= 5:
+            return date(d.year, d.month, 5)
+        else:
+            m = d.month - 1
+            y = d.year
+            if m < 1:
+                m = 12
+                y -= 1
+            return date(y, m, 20)
+    elif p == "quarterly":
+        target_d = t.month_day if t.month_day is not None else 1
+        target_q_month = t.weekday if t.weekday is not None else 1
+        d = search_date
+        
+        def get_clamped_date(y, m, day):
+            import calendar
+            last_day = calendar.monthrange(y, m)[1]
+            return date(y, m, min(day, last_day))
+
+        # Check current month and past months
+        for m_offset in range(12):
+            m = d.month - m_offset
+            y = d.year
+            while m < 1:
+                m += 12
+                y -= 1
+            pos = ((m - 1) % 3) + 1
+            if pos == target_q_month:
+                candidate = get_clamped_date(y, m, target_d)
+                if candidate <= search_date:
+                    return candidate
+    elif p == "every_x_days":
+        days = t.period_days or 1
+        anchor = t.start_date or search_date
+        if search_date < anchor:
+            return anchor
+        diff = (search_date - anchor).days
+        k = diff // days
+        return anchor + timedelta(days=k * days)
+    elif p == "once":
+        anchor = t.start_date or search_date
+        if search_date >= anchor:
+            return anchor
+        return anchor
+        
     return search_date
 
 
@@ -745,43 +879,20 @@ def get_template_next_date(t: TaskTemplate, last_done_date: date, active_inst_da
     p = t.periodicity
     if p == "once":
         if last_done_date:
-            if t.start_date and t.start_date > last_done_date:
-                return t.start_date
             return date(2099, 12, 31)
-        else:
-            return t.start_date if t.start_date else today_date
-        
-    if active_inst_date:
-        return max(active_inst_date, today_date)
-        
-    if t.start_date and (last_done_date is None or t.start_date > last_done_date):
-        anchor = t.start_date
-        search_start = max(anchor, today_date)
-    else:
-        anchor = last_done_date or t.start_date or (today_date - timedelta(days=30))
-        search_start = max(anchor + timedelta(days=1), today_date)
+        return t.start_date or today_date
+
+    ref_date = active_inst_date or last_done_date or t.start_date or (today_date - timedelta(days=1))
     
+    # For find_scheduled_date_on_or_after, we search starting from ref_date + 1 day
+    search_start = ref_date + timedelta(days=1)
+    
+    # If the task is every_x_days, it shifts relative to ref_date
     if p == "every_x_days":
         days = t.period_days or 1
-        if t.start_date and (last_done_date is None or t.start_date > last_done_date):
-            if t.start_date >= today_date:
-                return t.start_date
-            next_d = t.start_date
-            while next_d < today_date:
-                next_d += timedelta(days=days)
-            return next_d
-        elif last_done_date:
-            next_d = last_done_date + timedelta(days=days)
-            while next_d < today_date:
-                next_d += timedelta(days=days)
-            return next_d
-        else:
-            return today_date
-            
-    nd = find_scheduled_date_on_or_after(t, search_start)
-    if t.start_date and nd < t.start_date:
-        return t.start_date
-    return nd
+        return ref_date + timedelta(days=days)
+        
+    return find_scheduled_date_on_or_after(t, search_start)
 
 
 

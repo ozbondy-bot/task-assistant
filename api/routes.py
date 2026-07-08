@@ -1091,7 +1091,7 @@ async def create_chore_template(req: CreateTemplateRequest, user: User = Depends
                 f"🔔 *Согласование новой задачи!*\n\n"
                 f"*{user.display_name or user.username or 'Партнёр'}* хочет добавить домашнюю задачу:\n"
                 f"📋 *Название:* {clean_title}\n"
-                f"🍪 *Награда:* {req.points} печенек\n"
+                f"✨ *Награда:* {req.points} искр\n"
                 f"📅 *Цикл:* {p_label}\n\n"
                 f"Одобряете добавление?"
             )
@@ -1385,7 +1385,7 @@ async def shift_chore_template(template_id: int, req: ShiftRequest, user: User =
 
 NUDGE_PHRASES = [
     "Домовой жалуется на беспорядок! Тут плачет без внимания: <b>{task_title}</b> 🥺",
-    "Печеньки 🍪 сами себя не заработают! Тебя ждет отличный контракт: <b>{task_title}</b>",
+    "Искры ✨ сами себя не заработают! Тебя ждет отличный контракт: <b>{task_title}</b>",
     "Кажется, кто-то очень хочет, чтобы эта задача решилась. Герой, твой выход: <b>{task_title}</b> 🦸‍♂️",
     "Министерство уюта напоминает! Открыта горячая вакансия на дело: <b>{task_title}</b> 🔥",
     "Освободилось немного времени? Идеальный момент, чтобы закрыть: <b>{task_title}</b> ✨"

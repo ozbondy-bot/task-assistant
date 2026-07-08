@@ -293,6 +293,8 @@ body {
   position: relative;
   overflow: hidden;
   flex-shrink: 0;
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 .task-card::before {
@@ -521,6 +523,8 @@ body {
   transition: all 0.2s ease;
   flex-shrink: 0;
   box-sizing: border-box;
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 .shop-item-card.urgent {
@@ -536,12 +540,8 @@ body {
 .shop-item-card:active { transform: scale(0.98); }
 
 .shop-emoji {
-  font-size: 22px;
+  font-size: 16px;
   flex-shrink: 0;
-}
-
-.shop-body {
-  flex: 1;
 }
 
 .shop-name {
@@ -551,14 +551,21 @@ body {
 }
 
 .shop-price {
-  font-size: 12px;
-  color: var(--text2);
-  margin-top: 2px;
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 20px;
+  font-weight: 600;
+  background: rgba(251, 191, 36, 0.15);
+  color: var(--warning);
+  border: 1px solid rgba(251, 191, 36, 0.25);
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-right: 8px;
 }
 
 .shop-check {
-  width: 26px;
-  height: 26px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   border: 2px solid var(--border);
   display: flex;
@@ -567,7 +574,7 @@ body {
   flex-shrink: 0;
   transition: all 0.2s;
   color: transparent;
-  font-size: 14px;
+  font-size: 11px;
 }
 
 .shop-item-card:hover .shop-check,
@@ -733,7 +740,7 @@ body {
   justify-content: center !important;
   gap: 8px;
   background: var(--surface) !important;
-  border: 1.5px dashed var(--border) !important;
+  border: 1px dashed var(--border) !important;
   color: var(--accent2) !important;
   font-weight: 600 !important;
   cursor: pointer;
@@ -741,7 +748,10 @@ body {
   box-sizing: border-box;
   flex-shrink: 0;
   box-shadow: none !important;
-  border-left: 1.5px dashed var(--border) !important; /* override colored left borders */
+  border-left: 1px dashed var(--border) !important; /* override colored left borders */
+  font-size: 14px !important;
+  line-height: 1.5 !important;
+  padding: 10px 12px !important;
 }
 
 .add-inline-btn:active {
