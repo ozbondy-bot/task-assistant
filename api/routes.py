@@ -40,6 +40,20 @@ app.add_middleware(
 import time
 from fastapi import Request
 
+async def save_log_async(path: str, method: str, duration_ms: int):
+    try:
+        from db.models import AsyncSessionLocal
+        from sqlalchemy import text
+        async with AsyncSessionLocal() as session:
+            await session.execute(
+                text("INSERT INTO request_logs (path, method, duration_ms) VALUES (:path, :method, :duration_ms)"),
+                {"path": path, "method": method, "duration_ms": duration_ms}
+            )
+            await session.commit()
+    except Exception as e:
+        logger.error(f"Failed to save request log: {e}")
+
+
 @app.middleware("http")
 async def log_request_time(request: Request, call_next):
     start_time = time.time()
@@ -47,16 +61,8 @@ async def log_request_time(request: Request, call_next):
     duration_ms = int((time.time() - start_time) * 1000)
     
     if request.url.path.startswith("/api/"):
-        try:
-            from db.models import AsyncSessionLocal
-            async with AsyncSessionLocal() as session:
-                await session.execute(
-                    text("INSERT INTO request_logs (path, method, duration_ms) VALUES (:path, :method, :duration_ms)"),
-                    {"path": request.url.path, "method": request.method, "duration_ms": duration_ms}
-                )
-                await session.commit()
-        except Exception as e:
-            logger.error(f"Failed to save request log: {e}")
+        import asyncio
+        asyncio.create_task(save_log_async(request.url.path, request.method, duration_ms))
             
     return response
 
