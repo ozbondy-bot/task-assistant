@@ -1789,6 +1789,86 @@ async def spawn_chore_instance(req: SpawnChoreRequest, user: User = Depends(get_
                 priority=0
             )
             session.add(inst)
+            await session.flush()
+            
+            # Delete any future uncompleted instances of this template this week
+            await session.execute(
+                delete(TaskInstance)
+                .where(and_(
+                    TaskInstance.template_id == tmpl.id,
+                    TaskInstance.date > today,
+                    TaskInstance.status.in_(["free", "in_progress"])
+                ))
+            )
+            await session.flush()
+            
+            # Recalculate and insert future instances for this week starting from today
+            sunday_date = today - timedelta(days=today.weekday()) + timedelta(days=6)
+            p = tmpl.periodicity
+            days = tmpl.period_days or 1
+            
+            scheduled_dates = []
+            if p == "daily" or (p == "every_x_days" and days == 1):
+                curr_d = today + timedelta(days=1)
+                while curr_d <= sunday_date:
+                    scheduled_dates.append(curr_d)
+                    curr_d += timedelta(days=1)
+            elif p == "every_x_days":
+                curr_occ = today + timedelta(days=days)
+                while curr_occ <= sunday_date:
+                    scheduled_dates.append(curr_occ)
+                    curr_occ += timedelta(days=days)
+            elif p == "weekly":
+                weekday = tmpl.weekday if tmpl.weekday is not None else 0
+                target_d = today - timedelta(days=today.weekday()) + timedelta(days=weekday)
+                if target_d > today:
+                    scheduled_dates.append(target_d)
+            elif p == "twice_weekly":
+                mon = today - timedelta(days=today.weekday())
+                thu = mon + timedelta(days=3)
+                if mon > today:
+                    scheduled_dates.append(mon)
+                if thu > today:
+                    scheduled_dates.append(thu)
+            elif p == "monthly":
+                target_day = tmpl.month_day if tmpl.month_day is not None else 1
+                curr_d = today + timedelta(days=1)
+                while curr_d <= sunday_date:
+                    if curr_d.day == target_day:
+                        scheduled_dates.append(curr_d)
+                    curr_d += timedelta(days=1)
+            elif p == "twice_monthly":
+                curr_d = today + timedelta(days=1)
+                while curr_d <= sunday_date:
+                    if curr_d.day in (5, 20):
+                        scheduled_dates.append(curr_d)
+                    curr_d += timedelta(days=1)
+            elif p == "quarterly":
+                target_day = tmpl.month_day if tmpl.month_day is not None else 1
+                target_q_month = tmpl.weekday if tmpl.weekday is not None else 1
+                curr_d = today + timedelta(days=1)
+                while curr_d <= sunday_date:
+                    if curr_d.day == target_day:
+                        pos = ((curr_d.month - 1) % 3) + 1
+                        if pos == target_q_month:
+                            scheduled_dates.append(curr_d)
+                    curr_d += timedelta(days=1)
+            elif p == "once":
+                anchor = tmpl.start_date or today
+                if today < anchor <= sunday_date:
+                    scheduled_dates.append(anchor)
+
+            for s_date in scheduled_dates:
+                if tmpl.start_date and s_date < tmpl.start_date:
+                    continue
+                inst_new = TaskInstance(
+                    template_id=tmpl.id,
+                    date=s_date,
+                    status="free",
+                    priority=0
+                )
+                session.add(inst_new)
+            
             await session.commit()
     return {"ok": True}
 

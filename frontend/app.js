@@ -1490,10 +1490,14 @@ async function openAddFromDatabaseModal() {
     list.innerHTML = inactive.map(t => {
       let nextStr = 'Нет';
       if (t.next_execution) {
-        const dt = new Date(t.next_execution);
-        const day = String(dt.getDate()).padStart(2, '0');
-        const month = String(dt.getMonth() + 1).padStart(2, '0');
-        nextStr = `${day}.${month}.`;
+        const parts = t.next_execution.split('-');
+        const year = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10) - 1;
+        const day = parseInt(parts[2], 10);
+        const dt = new Date(year, month, day);
+        const dayStr = String(dt.getDate()).padStart(2, '0');
+        const monthStr = String(dt.getMonth() + 1).padStart(2, '0');
+        nextStr = `${dayStr}.${monthStr}.`;
       }
       return `
         <div class="task-card house-task" style="margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; cursor: default;">
