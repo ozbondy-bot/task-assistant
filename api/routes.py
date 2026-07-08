@@ -1753,6 +1753,59 @@ async def spawn_chore_instance(req: SpawnChoreRequest, user: User = Depends(get_
     return {"ok": True}
 
 
+@app.get("/api/debug/inspect")
+async def debug_inspect():
+    from bot.handlers.base import get_house_today_date, calculate_weekly_target_points
+    from sqlalchemy import text
+    
+    async with AsyncSessionLocal() as session:
+        # 1. Fetch request logs
+        logs_res = await session.execute(text("SELECT path, method, duration_ms, created_at FROM request_logs ORDER BY id DESC LIMIT 50"))
+        logs = [
+            {"path": row[0], "method": row[1], "duration_ms": row[2], "created_at": row[3].isoformat() if row[3] else ""}
+            for row in logs_res.all()
+        ]
+        
+        # 2. Get average duration
+        avg_res = await session.execute(text("SELECT AVG(duration_ms), COUNT(*) FROM request_logs"))
+        avg_row = avg_res.fetchone()
+        avg_duration = float(avg_row[0]) if avg_row and avg_row[0] is not None else 0.0
+        total_logs_count = int(avg_row[1]) if avg_row and avg_row[1] is not None else 0
+        
+        # 3. Calculate weekly target points for the house
+        today = await get_house_today_date(session)
+        points, details = await calculate_weekly_target_points(session, ACTIVE_HOUSE_ID, today)
+        
+        # 4. Get active task templates and count instances
+        monday_date = today - timedelta(days=today.weekday())
+        sunday_date = monday_date + timedelta(days=6)
+        
+        inst_res = await session.execute(
+            text("""
+                SELECT t.title, t.periodicity, count(i.id) 
+                FROM task_templates t
+                LEFT JOIN task_instances i ON t.id = i.template_id AND i.date >= :mon AND i.date <= :sun
+                WHERE t.house_id = :house AND t.deleted = false
+                GROUP BY t.title, t.periodicity
+            """),
+            {"mon": monday_date, "sun": sunday_date, "house": ACTIVE_HOUSE_ID}
+        )
+        db_instances = [
+            {"title": row[0], "periodicity": row[1], "count": row[2]}
+            for row in inst_res.all()
+        ]
+        
+    return {
+        "logs_count": total_logs_count,
+        "average_duration_ms": avg_duration,
+        "recent_logs": logs,
+        "weekly_target_points": points,
+        "weekly_target_details": details,
+        "db_instances_this_week": db_instances,
+        "today_date": today.isoformat()
+    }
+
+
 # ── Static files for Mini App ─────────────────────────────────────────────────
 frontend_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend")
 if os.path.exists(frontend_dir):
