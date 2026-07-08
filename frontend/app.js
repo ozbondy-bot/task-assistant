@@ -58,7 +58,52 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ── API Helper ───────────────────────────────────────────────────────────────
+let activeRequestsCount = 0;
+let isMutating = false;
+let loadingTimerInterval = null;
+let loadingStartSecs = 0;
+
+function showLoadingOverlay() {
+  const overlay = document.getElementById('globalLoadingOverlay');
+  const timerText = document.getElementById('globalLoadingTimer');
+  if (!overlay || !timerText) return;
+  
+  if (overlay.classList.contains('hidden')) {
+    loadingStartSecs = 0;
+    timerText.textContent = '0 сек';
+    overlay.classList.remove('hidden');
+    
+    if (loadingTimerInterval) clearInterval(loadingTimerInterval);
+    loadingTimerInterval = setInterval(() => {
+      loadingStartSecs++;
+      timerText.textContent = `${loadingStartSecs} сек`;
+    }, 1000);
+  }
+}
+
+function hideLoadingOverlay() {
+  const overlay = document.getElementById('globalLoadingOverlay');
+  if (overlay) {
+    overlay.classList.add('hidden');
+  }
+  if (loadingTimerInterval) {
+    clearInterval(loadingTimerInterval);
+    loadingTimerInterval = null;
+  }
+}
+
 async function api(method, path, body = null) {
+  const isWrite = method !== 'GET';
+  if (isWrite) {
+    isMutating = true;
+  }
+  
+  if (isMutating) {
+    showLoadingOverlay();
+  }
+  
+  activeRequestsCount++;
+  
   const opts = {
     method,
     headers: {
@@ -67,12 +112,24 @@ async function api(method, path, body = null) {
     },
   };
   if (body) opts.body = JSON.stringify(body);
-  const res = await fetch(API_BASE + path, opts);
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: 'Ошибка сети' }));
-    throw new Error(err.detail || `HTTP ${res.status}`);
+  
+  try {
+    const res = await fetch(API_BASE + path, opts);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Ошибка' }));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+    return await res.json();
+  } finally {
+    activeRequestsCount--;
+    if (activeRequestsCount <= 0) {
+      activeRequestsCount = 0;
+      if (isMutating) {
+        isMutating = false;
+        setTimeout(hideLoadingOverlay, 150);
+      }
+    }
   }
-  return res.json();
 }
 
 async function loadWeeklyGoal() {

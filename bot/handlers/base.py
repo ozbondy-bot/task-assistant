@@ -952,17 +952,7 @@ async def get_template_next_date_val(session: AsyncSession, t: TaskTemplate, tod
         )
     active_inst_date = active_inst_result.scalar()
 
-    # If daily generation for today has already run, and no instance exists today,
-    # treat today as already handled so the next occurrence starts searching from tomorrow.
-    house = await session.get(House, t.house_id) if t.house_id else None
-    generation_done = (house.last_summary_date >= today_date) if (house and house.last_summary_date) else False
-    if generation_done:
-        today_inst_count = await session.scalar(
-            select(func.count(TaskInstance.id))
-            .where(and_(TaskInstance.template_id == t.id, TaskInstance.date == today_date))
-        )
-        last_handled = today_date
-    
+    # Compute next execution date based on true last handled and active dates
     nd = get_template_next_date(t, last_handled, active_inst_date, today_date)
     return last_done, nd
 
@@ -1036,13 +1026,6 @@ async def calculate_weekly_target_points(session: AsyncSession, house_id: int, t
         l_done = last_done_map.get(tmpl.id)
         l_handled = last_handled_map.get(tmpl.id)
         act_inst = active_inst_map.get(tmpl.id)
-        
-        gen_done = (house.last_summary_date >= base_date) if (house and house.last_summary_date) else False
-        if gen_done:
-            inst_count = today_inst_map.get(tmpl.id, 0)
-            if inst_count == 0:
-                l_handled = base_date
-        
         return get_template_next_date(tmpl, l_handled, act_inst, base_date)
         
     templates = (await session.execute(
