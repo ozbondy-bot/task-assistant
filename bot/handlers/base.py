@@ -390,27 +390,35 @@ async def scheduler_loop():
         await asyncio.sleep(30)
 
 
+_last_generation_check = None
+_house_timezone_cache = {}
+
 async def get_house_today_date(session: AsyncSession) -> date:
     from zoneinfo import ZoneInfo
-    house = await session.get(House, ACTIVE_HOUSE_ID)
-    tz_str = house.timezone if (house and house.timezone) else "Europe/Moscow"
+    global _house_timezone_cache
+    tz_str = _house_timezone_cache.get(ACTIVE_HOUSE_ID)
+    if not tz_str:
+        house = await session.get(House, ACTIVE_HOUSE_ID)
+        tz_str = house.timezone if (house and house.timezone) else "Europe/Moscow"
+        _house_timezone_cache[ACTIVE_HOUSE_ID] = tz_str
     return datetime.now(ZoneInfo(tz_str)).date()
 
 
 async def generate_daily_chores_if_needed(session, house_id: int):
-    """Generate today's task instances from templates. Uses atomic UPDATE to prevent race conditions."""
+    """Generate calendar week's task instances from templates. Uses atomic UPDATE to prevent race conditions."""
     from sqlalchemy import update
+    global _last_generation_check
     today = await get_house_today_date(session)
-    weekday = today.weekday()
-    day = today.day
-    month = today.month
+    
+    # 1. In-memory check to bypass DB hits if already checked today
+    if _last_generation_check == (house_id, today):
+        return
 
     house = await session.get(House, house_id)
     if not house:
         return
 
     # Atomic claim: only one concurrent request can proceed to generate.
-    # UPDATE returns rows only if last_summary_date != today, preventing race conditions.
     result = await session.execute(
         update(House)
         .where(and_(House.id == house_id, House.last_summary_date != today))
@@ -420,10 +428,12 @@ async def generate_daily_chores_if_needed(session, house_id: int):
     await session.flush()  # flush immediately so the lock takes effect
     claimed = result.fetchone()
     if not claimed:
-        # Another request already claimed generation for today — skip
+        _last_generation_check = (house_id, today)
         return
 
-    # Process old uncompleted household task instances
+    _last_generation_check = (house_id, today)
+
+    # 2. Rollover old uncompleted household task instances
     old_instances = (await session.execute(
         select(TaskInstance).where(and_(
             TaskInstance.date < today,
@@ -437,9 +447,10 @@ async def generate_daily_chores_if_needed(session, house_id: int):
             await session.delete(inst)
             continue
 
-        if tmpl.periodicity == "daily":
-            # yesterday's daily task is skipped (deleted and removed from target calculation)
-            await session.delete(inst)
+        is_daily = (tmpl.periodicity == "daily") or (tmpl.periodicity == "every_x_days" and tmpl.period_days == 1)
+        if is_daily:
+            # yesterday's daily task is skipped (status set to skipped, which excludes it from target points)
+            inst.status = "skipped"
         else:
             # check if a copy exists today
             exists_today = await session.scalar(
@@ -450,14 +461,28 @@ async def generate_daily_chores_if_needed(session, house_id: int):
             )
             if not exists_today:
                 # rollover to today
-                inst.date = today
-                if inst.status == "in_progress":
-                    # return to general list
-                    inst.status = "free"
-                    inst.done_by_user_id = None
-                    inst.done_at = None
+                diff_days = (today - inst.date).days
+                if diff_days > 0:
+                    old_date = inst.date
+                    inst.date = today
+                    if inst.status == "in_progress":
+                        # return to general list
+                        inst.status = "free"
+                        inst.done_by_user_id = None
+                        inst.done_at = None
+                    
+                    # Also shift all future uncompleted instances of this template
+                    await session.execute(
+                        update(TaskInstance)
+                        .where(and_(
+                            TaskInstance.template_id == tmpl.id,
+                            TaskInstance.date > old_date,
+                            TaskInstance.status.in_(["free", "in_progress"])
+                        ))
+                        .values(date=TaskInstance.date + timedelta(days=diff_days))
+                    )
             else:
-                # delete yesterday's copy since today's copy already exists
+                # delete yesterday's duplicate copy
                 await session.delete(inst)
 
     await session.flush()
@@ -473,60 +498,90 @@ async def generate_daily_chores_if_needed(session, house_id: int):
         .values(date_execution=today)
     )
 
-    result = await session.execute(
+    # 3. Pre-generate tasks for the entire current calendar week (Monday to Sunday)
+    monday_date = today - timedelta(days=today.weekday())
+    sunday_date = monday_date + timedelta(days=6)
+
+    templates = (await session.execute(
         select(TaskTemplate).where(
             and_(
                 TaskTemplate.house_id == house_id,
                 TaskTemplate.deleted == False
             )
         )
-    )
-    templates = result.scalars().all()
+    )).scalars().all()
 
     for tmpl in templates:
-        if tmpl.start_date and today < tmpl.start_date:
-            continue
-
         p = tmpl.periodicity
-        should_create = False
-        if p == "daily":
-            should_create = True
+        days = tmpl.period_days or 1
+        
+        scheduled_dates = []
+        
+        if p == "daily" or (p == "every_x_days" and days == 1):
+            for d_idx in range(7):
+                scheduled_dates.append(monday_date + timedelta(days=d_idx))
         elif p == "weekly":
-            should_create = (weekday == (tmpl.weekday if tmpl.weekday is not None else 0))
+            weekday = tmpl.weekday if tmpl.weekday is not None else 0
+            scheduled_dates.append(monday_date + timedelta(days=weekday))
         elif p == "twice_weekly":
-            should_create = (weekday in (0, 3))
+            scheduled_dates.append(monday_date + timedelta(days=0))
+            scheduled_dates.append(monday_date + timedelta(days=3))
         elif p == "monthly":
-            should_create = (day == (tmpl.month_day if tmpl.month_day is not None else 1))
+            target_day = tmpl.month_day if tmpl.month_day is not None else 1
+            for d_idx in range(7):
+                curr_d = monday_date + timedelta(days=d_idx)
+                if curr_d.day == target_day:
+                    scheduled_dates.append(curr_d)
         elif p == "twice_monthly":
-            should_create = (day in (5, 20))
+            for d_idx in range(7):
+                curr_d = monday_date + timedelta(days=d_idx)
+                if curr_d.day in (5, 20):
+                    scheduled_dates.append(curr_d)
         elif p == "quarterly":
-            if day == (tmpl.month_day if tmpl.month_day is not None else 1):
-                pos = ((month - 1) % 3) + 1
-                if pos == (tmpl.weekday if tmpl.weekday is not None else 1):
-                    should_create = True
+            target_day = tmpl.month_day if tmpl.month_day is not None else 1
+            target_q_month = tmpl.weekday if tmpl.weekday is not None else 1
+            for d_idx in range(7):
+                curr_d = monday_date + timedelta(days=d_idx)
+                if curr_d.day == target_day:
+                    pos = ((curr_d.month - 1) % 3) + 1
+                    if pos == target_q_month:
+                        scheduled_dates.append(curr_d)
         elif p == "every_x_days":
-            _, nd = await get_template_next_date_val(session, tmpl, today)
-            if nd <= today:
-                should_create = True
+            anchor = tmpl.start_date or monday_date
+            if anchor < monday_date:
+                diff = (monday_date - anchor).days
+                k = (diff + days - 1) // days
+                first_occ = anchor + timedelta(days=k * days)
+            else:
+                first_occ = anchor
+                
+            curr_occ = first_occ
+            while curr_occ <= sunday_date:
+                if curr_occ >= monday_date:
+                    scheduled_dates.append(curr_occ)
+                curr_occ += timedelta(days=days)
         elif p == "once":
-            _, nd = await get_template_next_date_val(session, tmpl, today)
-            if nd <= today:
-                should_create = True
+            anchor = tmpl.start_date or monday_date
+            if monday_date <= anchor <= sunday_date:
+                scheduled_dates.append(anchor)
 
-        if should_create:
-            # Final safety check: no instance already exists for today
+        # Insert instances for scheduled dates if they do not exist
+        for s_date in scheduled_dates:
+            if tmpl.start_date and s_date < tmpl.start_date:
+                continue
+            
             exists = await session.scalar(
                 select(TaskInstance.id).where(
                     and_(
                         TaskInstance.template_id == tmpl.id,
-                        TaskInstance.date == today
+                        TaskInstance.date == s_date
                     )
                 )
             )
             if not exists:
                 inst = TaskInstance(
                     template_id=tmpl.id,
-                    date=today,
+                    date=s_date,
                     status="free",
                     priority=0
                 )
@@ -534,7 +589,7 @@ async def generate_daily_chores_if_needed(session, house_id: int):
 
     house.last_summary_date = today
     await session.commit()
-    logger.info(f"Generated daily chores for house {house_id}")
+    logger.info(f"Generated calendar week chores for house {house_id}")
 
 
 # ── Middleware: auto-register users ──────────────────────────────────────────
@@ -1069,7 +1124,15 @@ async def calculate_weekly_target_points(session: AsyncSession, house_id: int, t
         l_done = last_done_map.get(tmpl.id)
         l_handled = last_handled_map.get(tmpl.id)
         act_inst = active_inst_map.get(tmpl.id)
-        return get_template_next_date(tmpl, l_handled, act_inst, base_date)
+        next_occ = get_template_next_date(tmpl, l_handled, act_inst, base_date)
+        
+        if tmpl.periodicity == "every_x_days" and next_occ < base_date:
+            days = tmpl.period_days or 1
+            diff = (base_date - next_occ).days
+            k = (diff + days - 1) // days
+            next_occ += timedelta(days=k * days)
+            
+        return next_occ
         
     templates = (await session.execute(
         select(TaskTemplate).where(

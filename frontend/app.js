@@ -61,11 +61,17 @@ document.addEventListener('DOMContentLoaded', () => {
 let activeRequestsCount = 0;
 let loadingTimerInterval = null;
 let loadingStartSecs = 0;
+let hideTimeoutId = null;
 
 function showLoadingOverlay() {
   const overlay = document.getElementById('globalLoadingOverlay');
   const timerText = document.getElementById('globalLoadingTimer');
   if (!overlay || !timerText) return;
+  
+  if (hideTimeoutId) {
+    clearTimeout(hideTimeoutId);
+    hideTimeoutId = null;
+  }
   
   if (overlay.classList.contains('hidden')) {
     loadingStartSecs = 0;
@@ -116,7 +122,11 @@ async function api(method, path, body = null) {
     activeRequestsCount--;
     if (activeRequestsCount <= 0) {
       activeRequestsCount = 0;
-      setTimeout(hideLoadingOverlay, 150);
+      if (hideTimeoutId) clearTimeout(hideTimeoutId);
+      hideTimeoutId = setTimeout(() => {
+        hideLoadingOverlay();
+        hideTimeoutId = null;
+      }, 300);
     }
   }
 }

@@ -347,7 +347,30 @@ async def get_house_tasks(date: Optional[str] = None, user: User = Depends(get_c
                 raw_tasks.append((inst.id, tmpl.id, tmpl.title, tmpl.points, tmpl.periodicity, tmpl.period_days, str(target_date), inst.status, inst))
 
             # Simulate templates that don't have an instance in the DB for this target_date
-            from bot.handlers.base import get_template_next_date_val
+            last_handled_res = await session.execute(
+                select(TaskInstance.template_id, func.max(TaskInstance.date))
+                .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
+                .where(and_(
+                    TaskTemplate.house_id == ACTIVE_HOUSE_ID,
+                    TaskInstance.status.in_(["done", "skipped"]),
+                    TaskInstance.date <= target_date
+                ))
+                .group_by(TaskInstance.template_id)
+            )
+            last_handled_map = dict(last_handled_res.all())
+
+            active_inst_res = await session.execute(
+                select(TaskInstance.template_id, func.min(TaskInstance.date))
+                .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
+                .where(and_(
+                    TaskTemplate.house_id == ACTIVE_HOUSE_ID,
+                    TaskInstance.status.in_(["free", "in_progress"]),
+                    TaskInstance.date < target_date
+                ))
+                .group_by(TaskInstance.template_id)
+            )
+            active_inst_map = dict(active_inst_res.all())
+
             result = await session.execute(
                 select(TaskTemplate).where(
                     and_(
@@ -385,11 +408,22 @@ async def get_house_tasks(date: Optional[str] = None, user: User = Depends(get_c
                         if pos == (tmpl.weekday if tmpl.weekday is not None else 1):
                             should_run = True
                 elif p == "every_x_days":
-                    _, nd = await get_template_next_date_val(session, tmpl, target_date)
+                    last_handled_date = last_handled_map.get(tmpl.id)
+                    active_inst_date = active_inst_map.get(tmpl.id)
+                    from bot.handlers.base import get_template_next_date
+                    nd = get_template_next_date(tmpl, last_handled_date, active_inst_date, target_date)
+                    if nd < target_date:
+                        days = tmpl.period_days or 1
+                        diff = (target_date - nd).days
+                        k = (diff + days - 1) // days
+                        nd += timedelta(days=k * days)
                     if nd == target_date:
                         should_run = True
                 elif p == "once":
-                    _, nd = await get_template_next_date_val(session, tmpl, target_date)
+                    last_handled_date = last_handled_map.get(tmpl.id)
+                    active_inst_date = active_inst_map.get(tmpl.id)
+                    from bot.handlers.base import get_template_next_date
+                    nd = get_template_next_date(tmpl, last_handled_date, active_inst_date, target_date)
                     if nd == target_date:
                         should_run = True
                         
