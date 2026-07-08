@@ -1321,9 +1321,10 @@ async function openChoreDetails(t) {
     historyDiv.style.display = 'none';
     historyList.innerHTML = '';
     
-    if (t.template_id) {
+    const tmplId = t.template_id || t.id;
+    if (tmplId) {
       try {
-        const history = await api('GET', `/api/chores/templates/${t.template_id}/history`);
+        const history = await api('GET', `/api/chores/templates/${tmplId}/history`);
         if (history && history.length > 0) {
           historyList.innerHTML = history.map(item => {
             const dt = new Date(item.done_at);
@@ -1346,47 +1347,55 @@ async function openChoreDetails(t) {
   }
   
   const actions = document.getElementById('choreDetailsActions');
-  const isFuture = t.id === 0 || isFutureDate(t.date);
   
-  if (isFuture) {
+  if (!t.hasOwnProperty('status')) {
     actions.innerHTML = `
       <div style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
-        <div style="text-align: center; color: var(--text3); padding: 12px; font-size: 13px; font-weight: 500; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; line-height: 1.4;">
-          📅 Эта задача запланирована на будущее (${formatPaginationDate(t.date)})
-        </div>
-      </div>
-    `;
-  } else if (t.status === 'done' || t.status === 'skipped') {
-    const statusText = t.status === 'done'
-      ? `✓ Выполнено: ${escHtml(t.completed_by || 'Кто-то')} ${t.done_at ? 'в ' + t.done_at : ''}`
-      : `⚠️ Пропущено (skipped)`;
-    actions.innerHTML = `
-      <div style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
-        <div style="text-align: center; color: ${t.status === 'done' ? '#10b981' : 'var(--danger)'}; font-weight: 500; font-size: 13px; margin-bottom: 4px;">
-          ${statusText}
-        </div>
-        <button class="btn btn-secondary" onclick="restoreChoreFromArchive(${t.id}); closeModal('choreDetailsModal');" style="width: 100%; height: 40px; font-weight: 600; border-radius: 8px; cursor: pointer; border: 1px solid var(--border); background: var(--surface2); color: var(--text);">Вернуть в работу</button>
+        <button class="btn" onclick="spawnChoreFromTemplate(${t.id}); closeModal('choreDetailsModal');" style="width: 100%; height: 40px; font-weight: 600; background: var(--accent); border: none; color: white; border-radius: 8px; cursor: pointer;">Добавить на сегодня</button>
       </div>
     `;
   } else {
-    actions.innerHTML = `
-      <div style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
-        <!-- Top row: Done, Take, Skip, ... -->
-        <div style="display: flex; gap: 6px; width: 100%;">
-          <button class="btn" onclick="completeHouseTask(${t.id}, '${escAttr(t.title)}'); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 13px; font-weight: 600; background: #10b981; border: none; color: white; display: flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer;">Done</button>
-          <button class="btn" onclick="claimTask(${t.id}); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 13px; font-weight: 600; background: #f59e0b; border: none; color: white; display: flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer;">Take</button>
-          <button class="btn btn-secondary" onclick="skipFreeChore(${t.id});" style="flex: 1; height: 40px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer; border: 1px solid var(--border); background: var(--surface2); color: var(--text);">Skip</button>
-          <button class="btn btn-secondary" onclick="const el = document.getElementById('moreChoreActions'); el.style.display = (el.style.display === 'none' || el.style.display === '') ? 'flex' : 'none';" style="flex: 1; height: 40px; font-size: 13px; font-weight: 700; display: flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer; border: 1px solid var(--border); background: var(--surface2); color: var(--text);">•••</button>
+    const isFuture = t.id === 0 || isFutureDate(t.date);
+    if (isFuture) {
+      actions.innerHTML = `
+        <div style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
+          <div style="text-align: center; color: var(--text3); padding: 12px; font-size: 13px; font-weight: 500; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; line-height: 1.4;">
+            📅 Эта задача запланирована на будущее (${formatPaginationDate(t.date)})
+          </div>
         </div>
-        <!-- Bottom row: Nudge, Shift, Edit, Delete (hidden by default) -->
-        <div id="moreChoreActions" style="display: none; gap: 6px; width: 100%;">
-          <button class="btn btn-secondary" onclick="nudgeTask(${t.id}); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; padding: 0 4px;">Nudge</button>
-          <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'chore'); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; padding: 0 4px;">Shift</button>
-          <button class="btn btn-secondary" onclick="editChoreTemplateDirectly(${JSON.stringify(t).replace(/"/g, '&quot;')}); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; padding: 0 4px;">Edit</button>
-          <button class="btn btn-secondary" onclick="deleteChoreTemplate(${t.template_id}); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 12px; font-weight: 600; background: var(--surface3); border: 1px solid var(--border); color: var(--danger); display: flex; align-items: center; justify-content: center; padding: 0 4px;">Delete</button>
+      `;
+    } else if (t.status === 'done' || t.status === 'skipped') {
+      const statusText = t.status === 'done'
+        ? `✓ Выполнено: ${escHtml(t.completed_by || 'Кто-то')} ${t.done_at ? 'в ' + t.done_at : ''}`
+        : `⚠️ Пропущено (skipped)`;
+      actions.innerHTML = `
+        <div style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
+          <div style="text-align: center; color: ${t.status === 'done' ? '#10b981' : 'var(--danger)'}; font-weight: 500; font-size: 13px; margin-bottom: 4px;">
+            ${statusText}
+          </div>
+          <button class="btn btn-secondary" onclick="restoreChoreFromArchive(${t.id}); closeModal('choreDetailsModal');" style="width: 100%; height: 40px; font-weight: 600; border-radius: 8px; cursor: pointer; border: 1px solid var(--border); background: var(--surface2); color: var(--text);">Вернуть в работу</button>
         </div>
-      </div>
-    `;
+      `;
+    } else {
+      actions.innerHTML = `
+        <div style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
+          <!-- Top row: Done, Take, Skip, ... -->
+          <div style="display: flex; gap: 6px; width: 100%;">
+            <button class="btn" onclick="completeHouseTask(${t.id}, '${escAttr(t.title)}'); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 13px; font-weight: 600; background: #10b981; border: none; color: white; display: flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer;">Done</button>
+            <button class="btn" onclick="claimTask(${t.id}); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 13px; font-weight: 600; background: #f59e0b; border: none; color: white; display: flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer;">Take</button>
+            <button class="btn btn-secondary" onclick="skipFreeChore(${t.id});" style="flex: 1; height: 40px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer; border: 1px solid var(--border); background: var(--surface2); color: var(--text);">Skip</button>
+            <button class="btn btn-secondary" onclick="const el = document.getElementById('moreChoreActions'); el.style.display = (el.style.display === 'none' || el.style.display === '') ? 'flex' : 'none';" style="flex: 1; height: 40px; font-size: 13px; font-weight: 700; display: flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer; border: 1px solid var(--border); background: var(--surface2); color: var(--text);">•••</button>
+          </div>
+          <!-- Bottom row: Nudge, Shift, Edit, Delete (hidden by default) -->
+          <div id="moreChoreActions" style="display: none; gap: 6px; width: 100%;">
+            <button class="btn btn-secondary" onclick="nudgeTask(${t.id}); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; padding: 0 4px;">Nudge</button>
+            <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'chore'); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; padding: 0 4px;">Shift</button>
+            <button class="btn btn-secondary" onclick="editChoreTemplateDirectly(${JSON.stringify(t).replace(/"/g, '&quot;')}); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; padding: 0 4px;">Edit</button>
+            <button class="btn btn-secondary" onclick="deleteChoreTemplate(${t.template_id}); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 12px; font-weight: 600; background: var(--surface3); border: 1px solid var(--border); color: var(--danger); display: flex; align-items: center; justify-content: center; padding: 0 4px;">Delete</button>
+          </div>
+        </div>
+      `;
+    }
   }
   document.getElementById('choreDetailsModal').classList.remove('hidden');
 }
