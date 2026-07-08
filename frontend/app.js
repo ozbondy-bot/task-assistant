@@ -1264,7 +1264,7 @@ function isFutureDate(dateStr) {
   return dateStr > todayStr;
 }
 
-function openChoreDetails(t) {
+async function openChoreDetails(t) {
   document.getElementById('choreDetailsTitle').textContent = stripEmoji(t.title);
   document.getElementById('choreDetailsPeriod').textContent = periodLabel(t.periodicity, t.period_days);
   document.getElementById('choreDetailsPoints').textContent = `${t.points} ✨`;
@@ -1281,6 +1281,36 @@ function openChoreDetails(t) {
     nextEl.textContent = t.next_execution
       ? new Date(t.next_execution).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })
       : '—';
+  }
+  
+  const historyDiv = document.getElementById('choreDetailsHistory');
+  const historyList = document.getElementById('choreDetailsHistoryList');
+  if (historyDiv && historyList) {
+    historyDiv.style.display = 'none';
+    historyList.innerHTML = '';
+    
+    if (t.template_id) {
+      try {
+        const history = await api('GET', `/api/chores/templates/${t.template_id}/history`);
+        if (history && history.length > 0) {
+          historyList.innerHTML = history.map(item => {
+            const dt = new Date(item.done_at);
+            const timeStr = dt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+            const dateStr = dt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+            return `<div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.05); padding:2px 0;">
+              <span>👤 ${escHtml(item.done_by)}</span>
+              <span>📅 ${dateStr} в ${timeStr} (${item.points} ✨)</span>
+            </div>`;
+          }).join('');
+          historyDiv.style.display = 'block';
+        } else {
+          historyList.innerHTML = '<div style="text-align:center;color:var(--text3)">История пуста</div>';
+          historyDiv.style.display = 'block';
+        }
+      } catch (e) {
+        console.error("Failed to load template history", e);
+      }
+    }
   }
   
   const actions = document.getElementById('choreDetailsActions');
@@ -1500,12 +1530,16 @@ async function openAddFromDatabaseModal() {
         nextStr = `${dayStr}.${monthStr}.`;
       }
       return `
-        <div class="task-card house-task" style="margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; cursor: default;">
-          <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;">
-            <span style="font-weight: 500; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escHtml(stripEmoji(t.title))}</span>
-            <span class="task-badge badge-points" style="font-size: 11px; flex-shrink: 0; background: rgba(251,191,36,0.15); color: var(--warning); border-color: rgba(251,191,36,0.25);">📅 ${nextStr}</span>
+        <div class="task-card house-task" style="margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: default; padding: 12px 14px;">
+          <div style="font-weight: 500; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1;">
+            ${escHtml(stripEmoji(t.title))}
           </div>
-          <button onclick="spawnChoreFromTemplate(${t.id})" style="width: 32px; height: 32px; border-radius: 8px; border: none; background: var(--accent); color: white; font-size: 18px; font-weight: 600; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; margin-left: 8px; padding: 0; line-height: 1;">+</button>
+          <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
+            <span class="task-badge" style="font-size: 11px; font-weight: 500; background: rgba(147,197,253,0.12); color: #60a5fa; border: 1px solid rgba(147,197,253,0.2); padding: 4px 8px; border-radius: 6px;">
+              📅 ${nextStr}
+            </span>
+            <button onclick="spawnChoreFromTemplate(${t.id})" style="width: 32px; height: 32px; border-radius: 8px; border: none; background: var(--accent); color: white; font-size: 18px; font-weight: 600; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; line-height: 1;">+</button>
+          </div>
         </div>
       `;
     }).join('');

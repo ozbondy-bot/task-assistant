@@ -1081,6 +1081,34 @@ async def get_chores_templates(user: User = Depends(get_current_user)):
             })
     return res_list
 
+
+@app.get("/api/chores/templates/{template_id}/history")
+async def get_chore_history(template_id: int, user: User = Depends(get_current_user)):
+    async with AsyncSessionLocal() as session:
+        tmpl = await session.get(TaskTemplate, template_id)
+        if not tmpl or tmpl.house_id != user.house_id:
+            raise HTTPException(status_code=404, detail="Template not found")
+            
+        result = await session.execute(
+            select(Completion, User)
+            .join(TaskInstance, Completion.task_instance_id == TaskInstance.id)
+            .join(User, Completion.user_id == User.id)
+            .where(TaskInstance.template_id == template_id)
+            .order_by(Completion.created_at.desc())
+        )
+        rows = result.all()
+        
+        history = []
+        for comp, u in rows:
+            history.append({
+                "done_by": u.display_name,
+                "done_at": comp.created_at.isoformat(),
+                "points": comp.points
+            })
+            
+        return history
+
+
 class CreateTemplateRequest(BaseModel):
     title: str
     points: int = 1

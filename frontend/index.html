@@ -254,6 +254,13 @@
         <div>✨ <strong>Награда:</strong> <span id="choreDetailsPoints">0 очков</span></div>
         <div>✅ <strong>Последнее выполнение:</strong> <span id="choreDetailsLastCompleted">—</span></div>
         <div>⏭️ <strong>Следующее:</strong> <span id="choreDetailsNextExecution">—</span></div>
+        
+        <div id="choreDetailsHistory" style="margin-top: 12px; border-top: 1px solid var(--border); padding-top: 10px; display: none;">
+          <strong style="display: block; margin-bottom: 6px; font-size: 13px; color: var(--text1);">📜 История выполнений:</strong>
+          <div id="choreDetailsHistoryList" style="display: flex; flex-direction: column; gap: 4px; max-height: 100px; overflow-y: auto; font-size: 12px; color: var(--text3); padding-right: 4px;">
+            <!-- History items will be injected here -->
+          </div>
+        </div>
       </div>
       <div class="task-action-row" id="choreDetailsActions" onclick="event.stopPropagation();">
         <!-- Action buttons will be dynamically injected here -->
@@ -364,6 +371,6 @@
   <!-- Toast notification -->
   <div class="toast hidden" id="toast"></div>
 
-  <script src="app.js?v=13"></script>
+  <script src="app.js?v=14"></script>
 </body>
 </html>
