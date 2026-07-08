@@ -792,6 +792,35 @@ async def cmd_logs(message: types.Message):
             await message.answer(f"⚠️ Ошибка при чтении логов из базы: {e}")
 
 
+@dp.message(Command("reset"))
+async def cmd_reset(message: types.Message):
+    from bot.handlers.base import ALLOWED_TELEGRAM_IDS
+    if message.from_user.id not in ALLOWED_TELEGRAM_IDS:
+        await message.answer("Access denied.")
+        return
+        
+    async with AsyncSessionLocal() as session:
+        try:
+            from sqlalchemy import update
+            from datetime import date, timedelta
+            from db.models import House
+            from bot.handlers.base import _last_generation_check
+            
+            yesterday = date.today() - timedelta(days=1)
+            await session.execute(
+                update(House)
+                .where(House.id == 81)
+                .values(last_summary_date=yesterday)
+            )
+            await session.commit()
+            
+            _last_generation_check.clear()
+            
+            await message.answer(f"✅ <b>Сброс выполнен успешно!</b>\n\n<code>last_summary_date</code> для дома 81 установлен на {yesterday}. При следующем обновлении Mini App задачи на всю неделю сгенерируются заново.", parse_mode="HTML")
+        except Exception as e:
+            await message.answer(f"⚠️ Ошибка сброса: {e}")
+
+
 
 def find_scheduled_date_on_or_after(t: TaskTemplate, search_date: date) -> date:
     p = t.periodicity
