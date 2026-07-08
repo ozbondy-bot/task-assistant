@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException, Header, Depends, Request
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from sqlalchemy import select, and_, delete, update, func, or_
+from sqlalchemy import select, and_, delete, update, func, or_, text
 
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -39,7 +39,6 @@ app.add_middleware(
 
 import time
 from fastapi import Request
-from sqlalchemy import text
 
 @app.middleware("http")
 async def log_request_time(request: Request, call_next):
