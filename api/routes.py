@@ -1068,7 +1068,10 @@ async def get_chores_templates(user: User = Depends(get_current_user)):
             if generation_done:
                 last_handled = today
                 
-            nd = get_template_next_date(t, last_handled, active_inst_date, today)
+            if active_inst_date and active_inst_date > today:
+                nd = active_inst_date
+            else:
+                nd = get_template_next_date(t, last_handled, active_inst_date, today)
             res_list.append({
                 "id": t.id,
                 "title": t.title,
