@@ -227,6 +227,8 @@ async def send_morning_message():
     app_url = MINI_APP_URL
     if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
         app_url = app_url.rstrip("/") + "/app"
+    if app_url:
+        app_url = app_url.rstrip("/") + "?v=11"
         
     builder = InlineKeyboardBuilder()
     builder.row(
@@ -320,6 +322,8 @@ async def send_midnight_summary():
     app_url = MINI_APP_URL
     if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
         app_url = app_url.rstrip("/") + "/app"
+    if app_url:
+        app_url = app_url.rstrip("/") + "?v=11"
         
     builder = InlineKeyboardBuilder()
     builder.row(
@@ -586,6 +590,8 @@ async def cmd_start(message: types.Message, db_user: User = None):
     app_url = os.getenv("MINI_APP_URL") or os.getenv("RENDER_EXTERNAL_URL") or "https://example.com"
     if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
         app_url = app_url.rstrip("/") + "/app"
+    if app_url:
+        app_url = app_url.rstrip("/") + "?v=11"
     try:
         await message.bot.set_chat_menu_button(
             chat_id=message.chat.id,
@@ -1151,6 +1157,8 @@ async def catch_all_messages(message: types.Message):
     app_url = os.getenv("MINI_APP_URL") or os.getenv("RENDER_EXTERNAL_URL") or "https://example.com"
     if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
         app_url = app_url.rstrip("/") + "/app"
+    if app_url:
+        app_url = app_url.rstrip("/") + "?v=11"
         
     builder = InlineKeyboardBuilder()
     builder.row(
