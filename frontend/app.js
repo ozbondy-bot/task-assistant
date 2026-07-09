@@ -1773,17 +1773,30 @@ async function openAddFromDatabaseModal() {
   list.innerHTML = '';
 
   inactive.forEach(t => {
-    let nextStr = 'Нет';
+    let nextStr = '--.--';
     if (t.next_execution) {
       const [y, m, d] = t.next_execution.split('-').map(Number);
       const dt = new Date(y, m - 1, d);
-      nextStr = `${String(dt.getDate()).padStart(2,'0')}.${String(dt.getMonth()+1).padStart(2,'0')}.`;
+      nextStr = `${String(dt.getDate()).padStart(2,'0')}.${String(dt.getMonth()+1).padStart(2,'0')}`;
     }
+
+    let lastStr = '--.--';
+    if (t.last_completed) {
+      const [y, m, d] = t.last_completed.split('-').map(Number);
+      const dt = new Date(y, m - 1, d);
+      lastStr = `${String(dt.getDate()).padStart(2,'0')}.${String(dt.getMonth()+1).padStart(2,'0')}`;
+    }
+
+    let periodStr = '-';
+    if (t.periodicity === 'daily') periodStr = '1';
+    else if (t.periodicity === 'weekly') periodStr = '7';
+    else if (t.periodicity === 'every_x_days') periodStr = String(t.period_days);
+    else if (t.periodicity === 'once') periodStr = '0';
 
     // Строка — те же классы что у обычных карточек дел
     const row = document.createElement('div');
     row.className = 'task-card house-task';
-    row.style.cursor = 'default';
+    row.style.cursor = 'pointer';
     row.style.justifyContent = 'space-between';
     row.style.marginBottom = '6px';
 
@@ -1797,49 +1810,25 @@ async function openAddFromDatabaseModal() {
     const right = document.createElement('div');
     right.style.cssText = 'display:flex;align-items:center;gap:8px;flex-shrink:0;';
 
-    // Бейдж с датой — стандартный task-badge
+    // Бейдж со статистикой "10.07 14 24.07"
     const badge = document.createElement('span');
     badge.className = 'task-badge';
-    badge.style.cssText = 'font-size:11px;font-weight:500;background:rgba(147,197,253,0.12);color:#60a5fa;border:1px solid rgba(147,197,253,0.2);padding:4px 8px;border-radius:6px;white-space:nowrap;';
-    badge.textContent = `📅 ${nextStr}`;
+    badge.style.cssText = 'font-size:11px;font-weight:600;background:rgba(147,197,253,0.12);color:#60a5fa;border:1px solid rgba(147,197,253,0.2);padding:4px 8px;border-radius:6px;white-space:pre;';
+    badge.textContent = `${lastStr}   ${periodStr}   ${nextStr}`;
 
-    // Кнопка «+» — те же размеры что у badge-кнопок в других карточках
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.textContent = '+';
-    btn.style.cssText = [
-      'width:36px',
-      'height:36px',
-      'border-radius:10px',
-      'border:none',
-      'background:var(--accent)',
-      'color:white',
-      'font-size:20px',
-      'font-weight:700',
-      'display:flex',
-      'align-items:center',
-      'justify-content:center',
-      'cursor:pointer',
-      'padding:0',
-      'line-height:1',
-      'flex-shrink:0',
-      '-webkit-tap-highlight-color:rgba(0,0,0,0)',
-      'touch-action:manipulation',
-      'user-select:none',
-    ].join(';');
-
-    btn.addEventListener('click', function handler(e) {
+    row.addEventListener('click', function handler(e) {
       e.preventDefault();
       e.stopPropagation();
-      btn.removeEventListener('click', handler); // срабатывает только один раз
-      btn.disabled = true;
-      btn.textContent = '⏳';
-      btn.style.opacity = '0.6';
+      row.removeEventListener('click', handler); // срабатывает только один раз
+      row.style.opacity = '0.6';
+      
+      // Заменяем текст бейджа на "Загрузка..."
+      badge.textContent = '⏳ Загрузка...';
+      
       doSpawnChore(t.id);
     });
 
     right.appendChild(badge);
-    right.appendChild(btn);
     row.appendChild(titleEl);
     row.appendChild(right);
     list.appendChild(row);
