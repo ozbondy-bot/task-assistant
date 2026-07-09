@@ -1425,6 +1425,7 @@ async function openChoreDetails(t) {
         }
       } catch (e) {
         console.error("Failed to load template history", e);
+        showToast(`⚠️ Ошибка истории: ${e.message}`);
       }
     }
   }
