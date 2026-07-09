@@ -1711,81 +1711,164 @@ async function restoreChoreFromArchive(id) {
 /* ── Spawn/Database Preset Add Flow ── */
 async function openAddFromDatabaseModal() {
   closeModal('addChoreChoiceModal');
-  document.getElementById('addFromDbModal').classList.remove('hidden');
-  const list = document.getElementById('dbTemplatesList');
-  list.innerHTML = `<div class="loading-spinner"><div class="spinner"></div><p>Загрузка...</p></div>`;
-  
+
+  const modal = document.getElementById('addFromDbModal');
+  const list  = document.getElementById('dbTemplatesList');
+
+  modal.classList.remove('hidden');
+  list.innerHTML = '<div class="loading-spinner"><div class="spinner"></div><p>Загрузка...</p></div>';
+
+  // Use raw fetch so the global loading overlay never appears here
+  const headers = { 'Content-Type': 'application/json', 'X-Init-Data': initData };
+
+  let templates, activeTasks;
   try {
-    const [templates, activeTasks] = await Promise.all([
-      api('GET', '/api/chores/templates', null, true),
-      api('GET', '/api/house/tasks', null, true)
+    const [r1, r2] = await Promise.all([
+      fetch(API_BASE + '/api/chores/templates', { headers }),
+      fetch(API_BASE + '/api/house/tasks',      { headers }),
     ]);
-    window.choresTemplatesList = templates;
-    
-    const activeTemplateIds = new Set(activeTasks.filter(t => t.status === 'free' || t.status === 'in_progress').map(t => t.template_id));
-    const inactive = templates.filter(t => !activeTemplateIds.has(t.id));
-    
-    if (!inactive.length) {
-      list.innerHTML = `<p style="color:var(--text3);text-align:center;padding:24px">Все шаблоны уже активны на сегодня</p>`;
-      return;
-    }
-    
-    // Sort from nearest next execution to furthest
-    inactive.sort((a, b) => {
-      const da = a.next_execution ? new Date(a.next_execution) : new Date(2100, 11, 31);
-      const db = b.next_execution ? new Date(b.next_execution) : new Date(2100, 11, 31);
-      return da - db;
-    });
-    
-    list.innerHTML = inactive.map(t => {
-      let nextStr = 'Нет';
-      if (t.next_execution) {
-        const parts = t.next_execution.split('-');
-        const year = parseInt(parts[0], 10);
-        const month = parseInt(parts[1], 10) - 1;
-        const day = parseInt(parts[2], 10);
-        const dt = new Date(year, month, day);
-        const dayStr = String(dt.getDate()).padStart(2, '0');
-        const monthStr = String(dt.getMonth() + 1).padStart(2, '0');
-        nextStr = `${dayStr}.${monthStr}.`;
-      }
-      return `
-        <div class="task-card house-task" style="margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: default; padding: 12px 14px;">
-          <div style="font-weight: 500; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1;">
-            ${escHtml(stripEmoji(t.title))}
-          </div>
-          <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
-            <span class="task-badge" style="font-size: 11px; font-weight: 500; background: rgba(147,197,253,0.12); color: #60a5fa; border: 1px solid rgba(147,197,253,0.2); padding: 4px 8px; border-radius: 6px;">
-              📅 ${nextStr}
-            </span>
-            <button class="btn-spawn-tmpl" data-id="${t.id}" style="width: 32px; height: 32px; border-radius: 8px; border: none; background: var(--accent); color: white; font-size: 18px; font-weight: 600; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; line-height: 1;">+</button>
-          </div>
-        </div>
-      `;
-    }).join('');
-    
-    // Attach robust event listeners
-    list.querySelectorAll('.btn-spawn-tmpl').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const tmplId = parseInt(btn.dataset.id, 10);
-        spawnChoreFromTemplate(tmplId);
-      });
-    });
+    if (!r1.ok) throw new Error(`Шаблоны: ${r1.status}`);
+    if (!r2.ok) throw new Error(`Задачи: ${r2.status}`);
+    [templates, activeTasks] = await Promise.all([r1.json(), r2.json()]);
   } catch (e) {
-    list.innerHTML = `<p style="color:var(--danger);text-align:center;padding:24px">${e.message}</p>`;
+    list.innerHTML = `<p style="color:var(--danger);text-align:center;padding:24px">⚠️ ${e.message}</p>`;
+    return;
+  }
+
+  // IDs шаблонов, уже активных сегодня
+  const activeIds = new Set(
+    activeTasks
+      .filter(t => t.status === 'free' || t.status === 'in_progress')
+      .map(t => t.template_id)
+      .filter(id => id != null)
+  );
+
+  const inactive = templates.filter(t => !activeIds.has(t.id));
+
+  if (!inactive.length) {
+    list.innerHTML = '<p style="color:var(--text3);text-align:center;padding:24px">Все шаблоны уже активны на сегодня</p>';
+    return;
+  }
+
+  inactive.sort((a, b) => {
+    const da = a.next_execution ? new Date(a.next_execution) : new Date(2100, 11, 31);
+    const db = b.next_execution ? new Date(b.next_execution) : new Date(2100, 11, 31);
+    return da - db;
+  });
+
+  // Строим список через createElement — не через innerHTML
+  list.innerHTML = '';
+
+  inactive.forEach(t => {
+    let nextStr = 'Нет';
+    if (t.next_execution) {
+      const [y, m, d] = t.next_execution.split('-').map(Number);
+      const dt = new Date(y, m - 1, d);
+      nextStr = `${String(dt.getDate()).padStart(2,'0')}.${String(dt.getMonth()+1).padStart(2,'0')}.`;
+    }
+
+    // Строка
+    const row = document.createElement('div');
+    row.style.cssText = [
+      'margin-bottom:8px',
+      'display:flex',
+      'align-items:center',
+      'justify-content:space-between',
+      'gap:12px',
+      'padding:12px 14px',
+      'background:var(--surface2)',
+      'border:1px solid var(--border)',
+      'border-radius:12px',
+    ].join(';');
+
+    // Название
+    const titleEl = document.createElement('div');
+    titleEl.style.cssText = 'font-weight:500;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;color:var(--text);';
+    titleEl.textContent = stripEmoji(t.title);
+
+    // Правый блок
+    const right = document.createElement('div');
+    right.style.cssText = 'display:flex;align-items:center;gap:8px;flex-shrink:0;';
+
+    // Бейдж с датой
+    const badge = document.createElement('span');
+    badge.style.cssText = 'font-size:11px;font-weight:500;background:rgba(147,197,253,0.12);color:#60a5fa;border:1px solid rgba(147,197,253,0.2);padding:4px 8px;border-radius:6px;white-space:nowrap;';
+    badge.textContent = `📅 ${nextStr}`;
+
+    // Кнопка «+»
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = '+';
+    btn.style.cssText = [
+      'width:44px',
+      'height:44px',
+      'border-radius:12px',
+      'border:none',
+      'background:var(--accent)',
+      'color:white',
+      'font-size:24px',
+      'font-weight:700',
+      'display:flex',
+      'align-items:center',
+      'justify-content:center',
+      'cursor:pointer',
+      'padding:0',
+      'line-height:1',
+      'flex-shrink:0',
+      '-webkit-tap-highlight-color:rgba(0,0,0,0)',
+      'touch-action:manipulation',
+      'user-select:none',
+    ].join(';');
+
+    btn.addEventListener('click', function handler(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      btn.removeEventListener('click', handler); // срабатывает только один раз
+      btn.disabled = true;
+      btn.textContent = '⏳';
+      btn.style.opacity = '0.6';
+      doSpawnChore(t.id);
+    });
+
+    right.appendChild(badge);
+    right.appendChild(btn);
+    row.appendChild(titleEl);
+    row.appendChild(right);
+    list.appendChild(row);
+  });
+}
+
+async function doSpawnChore(tmplId) {
+  // Закрываем модал немедленно
+  document.getElementById('addFromDbModal').classList.add('hidden');
+
+  try {
+    // Прямой fetch без глобального overlay
+    const res = await fetch(API_BASE + '/api/house/tasks/spawn', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Init-Data': initData,
+      },
+      body: JSON.stringify({ template_id: tmplId }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+
+    showToast('✅ Задача активирована на сегодня!');
+    // Перезагружаем вкладку — показываем loading overlay только здесь
+    await Promise.all([loadHouseTab(), loadWeeklyGoal()]);
+  } catch (e) {
+    showToast(`⚠️ Ошибка: ${e.message}`);
   }
 }
 
+// Алиас для обратной совместимости с другими местами кода
 async function spawnChoreFromTemplate(tmplId) {
-  closeModal('addFromDbModal');
-  try {
-    await api('POST', `/api/house/tasks/spawn`, { template_id: tmplId });
-    showToast('✅ Задача активирована на сегодня!');
-    await Promise.all([loadHouseTab(), loadWeeklyGoal()]);
-  } catch (e) {
-    showToast(`⚠️ ${e.message}`);
-  }
+  return doSpawnChore(tmplId);
 }
 
 /* ── Detail Modals for Archive and Templates ── */
