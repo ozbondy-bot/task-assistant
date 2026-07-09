@@ -1758,11 +1758,20 @@ async function openAddFromDatabaseModal() {
             <span class="task-badge" style="font-size: 11px; font-weight: 500; background: rgba(147,197,253,0.12); color: #60a5fa; border: 1px solid rgba(147,197,253,0.2); padding: 4px 8px; border-radius: 6px;">
               📅 ${nextStr}
             </span>
-            <button onclick="window.spawnChoreFromTemplate(${t.id})" style="width: 32px; height: 32px; border-radius: 8px; border: none; background: var(--accent); color: white; font-size: 18px; font-weight: 600; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; line-height: 1;">+</button>
+            <button class="btn-spawn-tmpl" data-id="${t.id}" style="width: 32px; height: 32px; border-radius: 8px; border: none; background: var(--accent); color: white; font-size: 18px; font-weight: 600; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; line-height: 1;">+</button>
           </div>
         </div>
       `;
     }).join('');
+    
+    // Attach robust event listeners
+    list.querySelectorAll('.btn-spawn-tmpl').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const tmplId = parseInt(btn.dataset.id, 10);
+        spawnChoreFromTemplate(tmplId);
+      });
+    });
   } catch (e) {
     list.innerHTML = `<p style="color:var(--danger);text-align:center;padding:24px">${e.message}</p>`;
   }
