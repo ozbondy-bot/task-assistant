@@ -1707,6 +1707,16 @@ async def startup_db_cleanup():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """))
+        # Create action_logs table for client-side end-to-end timing
+        await session.execute(text("""
+            CREATE TABLE IF NOT EXISTS action_logs (
+                id SERIAL PRIMARY KEY,
+                action VARCHAR NOT NULL,
+                duration_ms INTEGER NOT NULL,
+                user_id INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
         await session.commit()
 
         # 1. Clean unauthorized users
@@ -1792,6 +1802,28 @@ async def startup_db_cleanup():
 
 class SpawnChoreRequest(BaseModel):
     template_id: int
+
+
+# ── Client-side action timing ─────────────────────────────────────────────────
+class ActionLogRequest(BaseModel):
+    action: str
+    duration_ms: int
+
+@app.post("/api/log/action")
+async def log_action(req: ActionLogRequest, user: User = Depends(get_current_user)):
+    """Saves client-side end-to-end timing for UI actions (tap → render done)."""
+    try:
+        async with AsyncSessionLocal() as session:
+            await session.execute(
+                text("INSERT INTO action_logs (action, duration_ms, user_id) VALUES (:action, :duration_ms, :user_id)"),
+                {"action": req.action, "duration_ms": req.duration_ms, "user_id": user.id}
+            )
+            await session.commit()
+        return {"ok": True}
+    except Exception as e:
+        logger.error(f"Failed to save action log: {e}")
+        return {"ok": False}
+
 
 @app.post("/api/house/tasks/spawn")
 async def spawn_chore_instance(req: SpawnChoreRequest, user: User = Depends(get_current_user)):

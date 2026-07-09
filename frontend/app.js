@@ -103,6 +103,16 @@ let activeRequestsCount = 0;
 let loadingTimerInterval = null;
 let loadingStartSecs = 0;
 let hideTimeoutId = null;
+let globalLoadingStartMs = 0;
+
+function logClientAction(actionName, durationMs) {
+  if (durationMs < 50) return; // Ignore trivial actions
+  fetch(API_BASE + '/api/log/action', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Init-Data': initData },
+    body: JSON.stringify({ action: actionName, duration_ms: durationMs })
+  }).catch(e => console.error('Log action failed', e));
+}
 
 function showLoadingOverlay() {
   const overlay = document.getElementById('globalLoadingOverlay');
@@ -115,6 +125,7 @@ function showLoadingOverlay() {
   }
   
   if (overlay.classList.contains('hidden')) {
+    globalLoadingStartMs = performance.now();
     loadingStartSecs = 0;
     timerText.textContent = '0 сек';
     overlay.classList.remove('hidden');
@@ -130,8 +141,10 @@ function showLoadingOverlay() {
 function hideLoadingOverlay() {
   if (activeRequestsCount > 0) return;
   const overlay = document.getElementById('globalLoadingOverlay');
-  if (overlay) {
+  if (overlay && !overlay.classList.contains('hidden')) {
     overlay.classList.add('hidden');
+    const duration = Math.round(performance.now() - globalLoadingStartMs);
+    logClientAction('global_ui_flow', duration);
   }
   if (loadingTimerInterval) {
     clearInterval(loadingTimerInterval);
@@ -1767,46 +1780,41 @@ async function openAddFromDatabaseModal() {
       nextStr = `${String(dt.getDate()).padStart(2,'0')}.${String(dt.getMonth()+1).padStart(2,'0')}.`;
     }
 
-    // Строка
+    // Строка — те же классы что у обычных карточек дел
     const row = document.createElement('div');
-    row.style.cssText = [
-      'margin-bottom:8px',
-      'display:flex',
-      'align-items:center',
-      'justify-content:space-between',
-      'gap:12px',
-      'padding:12px 14px',
-      'background:var(--surface2)',
-      'border:1px solid var(--border)',
-      'border-radius:12px',
-    ].join(';');
+    row.className = 'task-card house-task';
+    row.style.cursor = 'default';
+    row.style.justifyContent = 'space-between';
+    row.style.marginBottom = '6px';
 
     // Название
     const titleEl = document.createElement('div');
-    titleEl.style.cssText = 'font-weight:500;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;color:var(--text);';
+    titleEl.className = 'task-title';
+    titleEl.style.flex = '1';
     titleEl.textContent = stripEmoji(t.title);
 
     // Правый блок
     const right = document.createElement('div');
     right.style.cssText = 'display:flex;align-items:center;gap:8px;flex-shrink:0;';
 
-    // Бейдж с датой
+    // Бейдж с датой — стандартный task-badge
     const badge = document.createElement('span');
+    badge.className = 'task-badge';
     badge.style.cssText = 'font-size:11px;font-weight:500;background:rgba(147,197,253,0.12);color:#60a5fa;border:1px solid rgba(147,197,253,0.2);padding:4px 8px;border-radius:6px;white-space:nowrap;';
     badge.textContent = `📅 ${nextStr}`;
 
-    // Кнопка «+»
+    // Кнопка «+» — те же размеры что у badge-кнопок в других карточках
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.textContent = '+';
     btn.style.cssText = [
-      'width:44px',
-      'height:44px',
-      'border-radius:12px',
+      'width:36px',
+      'height:36px',
+      'border-radius:10px',
       'border:none',
       'background:var(--accent)',
       'color:white',
-      'font-size:24px',
+      'font-size:20px',
       'font-weight:700',
       'display:flex',
       'align-items:center',
