@@ -228,7 +228,7 @@ async def send_morning_message():
     if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
         app_url = app_url.rstrip("/") + "/app"
     if app_url:
-        app_url = app_url.rstrip("/") + "/?v=24"
+        app_url = app_url.rstrip("/") + "/?v=25"
         
     builder = InlineKeyboardBuilder()
     builder.row(
@@ -323,7 +323,7 @@ async def send_midnight_summary():
     if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
         app_url = app_url.rstrip("/") + "/app"
     if app_url:
-        app_url = app_url.rstrip("/") + "/?v=24"
+        app_url = app_url.rstrip("/") + "/?v=25"
         
     builder = InlineKeyboardBuilder()
     builder.row(
@@ -512,6 +512,20 @@ async def generate_daily_chores_if_needed(session, house_id: int):
     )).scalars().all()
 
     for tmpl in templates:
+        # Check if this template already has any instances generated for this week (including done, skipped or shifted)
+        has_instances = await session.scalar(
+            select(TaskInstance.id)
+            .where(
+                and_(
+                    TaskInstance.template_id == tmpl.id,
+                    TaskInstance.date.between(monday_date, sunday_date)
+                )
+            )
+            .limit(1)
+        )
+        if has_instances:
+            continue
+
         p = tmpl.periodicity
         days = tmpl.period_days or 1
         
@@ -646,7 +660,7 @@ async def cmd_start(message: types.Message, db_user: User = None):
     if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
         app_url = app_url.rstrip("/") + "/app"
     if app_url:
-        app_url = app_url.rstrip("/") + "/?v=24"
+        app_url = app_url.rstrip("/") + "/?v=25"
     try:
         await message.bot.set_chat_menu_button(
             chat_id=message.chat.id,
@@ -1287,7 +1301,7 @@ async def catch_all_messages(message: types.Message):
     if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
         app_url = app_url.rstrip("/") + "/app"
     if app_url:
-        app_url = app_url.rstrip("/") + "/?v=24"
+        app_url = app_url.rstrip("/") + "/?v=25"
         
     builder = InlineKeyboardBuilder()
     builder.row(
