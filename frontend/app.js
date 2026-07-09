@@ -41,6 +41,8 @@ let currentUser = null;
 let currentPoints = 0;
 let shiftTaskId = null;
 let shiftTaskType = null;
+window.tasksCache = {};
+window.houseMembersList = null;
 
 const FOOD_EMOJIS = [
   '🍏','🍎','🍐','🍊','🍋','🍌','🍉','🍇','🍓','🫐','🍒','🍑','🥭','🍍','🥥','🥝',
@@ -138,6 +140,10 @@ function hideLoadingOverlay() {
 }
 
 async function api(method, path, body = null) {
+  if (method !== 'GET') {
+    window.tasksCache = {};
+    window.houseMembersList = null;
+  }
   showLoadingOverlay();
   activeRequestsCount++;
   
@@ -174,7 +180,11 @@ async function loadWeeklyGoal() {
   const headerEl = document.getElementById('membersListHeader');
   if (!headerEl) return;
   try {
-    const members = await api('GET', '/api/house/members');
+    let members = window.houseMembersList;
+    if (!members) {
+      members = await api('GET', '/api/house/members');
+      window.houseMembersList = members;
+    }
     headerEl.innerHTML = members.map(m => {
       return `<span style="font-weight: 600; font-size: 13px;">${escHtml(m.display_name)}: ${m.weekly_earned}/${m.weekly_target} ✨</span>`;
     }).join('<span style="color: var(--text3); margin: 0 10px;">|</span>');
@@ -269,21 +279,81 @@ function showSpinnerIfNeeded(container, selector = '.task-card, .reward-card, .s
 }
 
 // ── House Tab ─────────────────────────────────────────────────────────────────
+// Background prefetching helper
+function prefetchDatesAround(centerDateStr) {
+  const parts = centerDateStr.split('-');
+  const y = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10) - 1;
+  const d = parseInt(parts[2], 10);
+  
+  const centerDt = new Date(y, m, d);
+  
+  const yesterdayDt = new Date(centerDt);
+  yesterdayDt.setDate(centerDt.getDate() - 1);
+  const yesterdayStr = formatLocalDate(yesterdayDt);
+  
+  const tomorrowDt = new Date(centerDt);
+  tomorrowDt.setDate(centerDt.getDate() + 1);
+  const tomorrowStr = formatLocalDate(tomorrowDt);
+  
+  if (!window.tasksCache[yesterdayStr]) {
+    api('GET', `/api/house/tasks?date=${yesterdayStr}`).then(data => {
+      window.tasksCache[yesterdayStr] = data;
+    }).catch(e => console.warn("Failed to prefetch tasks for " + yesterdayStr, e));
+  }
+  
+  if (!window.tasksCache[tomorrowStr]) {
+    api('GET', `/api/house/tasks?date=${tomorrowStr}`).then(data => {
+      window.tasksCache[tomorrowStr] = data;
+    }).catch(e => console.warn("Failed to prefetch tasks for " + tomorrowStr, e));
+  }
+}
+
 async function loadHouseTab() {
   const list = document.getElementById('houseTasksList');
-  showSpinnerIfNeeded(list, '.task-card');
+  const dateStr = getHouseActiveDateStr();
+  
+  const hasCachedTasks = !!window.tasksCache[dateStr];
+  if (!hasCachedTasks) {
+    showSpinnerIfNeeded(list, '.task-card');
+  }
 
   const display = document.getElementById('houseActiveDateDisplay');
   if (display) display.textContent = getHouseActiveDateLabel();
 
-  const dateStr = getHouseActiveDateStr();
   try {
-    const [tasks, members] = await Promise.all([
-      api('GET', `/api/house/tasks?date=${dateStr}`),
-      api('GET', `/api/house/members`),
-    ]);
+    let membersPromise;
+    if (window.houseMembersList) {
+      membersPromise = Promise.resolve(window.houseMembersList);
+    } else {
+      membersPromise = api('GET', `/api/house/members`).then(data => {
+        window.houseMembersList = data;
+        return data;
+      });
+    }
 
-    renderHouseTasks(tasks);
+    let tasksPromise;
+    if (hasCachedTasks) {
+      const cachedTasks = window.tasksCache[dateStr];
+      renderHouseTasks(cachedTasks);
+      
+      tasksPromise = api('GET', `/api/house/tasks?date=${dateStr}`).then(freshTasks => {
+        if (JSON.stringify(window.tasksCache[dateStr]) !== JSON.stringify(freshTasks)) {
+          window.tasksCache[dateStr] = freshTasks;
+          renderHouseTasks(freshTasks);
+        }
+        return freshTasks;
+      });
+    } else {
+      tasksPromise = api('GET', `/api/house/tasks?date=${dateStr}`).then(freshTasks => {
+        window.tasksCache[dateStr] = freshTasks;
+        renderHouseTasks(freshTasks);
+        return freshTasks;
+      });
+    }
+
+    const [tasks, members] = await Promise.all([tasksPromise, membersPromise]);
+
     renderMembers(members);
 
     const me = members.find(m => m.is_me);
@@ -293,7 +363,6 @@ async function loadHouseTab() {
       currentPoints = me.points;
     }
 
-    // Update the tab counter
     const todayStr = formatLocalDate(new Date());
     if (dateStr === todayStr) {
       const activeTasks = tasks.filter(t => t.status === 'free' || t.status === 'in_progress');
@@ -308,15 +377,24 @@ async function loadHouseTab() {
     } else {
       updateHouseTabCounter();
     }
+
+    prefetchDatesAround(dateStr);
+
   } catch (e) {
-    list.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-title">Не удалось загрузить</div><div class="empty-sub">${e.message}</div></div>`;
+    if (!window.tasksCache[dateStr]) {
+      list.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-title">Не удалось загрузить</div><div class="empty-sub">${e.message}</div></div>`;
+    }
   }
 }
 
 async function updateHouseTabCounter() {
   try {
     const todayStr = formatLocalDate(new Date());
-    const tasks = await api('GET', `/api/house/tasks?date=${todayStr}`);
+    let tasks = window.tasksCache[todayStr];
+    if (!tasks) {
+      tasks = await api('GET', `/api/house/tasks?date=${todayStr}`);
+      window.tasksCache[todayStr] = tasks;
+    }
     const activeTasks = tasks.filter(t => t.status === 'free' || t.status === 'in_progress');
     const count = activeTasks.length;
     let points = 0;
@@ -1668,11 +1746,11 @@ async function openAddFromDatabaseModal() {
         nextStr = `${dayStr}.${monthStr}.`;
       }
       return `
-        <div class="task-card house-task" onclick="openChoreTemplateDetails(${t.id})" style="margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; padding: 12px 14px;">
+        <div class="task-card house-task" style="margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: default; padding: 12px 14px;">
           <div style="font-weight: 500; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1;">
             ${escHtml(stripEmoji(t.title))}
           </div>
-          <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;" onclick="event.stopPropagation();">
+          <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
             <span class="task-badge" style="font-size: 11px; font-weight: 500; background: rgba(147,197,253,0.12); color: #60a5fa; border: 1px solid rgba(147,197,253,0.2); padding: 4px 8px; border-radius: 6px;">
               📅 ${nextStr}
             </span>
