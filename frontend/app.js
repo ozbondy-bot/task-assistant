@@ -1717,8 +1717,8 @@ async function openAddFromDatabaseModal() {
   
   try {
     const [templates, activeTasks] = await Promise.all([
-      api('GET', '/api/chores/templates'),
-      api('GET', '/api/house/tasks')
+      api('GET', '/api/chores/templates', null, true),
+      api('GET', '/api/house/tasks', null, true)
     ]);
     window.choresTemplatesList = templates;
     
@@ -1778,10 +1778,10 @@ async function openAddFromDatabaseModal() {
 }
 
 async function spawnChoreFromTemplate(tmplId) {
+  closeModal('addFromDbModal');
   try {
     await api('POST', `/api/house/tasks/spawn`, { template_id: tmplId });
     showToast('✅ Задача активирована на сегодня!');
-    closeModal('addFromDbModal');
     await Promise.all([loadHouseTab(), loadWeeklyGoal()]);
   } catch (e) {
     showToast(`⚠️ ${e.message}`);
