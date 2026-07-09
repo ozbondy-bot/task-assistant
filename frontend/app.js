@@ -139,13 +139,15 @@ function hideLoadingOverlay() {
   }
 }
 
-async function api(method, path, body = null) {
+async function api(method, path, body = null, silent = false) {
   if (method !== 'GET') {
     window.tasksCache = {};
     window.houseMembersList = null;
   }
-  showLoadingOverlay();
-  activeRequestsCount++;
+  if (!silent) {
+    showLoadingOverlay();
+    activeRequestsCount++;
+  }
   
   const opts = {
     method,
@@ -164,14 +166,16 @@ async function api(method, path, body = null) {
     }
     return await res.json();
   } finally {
-    activeRequestsCount--;
-    if (activeRequestsCount <= 0) {
-      activeRequestsCount = 0;
-      if (hideTimeoutId) clearTimeout(hideTimeoutId);
-      hideTimeoutId = setTimeout(() => {
-        hideLoadingOverlay();
-        hideTimeoutId = null;
-      }, 300);
+    if (!silent) {
+      activeRequestsCount--;
+      if (activeRequestsCount <= 0) {
+        activeRequestsCount = 0;
+        if (hideTimeoutId) clearTimeout(hideTimeoutId);
+        hideTimeoutId = setTimeout(() => {
+          hideLoadingOverlay();
+          hideTimeoutId = null;
+        }, 300);
+      }
     }
   }
 }
@@ -297,13 +301,13 @@ function prefetchDatesAround(centerDateStr) {
   const tomorrowStr = formatLocalDate(tomorrowDt);
   
   if (!window.tasksCache[yesterdayStr]) {
-    api('GET', `/api/house/tasks?date=${yesterdayStr}`).then(data => {
+    api('GET', `/api/house/tasks?date=${yesterdayStr}`, null, true).then(data => {
       window.tasksCache[yesterdayStr] = data;
     }).catch(e => console.warn("Failed to prefetch tasks for " + yesterdayStr, e));
   }
   
   if (!window.tasksCache[tomorrowStr]) {
-    api('GET', `/api/house/tasks?date=${tomorrowStr}`).then(data => {
+    api('GET', `/api/house/tasks?date=${tomorrowStr}`, null, true).then(data => {
       window.tasksCache[tomorrowStr] = data;
     }).catch(e => console.warn("Failed to prefetch tasks for " + tomorrowStr, e));
   }
@@ -337,7 +341,7 @@ async function loadHouseTab() {
       const cachedTasks = window.tasksCache[dateStr];
       renderHouseTasks(cachedTasks);
       
-      tasksPromise = api('GET', `/api/house/tasks?date=${dateStr}`).then(freshTasks => {
+      tasksPromise = api('GET', `/api/house/tasks?date=${dateStr}`, null, true).then(freshTasks => {
         if (JSON.stringify(window.tasksCache[dateStr]) !== JSON.stringify(freshTasks)) {
           window.tasksCache[dateStr] = freshTasks;
           renderHouseTasks(freshTasks);

@@ -228,7 +228,7 @@ async def send_morning_message():
     if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
         app_url = app_url.rstrip("/") + "/app"
     if app_url:
-        app_url = app_url.rstrip("/") + "/?v=26"
+        app_url = app_url.rstrip("/") + "/?v=27"
         
     builder = InlineKeyboardBuilder()
     builder.row(
@@ -323,7 +323,7 @@ async def send_midnight_summary():
     if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
         app_url = app_url.rstrip("/") + "/app"
     if app_url:
-        app_url = app_url.rstrip("/") + "/?v=26"
+        app_url = app_url.rstrip("/") + "/?v=27"
         
     builder = InlineKeyboardBuilder()
     builder.row(
@@ -502,6 +502,12 @@ async def generate_daily_chores_if_needed(session, house_id: int):
     monday_date = today - timedelta(days=today.weekday())
     sunday_date = monday_date + timedelta(days=6)
 
+    week_already_generated = False
+    if house.last_summary_date:
+        last_monday = house.last_summary_date - timedelta(days=house.last_summary_date.weekday())
+        if last_monday == monday_date:
+            week_already_generated = True
+
     templates = (await session.execute(
         select(TaskTemplate).where(
             and_(
@@ -512,19 +518,20 @@ async def generate_daily_chores_if_needed(session, house_id: int):
     )).scalars().all()
 
     for tmpl in templates:
-        # Check if this template already has any instances generated for this week (including done, skipped or shifted)
-        has_instances = await session.scalar(
-            select(TaskInstance.id)
-            .where(
-                and_(
-                    TaskInstance.template_id == tmpl.id,
-                    TaskInstance.date.between(monday_date, sunday_date)
+        if week_already_generated:
+            # Check if this template already has any instances generated for this week (including done, skipped or shifted)
+            has_instances = await session.scalar(
+                select(TaskInstance.id)
+                .where(
+                    and_(
+                        TaskInstance.template_id == tmpl.id,
+                        TaskInstance.date.between(monday_date, sunday_date)
+                    )
                 )
+                .limit(1)
             )
-            .limit(1)
-        )
-        if has_instances:
-            continue
+            if has_instances:
+                continue
 
         p = tmpl.periodicity
         days = tmpl.period_days or 1
@@ -660,7 +667,7 @@ async def cmd_start(message: types.Message, db_user: User = None):
     if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
         app_url = app_url.rstrip("/") + "/app"
     if app_url:
-        app_url = app_url.rstrip("/") + "/?v=26"
+        app_url = app_url.rstrip("/") + "/?v=27"
     try:
         await message.bot.set_chat_menu_button(
             chat_id=message.chat.id,
@@ -1301,7 +1308,7 @@ async def catch_all_messages(message: types.Message):
     if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
         app_url = app_url.rstrip("/") + "/app"
     if app_url:
-        app_url = app_url.rstrip("/") + "/?v=26"
+        app_url = app_url.rstrip("/") + "/?v=27"
         
     builder = InlineKeyboardBuilder()
     builder.row(
