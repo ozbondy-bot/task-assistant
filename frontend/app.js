@@ -1326,14 +1326,14 @@ window.currentHouseTasksList = [];
 window.currentChoreDetailsTemplate = null;
 
 function openChoreTemplateDetails(tmplId) {
-  const t = window.choresTemplatesList.find(x => x.id === tmplId);
+  const t = window.choresTemplatesList.find(x => Number(x.id) === Number(tmplId));
   if (t) {
     openChoreDetails(t);
   }
 }
 
 function openHouseTaskDetails(instanceId) {
-  const t = window.currentHouseTasksList.find(x => x.id === instanceId);
+  const t = window.currentHouseTasksList.find(x => Number(x.id) === Number(instanceId));
   if (t) {
     openChoreDetails(t);
   }
