@@ -1517,7 +1517,7 @@ async function openChoreDetails(t) {
   if (!t.hasOwnProperty('status')) {
     actions.innerHTML = `
       <div style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
-        <button class="btn" onclick="spawnChoreFromTemplate(window.currentChoreDetailsTemplate.id); closeModal('choreDetailsModal');" style="width: 100%; height: 40px; font-weight: 600; background: var(--accent); border: none; color: white; border-radius: 8px; cursor: pointer;">Добавить на сегодня</button>
+        <button class="btn" onclick="window.spawnChoreFromTemplate(window.currentChoreDetailsTemplate.id); closeModal('choreDetailsModal');" style="width: 100%; height: 40px; font-weight: 600; background: var(--accent); border: none; color: white; border-radius: 8px; cursor: pointer;">Добавить на сегодня</button>
       </div>
     `;
   } else {
@@ -1758,7 +1758,7 @@ async function openAddFromDatabaseModal() {
             <span class="task-badge" style="font-size: 11px; font-weight: 500; background: rgba(147,197,253,0.12); color: #60a5fa; border: 1px solid rgba(147,197,253,0.2); padding: 4px 8px; border-radius: 6px;">
               📅 ${nextStr}
             </span>
-            <button onclick="spawnChoreFromTemplate(${t.id})" style="width: 32px; height: 32px; border-radius: 8px; border: none; background: var(--accent); color: white; font-size: 18px; font-weight: 600; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; line-height: 1;">+</button>
+            <button onclick="window.spawnChoreFromTemplate(${t.id})" style="width: 32px; height: 32px; border-radius: 8px; border: none; background: var(--accent); color: white; font-size: 18px; font-weight: 600; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; line-height: 1;">+</button>
           </div>
         </div>
       `;
