@@ -2026,6 +2026,42 @@ async def debug_inspect(reset: Optional[int] = None):
         "reset_done": reset_done
     }
 
+@app.get("/api/admin/fix-tasks")
+async def temp_admin_fix_tasks():
+    from bot.handlers.base import generate_daily_chores_if_needed, ACTIVE_HOUSE_ID
+    async with AsyncSessionLocal() as session:
+        # Delete buggy instances
+        await session.execute(text("DELETE FROM task_instances WHERE status IN ('free', 'in_progress')"))
+        
+        # Reset last_summary_date to force generation
+        await session.execute(text(f"UPDATE houses SET last_summary_date = '2000-01-01' WHERE id = {ACTIVE_HOUSE_ID}"))
+        import bot.handlers.base
+        bot.handlers.base._last_generation_check = None
+
+        # Reset templates without history to today
+        res = await session.execute(text("SELECT id, house_id FROM task_templates WHERE deleted = false"))
+        templates = res.all()
+        for row in templates:
+            tid, hid = row[0], row[1]
+            hist_res = await session.execute(
+                text("SELECT id FROM task_instances WHERE template_id = :tid AND status IN ('done', 'skipped') LIMIT 1"),
+                {"tid": tid}
+            )
+            has_history = hist_res.first() is not None
+            if not has_history:
+                await session.execute(
+                    text("INSERT INTO task_instances (template_id, house_id, status, date) VALUES (:tid, :hid, 'free', '2026-07-09')"),
+                    {"tid": tid, "hid": hid}
+                )
+                await session.execute(
+                    text("UPDATE task_templates SET start_date = '2026-07-09' WHERE id = :tid"),
+                    {"tid": tid}
+                )
+        
+        await session.commit()
+        await generate_daily_chores_if_needed(session, ACTIVE_HOUSE_ID)
+        
+    return {"ok": True, "message": "Tasks fixed"}
 
 # ── Static files for Mini App ─────────────────────────────────────────────────
 frontend_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend")
