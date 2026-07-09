@@ -3,6 +3,38 @@
    ============================================= */
 
 const tg = window.Telegram?.WebApp;
+
+// Global error handler for WebApp debugging
+window.onerror = function(message, source, lineno, colno, error) {
+  showToast(`⚠️ JS Error: ${message} at line ${lineno}`);
+  console.error("Global error:", error);
+};
+
+// Safe date parser to bypass strict Safari/WebView ISO formats
+function parseDateSafe(dateStr) {
+  if (!dateStr) return null;
+  const mFull = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})/);
+  if (mFull) {
+    return new Date(
+      parseInt(mFull[1], 10),
+      parseInt(mFull[2], 10) - 1,
+      parseInt(mFull[3], 10),
+      parseInt(mFull[4], 10),
+      parseInt(mFull[5], 10),
+      parseInt(mFull[6], 10)
+    );
+  }
+  const mDate = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (mDate) {
+    return new Date(
+      parseInt(mDate[1], 10),
+      parseInt(mDate[2], 10) - 1,
+      parseInt(mDate[3], 10)
+    );
+  }
+  return new Date(dateStr);
+}
+
 const API_BASE = '';  // Same origin as the Mini App URL
 let initData = '';
 let currentUser = null;
@@ -1357,12 +1389,12 @@ async function openChoreDetails(t) {
   const nextEl = document.getElementById('choreDetailsNextExecution');
   if (lastEl) {
     lastEl.textContent = t.last_completed
-      ? new Date(t.last_completed).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })
+      ? parseDateSafe(t.last_completed).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })
       : 'Ещё не выполнялось';
   }
   if (nextEl) {
     nextEl.textContent = t.next_execution
-      ? new Date(t.next_execution).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })
+      ? parseDateSafe(t.next_execution).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })
       : '—';
   }
   
@@ -1378,7 +1410,7 @@ async function openChoreDetails(t) {
         const history = await api('GET', `/api/chores/templates/${tmplId}/history`);
         if (history && history.length > 0) {
           historyList.innerHTML = history.map(item => {
-            const dt = new Date(item.done_at);
+            const dt = parseDateSafe(item.done_at);
             const timeStr = dt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
             const dateStr = dt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
             return `<div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.05); padding:2px 0;">
