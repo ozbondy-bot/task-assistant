@@ -1904,6 +1904,29 @@ async def spawn_chore_instance(req: SpawnChoreRequest, user: User = Depends(get_
     return {"ok": True}
 
 
+@app.get("/api/debug/history/{template_id}")
+async def debug_history(template_id: int):
+    async with AsyncSessionLocal() as session:
+        from db.models import Completion, User, TaskInstance
+        from sqlalchemy import select
+        result = await session.execute(
+            select(Completion, User)
+            .join(TaskInstance, Completion.task_instance_id == TaskInstance.id)
+            .join(User, Completion.user_id == User.id)
+            .where(TaskInstance.template_id == template_id)
+            .order_by(Completion.created_at.desc())
+        )
+        rows = result.all()
+        history = []
+        for comp, u in rows:
+            history.append({
+                "done_by": u.display_name,
+                "done_at": comp.created_at.isoformat(),
+                "points": comp.points
+            })
+        return history
+
+
 @app.get("/api/debug/inspect")
 async def debug_inspect(reset: Optional[int] = None):
     from bot.handlers.base import get_house_today_date, calculate_weekly_target_points
