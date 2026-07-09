@@ -306,12 +306,13 @@ function isPastDate(dateStr) {
 }
 
 function renderHouseTasks(tasks) {
+  window.currentHouseTasksList = tasks;
   const list = document.getElementById('houseTasksList');
   const isToday = houseActiveOffset === 0;
   const isFuture = houseActiveOffset > 0;
 
   if (!tasks.length) {
-    list.innerHTML = `<div class="empty-state"><div class="empty-icon">${isFuture ? '📅' : '✨'}</div><div class="empty-title">${isFuture ? 'Задач нет' : 'Задач нет!'}</div><div class="empty-sub">${isFuture ? 'На этот день задач не запланировано' : 'Нет активных или выполненных задач на выбранную дату'}</div></div>`;
+    list.innerHTML = `<div class="empty-state"><div class="empty-icon">${isFuture ? '📅' : '🎉'}</div><div class="empty-title">${isFuture ? 'Задач нет' : 'Все дела сделаны!'}</div><div class="empty-sub">${isFuture ? 'На этот день ничего не запланировано' : 'Вы отлично поработали и можете отдохнуть'}</div></div>`;
     if (isToday) {
       list.innerHTML += `<div class="add-inline-btn task-card house-task" onclick="document.getElementById('addChoreChoiceModal').classList.remove('hidden')">+ Добавить</div>`;
     }
@@ -330,13 +331,12 @@ function renderHouseTasks(tasks) {
   const rows = tasks.map(t => {
     const isCompleted = t.status === 'done' || t.status === 'skipped';
     const grayClass = isCompleted ? 'completed-gray' : '';
-    const clickHandler = `openChoreDetails(${JSON.stringify(t).replace(/"/g, '&quot;')})`;
 
     const isCooking = t.title && (t.title.toLowerCase().includes('готов') || t.title.toLowerCase().includes('cook'));
     const pointsBadge = isCooking ? 'до 10 ✨' : `${t.points} ✨`;
 
     return `
-      <div class="task-card house-task flex-between ${grayClass}" onclick="${clickHandler}">
+      <div class="task-card house-task flex-between ${grayClass}" onclick="openHouseTaskDetails(${t.id})">
         <div class="task-left flex-row" style="align-items: center; gap: 8px;">
           <span style="font-size: 16px;">🏠</span>
           <span class="task-title" style="font-weight: 500; font-size: 14px;">${escHtml(stripEmoji(t.title))}</span>
@@ -1289,6 +1289,56 @@ window.completeHouseTask = completeHouseTask;
 window.unclaimChore = unclaimChore;
 window.skipChore = skipChore;
 
+window.choresTemplatesList = [];
+window.currentHouseTasksList = [];
+window.currentChoreDetailsTemplate = null;
+
+function openChoreTemplateDetails(tmplId) {
+  const t = window.choresTemplatesList.find(x => x.id === tmplId);
+  if (t) {
+    openChoreDetails(t);
+  }
+}
+
+function openHouseTaskDetails(instanceId) {
+  const t = window.currentHouseTasksList.find(x => x.id === instanceId);
+  if (t) {
+    openChoreDetails(t);
+  }
+}
+
+function completeHouseTaskFromDetails() {
+  const t = window.currentChoreDetailsTemplate;
+  if (t) {
+    completeHouseTask(t.id, t.title);
+    closeModal('choreDetailsModal');
+  }
+}
+
+function editChoreTemplateFromDetails() {
+  const t = window.currentChoreDetailsTemplate;
+  if (t) {
+    editChoreTemplateDirectly(t);
+    closeModal('choreDetailsModal');
+  }
+}
+
+function deleteChoreTemplateFromDetails() {
+  const t = window.currentChoreDetailsTemplate;
+  if (t) {
+    const tmplId = t.template_id || t.id;
+    deleteChoreTemplate(tmplId);
+    closeModal('choreDetailsModal');
+  }
+}
+
+// Expose to window for inline onclick attributes
+window.openChoreTemplateDetails = openChoreTemplateDetails;
+window.openHouseTaskDetails = openHouseTaskDetails;
+window.completeHouseTaskFromDetails = completeHouseTaskFromDetails;
+window.editChoreTemplateFromDetails = editChoreTemplateFromDetails;
+window.deleteChoreTemplateFromDetails = deleteChoreTemplateFromDetails;
+
 /* ── Chore Details & Tab Switching ── */
 function isFutureDate(dateStr) {
   if (!dateStr) return false;
@@ -1297,6 +1347,7 @@ function isFutureDate(dateStr) {
 }
 
 async function openChoreDetails(t) {
+  window.currentChoreDetailsTemplate = t;
   document.getElementById('choreDetailsTitle').textContent = stripEmoji(t.title);
   document.getElementById('choreDetailsPeriod').textContent = periodLabel(t.periodicity, t.period_days);
   document.getElementById('choreDetailsPoints').textContent = `${t.points} ✨`;
@@ -1351,7 +1402,7 @@ async function openChoreDetails(t) {
   if (!t.hasOwnProperty('status')) {
     actions.innerHTML = `
       <div style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
-        <button class="btn" onclick="spawnChoreFromTemplate(${t.id}); closeModal('choreDetailsModal');" style="width: 100%; height: 40px; font-weight: 600; background: var(--accent); border: none; color: white; border-radius: 8px; cursor: pointer;">Добавить на сегодня</button>
+        <button class="btn" onclick="spawnChoreFromTemplate(window.currentChoreDetailsTemplate.id); closeModal('choreDetailsModal');" style="width: 100%; height: 40px; font-weight: 600; background: var(--accent); border: none; color: white; border-radius: 8px; cursor: pointer;">Добавить на сегодня</button>
       </div>
     `;
   } else {
@@ -1373,7 +1424,7 @@ async function openChoreDetails(t) {
           <div style="text-align: center; color: ${t.status === 'done' ? '#10b981' : 'var(--danger)'}; font-weight: 500; font-size: 13px; margin-bottom: 4px;">
             ${statusText}
           </div>
-          <button class="btn btn-secondary" onclick="restoreChoreFromArchive(${t.id}); closeModal('choreDetailsModal');" style="width: 100%; height: 40px; font-weight: 600; border-radius: 8px; cursor: pointer; border: 1px solid var(--border); background: var(--surface2); color: var(--text);">Вернуть в работу</button>
+          <button class="btn btn-secondary" onclick="restoreChoreFromArchive(window.currentChoreDetailsTemplate.id); closeModal('choreDetailsModal');" style="width: 100%; height: 40px; font-weight: 600; border-radius: 8px; cursor: pointer; border: 1px solid var(--border); background: var(--surface2); color: var(--text);">Вернуть в работу</button>
         </div>
       `;
     } else {
@@ -1381,17 +1432,17 @@ async function openChoreDetails(t) {
         <div style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
           <!-- Top row: Done, Take, Skip, ... -->
           <div style="display: flex; gap: 6px; width: 100%;">
-            <button class="btn" onclick="completeHouseTask(${t.id}, '${escAttr(t.title)}'); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 13px; font-weight: 600; background: #10b981; border: none; color: white; display: flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer;">Done</button>
-            <button class="btn" onclick="claimTask(${t.id}); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 13px; font-weight: 600; background: #f59e0b; border: none; color: white; display: flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer;">Take</button>
-            <button class="btn btn-secondary" onclick="skipFreeChore(${t.id});" style="flex: 1; height: 40px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer; border: 1px solid var(--border); background: var(--surface2); color: var(--text);">Skip</button>
+            <button class="btn" onclick="completeHouseTaskFromDetails();" style="flex: 1; height: 40px; font-size: 13px; font-weight: 600; background: #10b981; border: none; color: white; display: flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer;">Done</button>
+            <button class="btn" onclick="claimTask(window.currentChoreDetailsTemplate.id); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 13px; font-weight: 600; background: #f59e0b; border: none; color: white; display: flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer;">Take</button>
+            <button class="btn btn-secondary" onclick="skipFreeChore(window.currentChoreDetailsTemplate.id);" style="flex: 1; height: 40px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer; border: 1px solid var(--border); background: var(--surface2); color: var(--text);">Skip</button>
             <button class="btn btn-secondary" onclick="const el = document.getElementById('moreChoreActions'); el.style.display = (el.style.display === 'none' || el.style.display === '') ? 'flex' : 'none';" style="flex: 1; height: 40px; font-size: 13px; font-weight: 700; display: flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer; border: 1px solid var(--border); background: var(--surface2); color: var(--text);">•••</button>
           </div>
           <!-- Bottom row: Nudge, Shift, Edit, Delete (hidden by default) -->
           <div id="moreChoreActions" style="display: none; gap: 6px; width: 100%;">
-            <button class="btn btn-secondary" onclick="nudgeTask(${t.id}); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; padding: 0 4px;">Nudge</button>
-            <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'chore'); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; padding: 0 4px;">Shift</button>
-            <button class="btn btn-secondary" onclick="editChoreTemplateDirectly(${JSON.stringify(t).replace(/"/g, '&quot;')}); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; padding: 0 4px;">Edit</button>
-            <button class="btn btn-secondary" onclick="deleteChoreTemplate(${t.template_id}); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 12px; font-weight: 600; background: var(--surface3); border: 1px solid var(--border); color: var(--danger); display: flex; align-items: center; justify-content: center; padding: 0 4px;">Delete</button>
+            <button class="btn btn-secondary" onclick="nudgeTask(window.currentChoreDetailsTemplate.id); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; padding: 0 4px;">Nudge</button>
+            <button class="btn btn-secondary" onclick="openShiftModal(window.currentChoreDetailsTemplate.id, 'chore'); closeModal('choreDetailsModal');" style="flex: 1; height: 40px; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; padding: 0 4px;">Shift</button>
+            <button class="btn btn-secondary" onclick="editChoreTemplateFromDetails();" style="flex: 1; height: 40px; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; padding: 0 4px;">Edit</button>
+            <button class="btn btn-secondary" onclick="deleteChoreTemplateFromDetails();" style="flex: 1; height: 40px; font-size: 12px; font-weight: 600; background: var(--surface3); border: 1px solid var(--border); color: var(--danger); display: flex; align-items: center; justify-content: center; padding: 0 4px;">Delete</button>
           </div>
         </div>
       `;
@@ -1554,6 +1605,7 @@ async function openAddFromDatabaseModal() {
       api('GET', '/api/chores/templates'),
       api('GET', '/api/house/tasks')
     ]);
+    window.choresTemplatesList = templates;
     
     const activeTemplateIds = new Set(activeTasks.filter(t => t.status === 'free' || t.status === 'in_progress').map(t => t.template_id));
     const inactive = templates.filter(t => !activeTemplateIds.has(t.id));
@@ -1583,7 +1635,7 @@ async function openAddFromDatabaseModal() {
         nextStr = `${dayStr}.${monthStr}.`;
       }
       return `
-        <div class="task-card house-task" onclick="openChoreDetails(${JSON.stringify(t).replace(/"/g, '&quot;')})" style="margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; padding: 12px 14px;">
+        <div class="task-card house-task" onclick="openChoreTemplateDetails(${t.id})" style="margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; padding: 12px 14px;">
           <div style="font-weight: 500; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1;">
             ${escHtml(stripEmoji(t.title))}
           </div>
