@@ -742,13 +742,19 @@ async def get_house_members(user: User = Depends(get_current_user)):
 
 
 @app.get("/api/house/weekly_goal_explanation")
-async def get_weekly_goal_explanation(user: User = Depends(get_current_user)):
+async def get_weekly_goal_explanation(date: Optional[str] = None, user: User = Depends(get_current_user)):
     from bot.handlers.base import get_house_today_date, calculate_weekly_target_points
     import zoneinfo
-    from datetime import date, datetime, timedelta, timezone
+    from datetime import date as dt_date, datetime, timedelta, timezone
     
     async with AsyncSessionLocal() as session:
-        today = await get_house_today_date(session)
+        if date:
+            try:
+                today = datetime.strptime(date, "%Y-%m-%d").date()
+            except Exception:
+                today = await get_house_today_date(session)
+        else:
+            today = await get_house_today_date(session)
         monday_date = today - timedelta(days=today.weekday())
         
         total_weekly_target_points, breakdown = await calculate_weekly_target_points(session, ACTIVE_HOUSE_ID, today)

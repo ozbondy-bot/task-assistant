@@ -283,14 +283,26 @@ async function loadWeeklyGoal() {
 }
 window.loadWeeklyGoal = loadWeeklyGoal;
 
-async function openWeeklyGoalExplanation() {
+let explanationWeekOffset = 0;
+
+async function openWeeklyGoalExplanation(offset = null) {
+  if (offset !== null && typeof offset === 'number') {
+    explanationWeekOffset = offset;
+  } else {
+    explanationWeekOffset = 0; // Reset to current week
+  }
+
   const body = document.getElementById('weeklyGoalExplanationBody');
   if (!body) return;
   body.innerHTML = `<div class="loading-spinner"><div class="spinner"></div><p>Загрузка...</p></div>`;
   document.getElementById('weeklyGoalExplanationModal').classList.remove('hidden');
   
   try {
-    const data = await api('GET', '/api/house/weekly_goal_explanation');
+    const d = new Date();
+    d.setDate(d.getDate() + (explanationWeekOffset * 7));
+    const targetDateStr = formatLocalDate(d);
+    
+    const data = await api('GET', `/api/house/weekly_goal_explanation?date=${targetDateStr}`);
     
     let templatesHtml = '';
     if (!data.templates.length) {
@@ -320,11 +332,20 @@ async function openWeeklyGoalExplanation() {
       }).join('');
     }
     
+    const startParts = data.start_date.split('-');
+    const endParts = data.end_date.split('-');
+    const label = `${startParts[2]}.${startParts[1]} - ${endParts[2]}.${endParts[1]}`;
+
     const targetsHtml = data.targets.map(t => {
       return `<div style="display: flex; justify-content: space-between;"><span>Цель для ${escHtml(t.name)}:</span><strong>${t.target} ✨</strong></div>`;
     }).join('');
 
     body.innerHTML = `
+      <div style="display: flex; align-items: center; justify-content: space-between; background: var(--surface3); padding: 8px 12px; border-radius: 12px; border: 1px solid var(--border); margin-bottom: 8px; flex-shrink: 0;">
+        <button class="btn-arrow" onclick="openWeeklyGoalExplanation(${explanationWeekOffset - 1})" style="background: none; border: none; color: var(--text); font-size: 16px; cursor: pointer; padding: 4px 8px; font-weight: 700;">←</button>
+        <span style="font-weight: 600; font-size: 13px; color: var(--text);">📅 Неделя: ${label}</span>
+        <button class="btn-arrow" onclick="openWeeklyGoalExplanation(${explanationWeekOffset + 1})" style="background: none; border: none; color: var(--text); font-size: 16px; cursor: pointer; padding: 4px 8px; font-weight: 700;">→</button>
+      </div>
       <p style="margin: 0; line-height: 1.4; color: var(--text);">
         Цель на неделю рассчитывается на основе всех запланированных домашних дел и делится между участниками в отношении 2/3 (первому) и 1/3 (второму).
       </p>
