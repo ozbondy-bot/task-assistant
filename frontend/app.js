@@ -320,15 +320,19 @@ async function openWeeklyGoalExplanation() {
       }).join('');
     }
     
+    const targetsHtml = data.targets.map(t => {
+      return `<div style="display: flex; justify-content: space-between;"><span>Цель для ${escHtml(t.name)}:</span><strong>${t.target} ✨</strong></div>`;
+    }).join('');
+
     body.innerHTML = `
       <p style="margin: 0; line-height: 1.4; color: var(--text);">
-        Цель каждого участника на неделю рассчитывается как сумма очков всех запланированных задач дома, деленная на число участников.
+        Цель на неделю рассчитывается на основе всех запланированных домашних дел и делится между участниками в отношении 2/3 (первому) и 1/3 (второму).
       </p>
       <div style="background: var(--surface3); padding: 12px; border-radius: 12px; margin: 4px 0; display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--border);">
-        <div style="display: flex; justify-content: space-between;"><span>Общая сумма очков дома:</span><strong>${data.total_points} ✨</strong></div>
+        <div style="display: flex; justify-content: space-between;"><span>Сумма очков дома за неделю:</span><strong>${data.total_points} ✨</strong></div>
         <div style="display: flex; justify-content: space-between;"><span>Количество участников:</span><strong>${data.num_members}</strong></div>
-        <div style="font-size: 14px; margin-top: 6px; border-top: 1px solid var(--border); padding-top: 6px; display: flex; justify-content: space-between; color: var(--accent2);">
-          <span>Цель на каждого:</span><strong>${data.target_points} ✨</strong>
+        <div style="margin-top: 6px; border-top: 1px solid var(--border); padding-top: 6px; display: flex; flex-direction: column; gap: 6px; color: var(--accent2);">
+          ${targetsHtml}
         </div>
       </div>
       <h4 style="margin: 8px 0 2px 0; color: var(--text); font-size: 14px;">Список планируемых задач:</h4>

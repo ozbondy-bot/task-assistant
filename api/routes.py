@@ -759,13 +759,25 @@ async def get_weekly_goal_explanation(user: User = Depends(get_current_user)):
         members = result.scalars().all()
         num_members = len(members)
         
+        # Sort members by ID for consistency in target splitting
+        sorted_members = sorted(members, key=lambda m: m.id)
+        targets = []
+        for index, m in enumerate(sorted_members):
+            member_target = int(total_weekly_target_points * 2 / 3) if index == 0 else int(total_weekly_target_points * 1 / 3)
+            if member_target < 1:
+                member_target = 1
+            targets.append({
+                "name": m.display_name or m.username or "Участник",
+                "target": member_target
+            })
+            
     return {
         "start_date": str(monday_date),
         "end_date": str(monday_date + timedelta(days=6)),
         "templates": breakdown,
         "total_points": total_weekly_target_points,
         "num_members": num_members,
-        "target_points": target_points
+        "targets": targets
     }
 
 
