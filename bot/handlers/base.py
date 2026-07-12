@@ -101,15 +101,16 @@ async def handle_approve_action(call: types.CallbackQuery, db_user: User = None)
                     pass
                 return
                 
-            field = payload["field"]
             old_title = tmpl.title
-            if field == "title":
-                tmpl.title = payload["new_value"]
-            elif field == "points":
-                tmpl.points = payload["new_value"]
-            elif field == "periodicity":
-                tmpl.periodicity = payload["periodicity"]
-                tmpl.period_days = payload["period_days"]
+            tmpl.title = payload.get("title", tmpl.title)
+            tmpl.points = payload.get("points", tmpl.points)
+            tmpl.periodicity = payload.get("periodicity", tmpl.periodicity)
+            tmpl.period_days = payload.get("period_days", tmpl.period_days)
+            if "start_date" in payload and payload["start_date"]:
+                try:
+                    tmpl.start_date = datetime.strptime(payload["start_date"], "%Y-%m-%d").date()
+                except Exception:
+                    pass
                 
             await session.commit()
             
@@ -154,6 +155,13 @@ async def handle_approve_action(call: types.CallbackQuery, db_user: User = None)
         await session.delete(pending)
         await session.commit()
 
+        try:
+            from api.routes import manager
+            import asyncio
+            asyncio.create_task(manager.broadcast_refresh(ACTIVE_HOUSE_ID))
+        except Exception as e:
+            logger.error(f"Failed to broadcast websocket refresh from bot approve: {e}")
+
 
 @dp.callback_query(F.data.startswith("reject_act:"))
 async def handle_reject_action(call: types.CallbackQuery, db_user: User = None):
@@ -192,6 +200,13 @@ async def handle_reject_action(call: types.CallbackQuery, db_user: User = None):
                 
         await session.delete(pending)
         await session.commit()
+
+        try:
+            from api.routes import manager
+            import asyncio
+            asyncio.create_task(manager.broadcast_refresh(ACTIVE_HOUSE_ID))
+        except Exception as e:
+            logger.error(f"Failed to broadcast websocket refresh from bot reject: {e}")
 
 
 async def send_morning_message():

@@ -89,7 +89,88 @@ document.addEventListener('DOMContentLoaded', () => {
   setupModals();
   setupFABs();
   loadWeeklyGoal();
+  preloadCurrentWeek();
+  connectWebSocket();
 });
+
+let ws;
+function connectWebSocket() {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${protocol}//${window.location.host}/api/ws?token=${encodeURIComponent(initData)}`;
+  
+  ws = new WebSocket(wsUrl);
+  
+  ws.onmessage = (event) => {
+    try {
+      const msg = JSON.parse(event.data);
+      if (msg.type === 'refresh') {
+        showToast('🔄 Обновление данных...');
+        // Clear caches
+        window.tasksCache = {};
+        window.personalTasksCache = {};
+        window.houseMembersList = null;
+        // Reload active views
+        const activeTab = document.querySelector('.tab-btn.active')?.dataset.tab;
+        if (activeTab === 'house') {
+          loadHouseTab();
+        } else if (activeTab === 'personal') {
+          loadPersonalTab();
+        } else if (activeTab === 'shopping') {
+          loadShoppingTab();
+        }
+        loadWeeklyGoal();
+      }
+    } catch (e) {
+      console.error("WS message error:", e);
+    }
+  };
+  
+  ws.onclose = () => {
+    // Reconnect after 3 seconds
+    setTimeout(connectWebSocket, 3000);
+  };
+  
+  ws.onerror = (e) => {
+    console.warn("WS connection error:", e);
+  };
+}
+window.connectWebSocket = connectWebSocket;
+
+function preloadCurrentWeek() {
+  const today = new Date();
+  let dayOfWeek = today.getDay(); // 0 is Sunday, 1-6 is Mon-Sat
+  if (dayOfWeek === 0) dayOfWeek = 7; // Treat Sunday as 7
+  
+  // Start date of the week (Monday)
+  const monday = new Date(today);
+  monday.setDate(today.getDate() - (dayOfWeek - 1));
+  
+  window.personalTasksCache = window.personalTasksCache || {};
+  window.tasksCache = window.tasksCache || {};
+
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    const dateStr = formatLocalDate(d);
+    
+    // 1. Fetch house chores
+    api('GET', `/api/house/tasks?date=${dateStr}`, null, true).then(freshTasks => {
+      window.tasksCache[dateStr] = freshTasks;
+      if (getHouseActiveDateStr() === dateStr) {
+        renderHouseTasks(freshTasks);
+      }
+    }).catch(e => console.warn("Failed to preload house tasks for " + dateStr, e));
+    
+    // 2. Fetch personal tasks
+    api('GET', `/api/tasks/today?date=${dateStr}`, null, true).then(fresh => {
+      window.personalTasksCache[dateStr] = fresh;
+      if (getPersonalActiveDateStr() === dateStr) {
+        renderPersonalTasks(fresh.personal, fresh.household);
+      }
+    }).catch(e => console.warn("Failed to preload personal tasks for " + dateStr, e));
+  }
+}
+window.preloadCurrentWeek = preloadCurrentWeek;
 
 // ── API Helper ───────────────────────────────────────────────────────────────
 function formatLocalDate(d) {
@@ -155,6 +236,7 @@ function hideLoadingOverlay() {
 async function api(method, path, body = null, silent = false) {
   if (method !== 'GET') {
     window.tasksCache = {};
+    window.personalTasksCache = {};
     window.houseMembersList = null;
   }
   if (!silent) {
@@ -389,8 +471,9 @@ async function loadHouseTab() {
         const isCooking = t.title && (t.title.toLowerCase().includes('готов') || t.title.toLowerCase().includes('cook'));
         points += isCooking ? 10 : (t.points || 0);
       }
-      const counterEl = document.getElementById('tabHouseCounter');
-      if (counterEl) counterEl.textContent = `(${count}|${points})`;
+      window.currentTodayCounterText = `(${count}|${points})`;
+      const counterEl = document.getElementById('headerTodayCounter');
+      if (counterEl) counterEl.textContent = window.currentTodayCounterText;
     } else {
       updateHouseTabCounter();
     }
@@ -419,8 +502,9 @@ async function updateHouseTabCounter() {
       const isCooking = t.title && (t.title.toLowerCase().includes('готов') || t.title.toLowerCase().includes('cook'));
       points += isCooking ? 10 : (t.points || 0);
     }
-    const counterEl = document.getElementById('tabHouseCounter');
-    if (counterEl) counterEl.textContent = `(${count}|${points})`;
+    window.currentTodayCounterText = `(${count}|${points})`;
+    const counterEl = document.getElementById('headerTodayCounter');
+    if (counterEl) counterEl.textContent = window.currentTodayCounterText;
   } catch (e) {
     console.error("Failed to update house tab counter", e);
   }
@@ -501,11 +585,17 @@ function renderMembers(members) {
   let html = '';
   if (m1) {
     const isMeStyle = m1.is_me ? 'font-weight: 700; color: var(--accent);' : 'color: var(--text1);';
-    html += `<span style="${isMeStyle} text-align: left; flex: 1;">${escHtml(m1.display_name || 'Участник')}: ${m1.weekly_earned}/${m1.weekly_target} ✨</span>`;
+    html += `<span style="${isMeStyle} text-align: left; flex: 1; white-space: nowrap;">${escHtml(m1.display_name || 'Участник')}: ${m1.weekly_earned}/${m1.weekly_target} ✨</span>`;
+  } else {
+    html += `<span style="flex: 1;"></span>`;
   }
+  
+  const counterText = window.currentTodayCounterText || '(0|0)';
+  html += `<span id="headerTodayCounter" style="text-align: center; flex: 0 0 auto; color: var(--text3); font-weight: 600; font-size: 12px; padding: 0 8px; white-space: nowrap;">${counterText}</span>`;
+  
   if (m2) {
     const isMeStyle = m2.is_me ? 'font-weight: 700; color: var(--accent);' : 'color: var(--text1);';
-    html += `<span style="${isMeStyle} text-align: right; flex: 1;">${escHtml(m2.display_name || 'Участник')}: ${m2.weekly_earned}/${m2.weekly_target} ✨</span>`;
+    html += `<span style="${isMeStyle} text-align: right; flex: 1; white-space: nowrap;">${escHtml(m2.display_name || 'Участник')}: ${m2.weekly_earned}/${m2.weekly_target} ✨</span>`;
   } else {
     html += `<span style="flex: 1;"></span>`;
   }
@@ -588,17 +678,42 @@ window.shiftShoppingDay = shiftShoppingDay;
 
 async function loadPersonalTab() {
   const list = document.getElementById('personalTasksList');
-  showSpinnerIfNeeded(list, '.task-card');
+  const dateStr = getPersonalActiveDateStr();
+  
+  window.personalTasksCache = window.personalTasksCache || {};
+  const hasCached = !!window.personalTasksCache[dateStr];
+  if (!hasCached) {
+    showSpinnerIfNeeded(list, '.task-card');
+  }
 
   const display = document.getElementById('personalActiveDateDisplay');
   if (display) display.textContent = getPersonalActiveDateLabel();
 
-  const dateStr = getPersonalActiveDateStr();
   try {
-    const data = await api('GET', `/api/tasks/today?date=${dateStr}`);
-    renderPersonalTasks(data.personal, data.household);
+    let tasksPromise;
+    if (hasCached) {
+      const cached = window.personalTasksCache[dateStr];
+      renderPersonalTasks(cached.personal, cached.household);
+      
+      tasksPromise = api('GET', `/api/tasks/today?date=${dateStr}`, null, true).then(fresh => {
+        if (JSON.stringify(window.personalTasksCache[dateStr]) !== JSON.stringify(fresh)) {
+          window.personalTasksCache[dateStr] = fresh;
+          renderPersonalTasks(fresh.personal, fresh.household);
+        }
+        return fresh;
+      });
+    } else {
+      tasksPromise = api('GET', `/api/tasks/today?date=${dateStr}`).then(fresh => {
+        window.personalTasksCache[dateStr] = fresh;
+        renderPersonalTasks(fresh.personal, fresh.household);
+        return fresh;
+      });
+    }
+    await tasksPromise;
   } catch (e) {
-    list.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-title">Ошибка</div><div class="empty-sub">${e.message}</div></div>`;
+    if (!window.personalTasksCache[dateStr]) {
+      list.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-title">Ошибка</div><div class="empty-sub">${e.message}</div></div>`;
+    }
   }
 }
 
@@ -710,6 +825,18 @@ function checkEmptyPersonal() {
   }
 }
 
+function toggleTaskPeriodDays(val) {
+  const grp = document.getElementById('taskPeriodDaysGroup');
+  if (grp) {
+    if (val === 'every_x_days') {
+      grp.classList.remove('hidden');
+    } else {
+      grp.classList.add('hidden');
+    }
+  }
+}
+window.toggleTaskPeriodDays = toggleTaskPeriodDays;
+
 // ── Add Task Modal ────────────────────────────────────────────────────────────
 function setupModals() {
   document.getElementById('cancelTaskBtn').addEventListener('click', () => {
@@ -720,13 +847,20 @@ function setupModals() {
     const text = document.getElementById('newTaskInput').value.trim();
     if (!text) return;
     const date = document.getElementById('newTaskDate').value || null;
-    const recurrence = document.getElementById('newTaskRecurrence').value || null;
+    let recurrence = document.getElementById('newTaskRecurrence').value || null;
+    if (recurrence === 'every_x_days') {
+      const daysInput = document.getElementById('taskTmplPeriodDays');
+      const days = parseInt(daysInput ? daysInput.value : 3) || 3;
+      recurrence = `every_x_days:${days}`;
+    }
     
     // Snappy modal close
     document.getElementById('addTaskModal').classList.add('hidden');
     document.getElementById('newTaskInput').value = '';
     document.getElementById('newTaskDate').value = '';
     document.getElementById('newTaskRecurrence').value = '';
+    const grp = document.getElementById('taskPeriodDaysGroup');
+    if (grp) grp.classList.add('hidden');
     
     try {
       await api('POST', '/api/tasks', { text, date, recurrence });
@@ -778,8 +912,12 @@ function setupModals() {
     if (!title) return;
     try {
       if (currentEditingTemplateId) {
-        await api('PUT', `/api/chores/templates/${currentEditingTemplateId}`, { title, points, periodicity, period_days: periodDays });
-        showToast('✅ Шаблон сохранен!');
+        const res = await api('PUT', `/api/chores/templates/${currentEditingTemplateId}`, { title, points, periodicity, period_days: periodDays });
+        if (res && res.pending) {
+          showToast(res.message || '⏳ Запрос на изменение отправлен партнёру!');
+        } else {
+          showToast('✅ Шаблон сохранен!');
+        }
       } else {
         const res = await api('POST', '/api/chores/templates', { title, points, periodicity, period_days: periodDays });
         if (res && res.pending) {
@@ -1038,7 +1176,13 @@ function periodLabel(p, days) {
 
 function recLabel(r) {
   const m = { daily:'Ежедневно', weekly:'Еженед.', biweekly:'Раз в 2 нед.', monthly:'Ежемес.' };
-  return m[r] || r;
+  if (m[r]) return m[r];
+  if (r && (r.startsWith('every_x_days:') || r.startsWith('everyxdays:'))) {
+    const parts = r.split(':');
+    const d = parts[1] || '3';
+    return `Раз в ${d} дн.`;
+  }
+  return r;
 }
 
 // ── Settings Tab & Actions ───────────────────────────────────────────────────

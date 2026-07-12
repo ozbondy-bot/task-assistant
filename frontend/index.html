@@ -28,10 +28,7 @@
     <nav class="tab-nav">
       <button class="tab-btn active" data-tab="house" id="tabHouse">
         <span class="tab-icon">🏠</span>
-        <div class="tab-label" style="display:flex; flex-direction:column; align-items:center; gap:1px; line-height:1.1;">
-          <span>Дом</span>
-          <span id="tabHouseCounter" style="font-size: 9px; font-weight: 600; color: var(--text3); opacity: 0.85;">(0|0)</span>
-        </div>
+        <span class="tab-label">Дом</span>
       </button>
       <button class="tab-btn" data-tab="personal" id="tabPersonal">
         <span class="tab-icon">👤</span>
@@ -87,12 +84,14 @@
             </div>
             <div class="form-group" style="margin-top: 8px">
               <label>Повторение (необязательно)</label>
-              <select id="newTaskRecurrence" style="width:100%">
+              <select id="newTaskRecurrence" style="width:100%" onchange="toggleTaskPeriodDays(this.value)">
                 <option value="">Без повторения</option>
-                <option value="daily">Каждый день</option>
-                <option value="weekly">Каждую неделю</option>
-                <option value="monthly">Каждый месяц</option>
+                <option value="every_x_days">Раз в X дней</option>
               </select>
+            </div>
+            <div class="form-group hidden" id="taskPeriodDaysGroup" style="margin-top: 8px">
+              <label>Интервал в днях</label>
+              <input id="taskTmplPeriodDays" type="number" placeholder="Например: 3" min="1" value="3" style="width:100%" />
             </div>
             <div class="modal-actions">
               <button class="btn btn-ghost" id="cancelTaskBtn">Отмена</button>

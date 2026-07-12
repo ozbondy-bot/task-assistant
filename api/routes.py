@@ -3,10 +3,37 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Header, Depends, Request
+from fastapi import FastAPI, HTTPException, Header, Depends, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections = {}
+
+    async def connect(self, house_id: int, websocket: WebSocket):
+        await websocket.accept()
+        if house_id not in self.active_connections:
+            self.active_connections[house_id] = []
+        self.active_connections[house_id].append(websocket)
+
+    def disconnect(self, house_id: int, websocket: WebSocket):
+        if house_id in self.active_connections:
+            if websocket in self.active_connections[house_id]:
+                self.active_connections[house_id].remove(websocket)
+            if not self.active_connections[house_id]:
+                del self.active_connections[house_id]
+
+    async def broadcast_refresh(self, house_id: int):
+        if house_id in self.active_connections:
+            for connection in self.active_connections[house_id]:
+                try:
+                    await connection.send_json({"type": "refresh"})
+                except Exception:
+                    pass
+
+manager = ConnectionManager()
 from sqlalchemy import select, and_, delete, update, func, or_, text
 
 import sys
@@ -54,6 +81,27 @@ async def save_log_async(path: str, method: str, duration_ms: int):
         logger.error(f"Failed to save request log: {e}")
 
 
+@app.websocket("/api/ws")
+async def websocket_endpoint(websocket: WebSocket, token: str):
+    from api.auth import validate_telegram_init_data
+    
+    house_id = ACTIVE_HOUSE_ID
+    if token != "dev_mock":
+        user_data = validate_telegram_init_data(token, BOT_TOKEN)
+        if not user_data:
+            await websocket.close(code=4003)
+            return
+            
+    await manager.connect(house_id, websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(house_id, websocket)
+    except Exception:
+        manager.disconnect(house_id, websocket)
+
+
 @app.middleware("http")
 async def log_request_time(request: Request, call_next):
     start_time = time.time()
@@ -64,6 +112,21 @@ async def log_request_time(request: Request, call_next):
         import asyncio
         asyncio.create_task(save_log_async(request.url.path, request.method, duration_ms))
             
+    return response
+
+
+@app.middleware("http")
+async def websocket_refresh_middleware(request: Request, call_next):
+    response = await call_next(request)
+    if (
+        request.method in ["POST", "PUT", "DELETE"]
+        and request.url.path.startswith("/api/")
+        and not request.url.path.endswith("/log/action")
+        and not request.url.path.endswith("/nudge")
+        and 200 <= response.status_code < 300
+    ):
+        import asyncio
+        asyncio.create_task(manager.broadcast_refresh(ACTIVE_HOUSE_ID))
     return response
 
 
@@ -578,10 +641,7 @@ async def complete_house_task(instance_id: int, points: Optional[int] = None, us
         if points is not None:
             pts = points
         else:
-            if tmpl and tmpl.title == "Готовка":
-                pts = 5  # default cooking points
-            else:
-                pts = tmpl.points if tmpl else 1
+            pts = tmpl.points if tmpl else 1
         db_user.points = (db_user.points or 0) + pts
 
         # Record completion
@@ -1227,19 +1287,63 @@ async def update_chore_template(template_id: int, req: CreateTemplateRequest, us
         p_days = 30
 
     async with AsyncSessionLocal() as session:
+        from bot.handlers.base import get_partner_user, bot
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        from aiogram.types import InlineKeyboardButton
+        import json
+        
         tmpl = await session.get(TaskTemplate, template_id)
         if not tmpl or tmpl.house_id != ACTIVE_HOUSE_ID:
             raise HTTPException(status_code=404, detail="Template not found")
             
-        tmpl.title = req.title
-        tmpl.points = req.points
-        tmpl.periodicity = req.periodicity
-        tmpl.period_days = p_days
-        if start_date:
-            tmpl.start_date = start_date
+        partner = await get_partner_user(session, user.id)
+        if partner:
+            pending = PendingAction(
+                house_id=ACTIVE_HOUSE_ID,
+                initiator_id=user.id,
+                action_type="edit_template",
+                data_payload=json.dumps({
+                    "template_id": template_id,
+                    "title": req.title,
+                    "points": req.points,
+                    "periodicity": req.periodicity,
+                    "period_days": p_days,
+                    "start_date": req.start_date
+                })
+            )
+            session.add(pending)
+            await session.commit()
+            await session.refresh(pending)
             
-        await session.commit()
-    return {"ok": True}
+            p_map = {"daily": "Каждый день", "weekly": "Каждую неделю", "monthly": "Каждый месяц", "every_x_days": f"Раз в {p_days} дн."}
+            p_label = p_map.get(req.periodicity, req.periodicity)
+            
+            partner_text = (
+                f"🔔 *Согласование изменения задачи!*\n\n"
+                f"*{user.display_name or user.username or 'Партнёр'}* хочет изменить домашнюю задачу:\n"
+                f"📝 *Было:* {tmpl.title} ({tmpl.points} ✨, {p_map.get(tmpl.periodicity, tmpl.periodicity)})\n"
+                f"✨ *Станет:* {req.title} ({req.points} ✨, {p_label})\n\n"
+                f"Одобряете изменения?"
+            )
+            builder = InlineKeyboardBuilder()
+            builder.row(
+                InlineKeyboardButton(text="✅ Одобрить", callback_data=f"approve_act:{pending.id}"),
+                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_act:{pending.id}")
+            )
+            try:
+                await bot.send_message(chat_id=partner.telegram_id, text=partner_text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+            except Exception as e:
+                logger.error(f"Failed to send approval message to partner: {e}")
+            return {"ok": True, "pending": True, "message": "⏳ Запрос на изменение отправлен партнёру!"}
+        else:
+            tmpl.title = req.title
+            tmpl.points = req.points
+            tmpl.periodicity = req.periodicity
+            tmpl.period_days = p_days
+            if start_date:
+                tmpl.start_date = start_date
+            await session.commit()
+            return {"ok": True}
 
 @app.delete("/api/chores/templates/{template_id}")
 async def delete_chore_template(template_id: int, user: User = Depends(get_current_user)):
@@ -1695,7 +1799,6 @@ async def get_shopping_archive(page: int = 0, limit: int = 10, user: User = Depe
 
 @app.on_event("startup")
 async def startup_db_cleanup():
-    from bot.handlers.base import ALLOWED_TELEGRAM_IDS, ACTIVE_HOUSE_ID
     async with AsyncSessionLocal() as session:
         # Create request_logs table if not exists
         await session.execute(text("""
@@ -1717,83 +1820,6 @@ async def startup_db_cleanup():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """))
-        await session.commit()
-
-        # 1. Clean unauthorized users
-        result = await session.execute(select(User))
-        users = result.scalars().all()
-        for u in users:
-            if u.telegram_id not in ALLOWED_TELEGRAM_IDS:
-                logger.info(f"Removing unauthorized user {u.username} (id: {u.telegram_id}) from house {ACTIVE_HOUSE_ID}")
-                await session.execute(delete(Completion).where(Completion.user_id == u.id))
-                await session.execute(delete(RewardPurchase).where(RewardPurchase.user_id == u.id))
-                await session.execute(delete(PersonalTask).where(PersonalTask.user_id == u.id))
-                await session.delete(u)
-        
-        # 2. Fix cooking template (if title matches 'готовка' or 'готовить' case-insensitive and points is 0)
-        tmpl_res = await session.execute(
-            select(TaskTemplate).where(
-                and_(
-                    TaskTemplate.house_id == ACTIVE_HOUSE_ID,
-                    TaskTemplate.points == 0
-                )
-            )
-        )
-        templates = tmpl_res.scalars().all()
-        for t in templates:
-            if "готов" in t.title.lower():
-                logger.info(f"Updating points of task template '{t.title}' to 15 (was 0)")
-                t.points = 15
-                
-        # 3. Reset points earned on or before July 5th, 2026 inclusive
-        # July 5th 23:59:59 MSK is July 5th 20:59:59 UTC
-        cutoff_dt = datetime(2026, 7, 5, 21, 0, 0)
-        await session.execute(
-            update(Completion)
-            .where(Completion.created_at <= cutoff_dt)
-            .values(points=0)
-        )
-        
-        # Recalculate each user's points
-        for u in users:
-            sum_points = await session.scalar(
-                select(func.sum(Completion.points))
-                .where(Completion.user_id == u.id)
-            ) or 0
-            u.points = sum_points
-            
-        # 4. Clean duplicate task instances (same template_id and date)
-        from collections import defaultdict
-        inst_res = await session.execute(select(TaskInstance))
-        instances = inst_res.scalars().all()
-        
-        groups = defaultdict(list)
-        for inst in instances:
-            groups[(inst.template_id, inst.date)].append(inst)
-            
-        duplicates = {k: v for k, v in groups.items() if len(v) > 1}
-        for (tmpl_id, d), inst_list in duplicates.items():
-            inst_ids = [inst.id for inst in inst_list]
-            comp_res = await session.execute(
-                select(Completion.task_instance_id).where(Completion.task_instance_id.in_(inst_ids))
-            )
-            completed_inst_ids = set(comp_res.scalars().all())
-            
-            def sort_key(inst):
-                is_completed = 1 if inst.id in completed_inst_ids else 0
-                is_done = 1 if inst.status == 'done' else 0
-                return (is_completed, is_done, -inst.id)
-                
-            sorted_insts = sorted(inst_list, key=sort_key, reverse=True)
-            keep_inst = sorted_insts[0]
-            delete_insts = sorted_insts[1:]
-            
-            for inst in delete_insts:
-                await session.execute(
-                    delete(Completion).where(Completion.task_instance_id == inst.id)
-                )
-                await session.delete(inst)
-            
         await session.commit()
 
 
