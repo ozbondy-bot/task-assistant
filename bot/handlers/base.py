@@ -1300,15 +1300,9 @@ async def calculate_weekly_target_points(session: AsyncSession, house_id: int, t
                     elif inst.status in ["free", "in_progress"]:
                         # Only count uncompleted tasks if the date is today or in the future
                         if curr_d >= real_today:
-                            if p == "every_x_days":
-                                if is_next_occ_day:
-                                    occurrences += 1
-                                    planned_dates.append(curr_d.strftime("%d.%m"))
-                                    tmpl_points_sum += tmpl.points
-                            else:
-                                occurrences += 1
-                                planned_dates.append(curr_d.strftime("%d.%m"))
-                                tmpl_points_sum += tmpl.points
+                            occurrences += 1
+                            planned_dates.append(curr_d.strftime("%d.%m"))
+                            tmpl_points_sum += tmpl.points
                 # Still advance next_occ if today was the scheduled date
                 if is_next_occ_day:
                     if p == "every_x_days":
