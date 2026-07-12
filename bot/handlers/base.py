@@ -583,13 +583,33 @@ async def generate_daily_chores_if_needed(session, house_id: int):
                     if pos == target_q_month:
                         scheduled_dates.append(curr_d)
         elif p == "every_x_days":
-            anchor = tmpl.start_date or monday_date
-            if anchor < monday_date:
-                diff = (monday_date - anchor).days
+            # Determine the next scheduled occurrence based on actual last completion (last_done)
+            last_done = await session.scalar(
+                select(func.max(TaskInstance.date))
+                .where(and_(
+                    TaskInstance.template_id == tmpl.id,
+                    TaskInstance.status == "done",
+                    TaskInstance.date < monday_date
+                ))
+            )
+            active_inst_date = await session.scalar(
+                select(func.min(TaskInstance.date))
+                .where(and_(
+                    TaskInstance.template_id == tmpl.id,
+                    TaskInstance.status.in_(["free", "in_progress"]),
+                    TaskInstance.date < monday_date
+                ))
+            )
+            
+            ref_date = active_inst_date or last_done or tmpl.start_date or (monday_date - timedelta(days=1))
+            next_occ = ref_date + timedelta(days=days)
+            
+            if next_occ < monday_date:
+                diff = (monday_date - next_occ).days
                 k = (diff + days - 1) // days
-                first_occ = anchor + timedelta(days=k * days)
+                first_occ = next_occ + timedelta(days=k * days)
             else:
-                first_occ = anchor
+                first_occ = next_occ
                 
             curr_occ = first_occ
             while curr_occ <= sunday_date:
@@ -763,8 +783,10 @@ async def cmd_raschet(message: types.Message):
             ) or 0
             
             # Split target 2/3 for participant 1, 1/3 for participant 2
-            if len(sorted_members) >= 2:
-                member_target = int(total_weekly_target_points * 2 / 3) if index == 0 else int(total_weekly_target_points * 1 / 3)
+            if len(sorted_members) == 2:
+                member_target = round(total_weekly_target_points * 2 / 3) if index == 0 else (total_weekly_target_points - round(total_weekly_target_points * 2 / 3))
+            elif len(sorted_members) >= 3:
+                member_target = int(total_weekly_target_points / len(sorted_members))
             else:
                 member_target = total_weekly_target_points
             
@@ -1115,8 +1137,8 @@ async def get_template_next_date_val(session: AsyncSession, t: TaskTemplate, tod
         )
     active_inst_date = active_inst_result.scalar()
 
-    # Compute next execution date based on true last handled and active dates
-    nd = get_template_next_date(t, last_handled, active_inst_date, today_date)
+    # Compute next execution date based on true last completed and active dates
+    nd = get_template_next_date(t, last_done, active_inst_date, today_date)
     return last_done, nd
 
 
@@ -1190,7 +1212,7 @@ async def calculate_weekly_target_points(session: AsyncSession, house_id: int, t
         l_done = last_done_map.get(tmpl.id)
         l_handled = last_handled_map.get(tmpl.id)
         act_inst = active_inst_map.get(tmpl.id)
-        next_occ = get_template_next_date(tmpl, l_handled, act_inst, base_date)
+        next_occ = get_template_next_date(tmpl, l_done, act_inst, base_date)
         
         if tmpl.periodicity == "every_x_days" and next_occ < base_date:
             days = tmpl.period_days or 1
@@ -1315,6 +1337,7 @@ async def calculate_weekly_target_points(session: AsyncSession, house_id: int, t
             templates_detail.append({
                 "title": tmpl.title,
                 "periodicity": tmpl.periodicity,
+                "period_label": get_period_label(tmpl),
                 "points": tmpl.points,
                 "occurrences": occurrences,
                 "total": tmpl_points_sum,

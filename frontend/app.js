@@ -344,7 +344,7 @@ async function openWeeklyGoalExplanation(offset = null) {
               <span style="font-weight: 600; font-size: 12px; color: var(--accent2); flex-shrink: 0;">+${t.total} ✨</span>
             </div>
             <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 11px; color: var(--text2);">
-              <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; padding-right: 8px;">${recLabel(t.periodicity)} • ${t.points} ✨ • 📅 ${datesHtml}</span>
+              <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; padding-right: 8px;">${escHtml(t.period_label || recLabel(t.periodicity))} • ${t.points} ✨ • 📅 ${datesHtml}</span>
               <span style="flex-shrink: 0; font-weight: 500;">${t.occurrences} р/нед</span>
             </div>
           </div>
@@ -425,18 +425,13 @@ function copyWeeklyGoalExplanation() {
       const done = t.done_dates || [];
       const plan = t.planned_dates || [];
       if (done.length || plan.length) {
-        const doneText = done.length ? `[вып: ${done.join(', ')}]` : '';
-        const planText = plan.length ? `[план: ${plan.join(', ')}]` : '';
+        const doneText = done.length ? `[✅ вып: ${done.join(', ')}]` : '';
+        const planText = plan.length ? `[📅 план: ${plan.join(', ')}]` : '';
         const sep = doneText && planText ? ' ' : '';
         datesStr = ` (${doneText}${sep}${planText})`;
       }
       
-      let rec = t.periodicity;
-      if (rec === 'daily') rec = 'ежедневно';
-      else if (rec === 'weekly') rec = 'раз в неделю';
-      else if (rec === 'every_x_days') rec = `раз в ${t.period_days || 1} дн`;
-      else if (rec === 'once') rec = 'один раз';
-      
+      const rec = t.period_label || t.periodicity;
       text += `• ${t.title} (+${t.total} ✨) — ${rec} • ${t.points} ✨ за раз • ${t.occurrences} р/нед${datesStr}\n`;
     });
   }

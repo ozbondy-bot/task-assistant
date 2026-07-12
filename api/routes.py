@@ -726,8 +726,10 @@ async def get_house_members(date: Optional[str] = None, user: User = Depends(get
             earned = earned_map.get(m.id, 0)
             
             # Split target 2/3 for first, 1/3 for second member
-            if len(sorted_members) >= 2:
-                member_target = int(total_weekly_target_points * 2 / 3) if index == 0 else int(total_weekly_target_points * 1 / 3)
+            if len(sorted_members) == 2:
+                member_target = round(total_weekly_target_points * 2 / 3) if index == 0 else (total_weekly_target_points - round(total_weekly_target_points * 2 / 3))
+            elif len(sorted_members) >= 3:
+                member_target = int(total_weekly_target_points / len(sorted_members))
             else:
                 member_target = total_weekly_target_points
                 
@@ -775,7 +777,12 @@ async def get_weekly_goal_explanation(date: Optional[str] = None, user: User = D
         sorted_members = sorted(members, key=lambda m: m.id)
         targets = []
         for index, m in enumerate(sorted_members):
-            member_target = int(total_weekly_target_points * 2 / 3) if index == 0 else int(total_weekly_target_points * 1 / 3)
+            if len(sorted_members) == 2:
+                member_target = round(total_weekly_target_points * 2 / 3) if index == 0 else (total_weekly_target_points - round(total_weekly_target_points * 2 / 3))
+            elif len(sorted_members) >= 3:
+                member_target = int(total_weekly_target_points / len(sorted_members))
+            else:
+                member_target = total_weekly_target_points
             if member_target < 1:
                 member_target = 1
             targets.append({
