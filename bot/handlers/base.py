@@ -621,6 +621,22 @@ async def generate_daily_chores_if_needed(session, house_id: int):
             if monday_date <= anchor <= sunday_date:
                 scheduled_dates.append(anchor)
 
+        # Clean up any incorrect future/uncompleted instances of this template for this week
+        if p in ("every_x_days", "once"):
+            existing_uncompleted = (await session.execute(
+                select(TaskInstance)
+                .where(and_(
+                    TaskInstance.template_id == tmpl.id,
+                    TaskInstance.date.between(monday_date, sunday_date),
+                    TaskInstance.status.in_(["free", "in_progress"])
+                ))
+            )).scalars().all()
+            
+            for inst in existing_uncompleted:
+                if inst.date not in scheduled_dates:
+                    await session.delete(inst)
+            await session.flush()
+
         # Insert instances for scheduled dates if they do not exist
         for s_date in scheduled_dates:
             if tmpl.start_date and s_date < tmpl.start_date:
@@ -1284,9 +1300,15 @@ async def calculate_weekly_target_points(session: AsyncSession, house_id: int, t
                     elif inst.status in ["free", "in_progress"]:
                         # Only count uncompleted tasks if the date is today or in the future
                         if curr_d >= real_today:
-                            occurrences += 1
-                            planned_dates.append(curr_d.strftime("%d.%m"))
-                            tmpl_points_sum += tmpl.points
+                            if p == "every_x_days":
+                                if is_next_occ_day:
+                                    occurrences += 1
+                                    planned_dates.append(curr_d.strftime("%d.%m"))
+                                    tmpl_points_sum += tmpl.points
+                            else:
+                                occurrences += 1
+                                planned_dates.append(curr_d.strftime("%d.%m"))
+                                tmpl_points_sum += tmpl.points
                 # Still advance next_occ if today was the scheduled date
                 if is_next_occ_day:
                     if p == "every_x_days":
