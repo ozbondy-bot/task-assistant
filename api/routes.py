@@ -670,14 +670,20 @@ async def unclaim_house_task(instance_id: int, user: User = Depends(get_current_
 
 # -- House info & members --
 @app.get("/api/house/members")
-async def get_house_members(user: User = Depends(get_current_user)):
+async def get_house_members(date: Optional[str] = None, user: User = Depends(get_current_user)):
     from bot.handlers.base import get_house_today_date, calculate_weekly_target_points
     import zoneinfo
-    from datetime import date, datetime, timedelta, timezone
+    from datetime import date as dt_date, datetime, timedelta, timezone
     
     async with AsyncSessionLocal() as session:
-        today = await get_house_today_date(session)
-        
+        if date:
+            try:
+                today = datetime.strptime(date, "%Y-%m-%d").date()
+            except Exception:
+                today = await get_house_today_date(session)
+        else:
+            today = await get_house_today_date(session)
+            
         # Calculate calendar week range in Europe/Moscow
         msk_tz = zoneinfo.ZoneInfo("Europe/Moscow")
         monday_date = today - timedelta(days=today.weekday())

@@ -248,7 +248,12 @@ async function api(method, path, body = null, silent = false) {
   if (body) opts.body = JSON.stringify(body);
   
   try {
-    const res = await fetch(API_BASE + path, opts);
+    let url = API_BASE + path;
+    if (method === 'GET') {
+      const separator = url.includes('?') ? '&' : '?';
+      url += `${separator}_cb=${Date.now()}`;
+    }
+    const res = await fetch(url, opts);
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: 'Ошибка' }));
       throw new Error(err.detail || `HTTP ${res.status}`);
@@ -271,11 +276,15 @@ async function api(method, path, body = null, silent = false) {
 
 async function loadWeeklyGoal() {
   try {
-    let members = window.houseMembersList;
-    if (!members) {
-      members = await api('GET', '/api/house/members');
-      window.houseMembersList = members;
+    let dateStr = '';
+    const activeTab = document.querySelector('.tab-btn.active')?.dataset.tab;
+    if (activeTab === 'house') {
+      dateStr = getHouseActiveDateStr();
+    } else if (activeTab === 'personal') {
+      dateStr = getPersonalActiveDateStr();
     }
+    const path = dateStr ? `/api/house/members?date=${dateStr}` : '/api/house/members';
+    const members = await api('GET', path);
     renderMembers(members);
   } catch (e) {
     console.error('Failed to load weekly goal:', e);
