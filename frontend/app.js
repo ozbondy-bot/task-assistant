@@ -276,17 +276,13 @@ async function api(method, path, body = null, silent = false) {
 }
 
 async function loadWeeklyGoal() {
-  const headerEl = document.getElementById('membersListHeader');
-  if (!headerEl) return;
   try {
     let members = window.houseMembersList;
     if (!members) {
       members = await api('GET', '/api/house/members');
       window.houseMembersList = members;
     }
-    headerEl.innerHTML = members.map(m => {
-      return `<span style="font-weight: 600; font-size: 13px;">${escHtml(m.display_name)}: ${m.weekly_earned}/${m.weekly_target} ✨</span>`;
-    }).join('<span style="color: var(--text3); margin: 0 10px;">|</span>');
+    renderMembers(members);
   } catch (e) {
     console.error('Failed to load weekly goal:', e);
   }
@@ -630,7 +626,9 @@ function getPersonalActiveDateLabel() {
 function shiftPersonalDay(diff) {
   personalActiveOffset += diff;
   const list = document.getElementById('personalTasksList');
-  showSpinnerIfNeeded(list, '.task-card', true);
+  const dateStr = getPersonalActiveDateStr();
+  const isCached = window.personalTasksCache && window.personalTasksCache[dateStr];
+  showSpinnerIfNeeded(list, '.task-card', !isCached);
   loadPersonalTab();
   loadWeeklyGoal();
 }
@@ -650,7 +648,9 @@ function getHouseActiveDateLabel() {
 function shiftHouseDay(diff) {
   houseActiveOffset += diff;
   const list = document.getElementById('houseTasksList');
-  showSpinnerIfNeeded(list, '.task-card', true);
+  const dateStr = getHouseActiveDateStr();
+  const isCached = window.tasksCache && window.tasksCache[dateStr];
+  showSpinnerIfNeeded(list, '.task-card', !isCached);
   loadHouseTab();
   loadWeeklyGoal();
 }
