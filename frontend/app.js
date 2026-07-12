@@ -35,6 +35,16 @@ function parseDateSafe(dateStr) {
   return new Date(dateStr);
 }
 
+function escHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 const API_BASE = '';  // Same origin as the Mini App URL
 let initData = '';
 let currentUser = null;
