@@ -419,104 +419,16 @@ async def get_house_today_date(session: AsyncSession) -> date:
     return datetime.now(ZoneInfo(tz_str)).date()
 
 
-async def generate_daily_chores_if_needed(session, house_id: int):
-    """Generate calendar week's task instances from templates. Uses atomic UPDATE to prevent race conditions."""
-    from sqlalchemy import update
-    global _last_generation_check
-    today = await get_house_today_date(session)
+async def generate_chores_for_week(session, house_id: int, monday_date: date):
+    from sqlalchemy import select, and_, func
+    from datetime import timedelta, date
     
-    # 1. In-memory check to bypass DB hits if already checked today
-    if _last_generation_check == (house_id, today):
-        return
-
     house = await session.get(House, house_id)
     if not house:
         return
-
-    # Atomic claim: only one concurrent request can proceed to generate.
-    result = await session.execute(
-        update(House)
-        .where(and_(House.id == house_id, House.last_summary_date != today))
-        .values(last_summary_date=today)
-        .returning(House.id)
-    )
-    await session.flush()  # flush immediately so the lock takes effect
-    claimed = result.fetchone()
-    if not claimed:
-        _last_generation_check = (house_id, today)
-        return
-
-    _last_generation_check = (house_id, today)
-
-    # 2. Rollover old uncompleted household task instances
-    old_instances = (await session.execute(
-        select(TaskInstance).where(and_(
-            TaskInstance.date < today,
-            TaskInstance.status.in_(["free", "in_progress"])
-        ))
-    )).scalars().all()
-
-    for inst in old_instances:
-        tmpl = await session.get(TaskTemplate, inst.template_id)
-        if not tmpl:
-            await session.delete(inst)
-            continue
-
-        is_daily = (tmpl.periodicity == "daily") or (tmpl.periodicity == "every_x_days" and tmpl.period_days == 1)
-        if is_daily:
-            # yesterday's daily task is skipped (status set to skipped, which excludes it from target points)
-            inst.status = "skipped"
-        else:
-            # check if a copy exists today
-            exists_today = await session.scalar(
-                select(TaskInstance).where(and_(
-                    TaskInstance.template_id == tmpl.id,
-                    TaskInstance.date == today
-                ))
-            )
-            if not exists_today:
-                # rollover to today
-                diff_days = (today - inst.date).days
-                if diff_days > 0:
-                    old_date = inst.date
-                    inst.date = today
-                    if inst.status == "in_progress":
-                        # return to general list
-                        inst.status = "free"
-                        inst.done_by_user_id = None
-                        inst.done_at = None
-                    
-                    # Also shift all future uncompleted instances of this template
-                    await session.execute(
-                        update(TaskInstance)
-                        .where(and_(
-                            TaskInstance.template_id == tmpl.id,
-                            TaskInstance.date > old_date,
-                            TaskInstance.status.in_(["free", "in_progress"])
-                        ))
-                        .values(date=TaskInstance.date + timedelta(days=diff_days))
-                    )
-            else:
-                # delete yesterday's duplicate copy
-                await session.delete(inst)
-
-    await session.flush()
-
-    # Rollover old uncompleted personal tasks to today
-    await session.execute(
-        update(PersonalTask)
-        .where(and_(
-            PersonalTask.date_execution < today,
-            PersonalTask.is_completed == False,
-            PersonalTask.is_deleted == False
-        ))
-        .values(date_execution=today)
-    )
-
-    # 3. Pre-generate tasks for the entire current calendar week (Monday to Sunday)
-    monday_date = today - timedelta(days=today.weekday())
+        
     sunday_date = monday_date + timedelta(days=6)
-
+    
     week_already_generated = False
     if house.last_summary_date:
         last_monday = house.last_summary_date - timedelta(days=house.last_summary_date.weekday())
@@ -658,6 +570,105 @@ async def generate_daily_chores_if_needed(session, house_id: int):
                     priority=0
                 )
                 session.add(inst)
+
+
+async def generate_daily_chores_if_needed(session, house_id: int):
+    """Generate calendar week's task instances from templates. Uses atomic UPDATE to prevent race conditions."""
+    from sqlalchemy import update
+    global _last_generation_check
+    today = await get_house_today_date(session)
+    
+    # 1. In-memory check to bypass DB hits if already checked today
+    if _last_generation_check == (house_id, today):
+        return
+
+    house = await session.get(House, house_id)
+    if not house:
+        return
+
+    # Atomic claim: only one concurrent request can proceed to generate.
+    result = await session.execute(
+        update(House)
+        .where(and_(House.id == house_id, House.last_summary_date != today))
+        .values(last_summary_date=today)
+        .returning(House.id)
+    )
+    await session.flush()  # flush immediately so the lock takes effect
+    claimed = result.fetchone()
+    if not claimed:
+        _last_generation_check = (house_id, today)
+        return
+
+    _last_generation_check = (house_id, today)
+
+    # 2. Rollover old uncompleted household task instances
+    old_instances = (await session.execute(
+        select(TaskInstance).where(and_(
+            TaskInstance.date < today,
+            TaskInstance.status.in_(["free", "in_progress"])
+        ))
+    )).scalars().all()
+
+    for inst in old_instances:
+        tmpl = await session.get(TaskTemplate, inst.template_id)
+        if not tmpl:
+            await session.delete(inst)
+            continue
+
+        is_daily = (tmpl.periodicity == "daily") or (tmpl.periodicity == "every_x_days" and tmpl.period_days == 1)
+        if is_daily:
+            # yesterday's daily task is skipped (status set to skipped, which excludes it from target points)
+            inst.status = "skipped"
+        else:
+            # check if a copy exists today
+            exists_today = await session.scalar(
+                select(TaskInstance).where(and_(
+                    TaskInstance.template_id == tmpl.id,
+                    TaskInstance.date == today
+                ))
+            )
+            if not exists_today:
+                # rollover to today
+                diff_days = (today - inst.date).days
+                if diff_days > 0:
+                    old_date = inst.date
+                    inst.date = today
+                    if inst.status == "in_progress":
+                        # return to general list
+                        inst.status = "free"
+                        inst.done_by_user_id = None
+                        inst.done_at = None
+                    
+                    # Also shift all future uncompleted instances of this template
+                    await session.execute(
+                        update(TaskInstance)
+                        .where(and_(
+                            TaskInstance.template_id == tmpl.id,
+                            TaskInstance.date > old_date,
+                            TaskInstance.status.in_(["free", "in_progress"])
+                        ))
+                        .values(date=TaskInstance.date + timedelta(days=diff_days))
+                    )
+            else:
+                # delete yesterday's duplicate copy
+                await session.delete(inst)
+
+    await session.flush()
+
+    # Rollover old uncompleted personal tasks to today
+    await session.execute(
+        update(PersonalTask)
+        .where(and_(
+            PersonalTask.date_execution < today,
+            PersonalTask.is_completed == False,
+            PersonalTask.is_deleted == False
+        ))
+        .values(date_execution=today)
+    )
+
+    # 3. Pre-generate tasks for the entire current calendar week (Monday to Sunday)
+    monday_date = today - timedelta(days=today.weekday())
+    await generate_chores_for_week(session, house_id, monday_date)
 
     house.last_summary_date = today
     await session.commit()
@@ -1300,9 +1311,15 @@ async def calculate_weekly_target_points(session: AsyncSession, house_id: int, t
                     elif inst.status in ["free", "in_progress"]:
                         # Only count uncompleted tasks if the date is today or in the future
                         if curr_d >= real_today:
-                            occurrences += 1
-                            planned_dates.append(curr_d.strftime("%d.%m"))
-                            tmpl_points_sum += tmpl.points
+                            if p in ("every_x_days", "once"):
+                                if is_next_occ_day:
+                                    occurrences += 1
+                                    planned_dates.append(curr_d.strftime("%d.%m"))
+                                    tmpl_points_sum += tmpl.points
+                            else:
+                                occurrences += 1
+                                planned_dates.append(curr_d.strftime("%d.%m"))
+                                tmpl_points_sum += tmpl.points
                 # Still advance next_occ if today was the scheduled date
                 if is_next_occ_day:
                     if p == "every_x_days":

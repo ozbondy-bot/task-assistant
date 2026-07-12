@@ -688,6 +688,11 @@ async def get_house_members(date: Optional[str] = None, user: User = Depends(get
         msk_tz = zoneinfo.ZoneInfo("Europe/Moscow")
         monday_date = today - timedelta(days=today.weekday())
         
+        # Pre-generate and clean up tasks for this week to keep DB synchronized
+        from bot.handlers.base import generate_chores_for_week
+        await generate_chores_for_week(session, ACTIVE_HOUSE_ID, monday_date)
+        await session.commit()
+        
         # Monday 00:00:00 MSK in UTC
         start_msk = datetime.combine(monday_date, datetime.min.time()).replace(tzinfo=msk_tz)
         start_utc = start_msk.astimezone(timezone.utc).replace(tzinfo=None)
@@ -764,6 +769,11 @@ async def get_weekly_goal_explanation(date: Optional[str] = None, user: User = D
         else:
             today = await get_house_today_date(session)
         monday_date = today - timedelta(days=today.weekday())
+        
+        # Pre-generate and clean up tasks for this week to keep DB synchronized
+        from bot.handlers.base import generate_chores_for_week
+        await generate_chores_for_week(session, ACTIVE_HOUSE_ID, monday_date)
+        await session.commit()
         
         total_weekly_target_points, breakdown = await calculate_weekly_target_points(session, ACTIVE_HOUSE_ID, today)
         
