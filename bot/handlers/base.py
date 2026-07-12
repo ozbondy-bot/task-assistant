@@ -1207,9 +1207,11 @@ async def calculate_weekly_target_points(session: AsyncSession, house_id: int, t
             )
         )
     )).scalars().all()
-    # Bulk query all task instances for this week
+    # Bulk query all task instances for this week, including completions relationship
+    from sqlalchemy.orm import selectinload
     week_insts_result = await session.execute(
         select(TaskInstance)
+        .options(selectinload(TaskInstance.completions))
         .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
         .where(and_(
             TaskTemplate.house_id == house_id,
@@ -1228,6 +1230,7 @@ async def calculate_weekly_target_points(session: AsyncSession, house_id: int, t
     templates_detail = []
     
     for tmpl in templates:
+        tmpl_points_sum = 0
         occurrences = 0
         p = tmpl.periodicity
         
@@ -1253,9 +1256,14 @@ async def calculate_weekly_target_points(session: AsyncSession, house_id: int, t
                     if inst.status == "done":
                         occurrences += 1
                         done_dates.append(curr_d.strftime("%d.%m"))
+                        actual_pts = sum(c.points for c in inst.completions) if inst.completions else tmpl.points
+                        tmpl_points_sum += actual_pts
                     elif inst.status in ["free", "in_progress"]:
-                        occurrences += 1
-                        planned_dates.append(curr_d.strftime("%d.%m"))
+                        # Only count uncompleted tasks if the date is today or in the future
+                        if curr_d >= today:
+                            occurrences += 1
+                            planned_dates.append(curr_d.strftime("%d.%m"))
+                            tmpl_points_sum += tmpl.points
                 # Still advance next_occ if today was the scheduled date
                 if is_next_occ_day:
                     if p == "every_x_days":
@@ -1292,6 +1300,7 @@ async def calculate_weekly_target_points(session: AsyncSession, house_id: int, t
                     if should_run:
                         occurrences += 1
                         planned_dates.append(curr_d.strftime("%d.%m"))
+                        tmpl_points_sum += tmpl.points
                         
                 # Always advance next_occ for schedule tracking even if we didn't simulate the day
                 if is_next_occ_day:
@@ -1301,13 +1310,13 @@ async def calculate_weekly_target_points(session: AsyncSession, house_id: int, t
                         next_occ = date(2099, 12, 31)
                         
         if occurrences > 0:
-            total_weekly_target_points += occurrences * tmpl.points
+            total_weekly_target_points += tmpl_points_sum
             templates_detail.append({
                 "title": tmpl.title,
                 "periodicity": tmpl.periodicity,
                 "points": tmpl.points,
                 "occurrences": occurrences,
-                "total": occurrences * tmpl.points,
+                "total": tmpl_points_sum,
                 "done_dates": done_dates,
                 "planned_dates": planned_dates
             })
