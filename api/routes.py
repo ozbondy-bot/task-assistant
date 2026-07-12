@@ -695,12 +695,12 @@ async def get_house_members(date: Optional[str] = None, user: User = Depends(get
         
         # Monday 00:00:00 MSK in UTC
         start_msk = datetime.combine(monday_date, datetime.min.time()).replace(tzinfo=msk_tz)
-        start_utc = start_msk.astimezone(timezone.utc).replace(tzinfo=None)
+        start_utc = start_msk.astimezone(timezone.utc)
         
         # Sunday 23:59:59 MSK in UTC
         sunday_date = monday_date + timedelta(days=6)
         end_msk = datetime.combine(sunday_date, datetime.max.time()).replace(tzinfo=msk_tz)
-        end_utc = end_msk.astimezone(timezone.utc).replace(tzinfo=None)
+        end_utc = end_msk.astimezone(timezone.utc)
         
         total_weekly_target_points, _ = await calculate_weekly_target_points(session, ACTIVE_HOUSE_ID, today)
         
@@ -999,7 +999,7 @@ async def restore_shopping_item(item_id: int, user: User = Depends(get_current_u
 # -- Rewards / Shop calculation and adjustment --
 async def get_shop_calculation_stats(session):
     from sqlalchemy import func
-    thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+    thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
     
     total_points = await session.scalar(
         select(func.sum(Completion.points))
@@ -1686,10 +1686,17 @@ async def get_chores_archive(date: Optional[str] = None, user: User = Depends(ge
             TaskTemplate, TaskInstance.template_id == TaskTemplate.id
         ).where(TaskTemplate.house_id == ACTIVE_HOUSE_ID)
         
+        # Localize dates using house timezone
+        house = await session.get(House, ACTIVE_HOUSE_ID)
+        import zoneinfo
+        tz = zoneinfo.ZoneInfo(house.timezone if (house and house.timezone) else "Europe/Moscow")
+        
         if date:
             parsed_date = datetime.strptime(date, "%Y-%m-%d").date()
-            start_dt = datetime.combine(parsed_date, datetime.min.time())
-            end_dt = datetime.combine(parsed_date, datetime.max.time())
+            start_local = datetime.combine(parsed_date, datetime.min.time()).replace(tzinfo=tz)
+            end_local = datetime.combine(parsed_date, datetime.max.time()).replace(tzinfo=tz)
+            start_dt = start_local.astimezone(timezone.utc)
+            end_dt = end_local.astimezone(timezone.utc)
             query = query.where(and_(
                 Completion.created_at >= start_dt,
                 Completion.created_at <= end_dt
@@ -1698,12 +1705,6 @@ async def get_chores_archive(date: Optional[str] = None, user: User = Depends(ge
         query = query.order_by(Completion.created_at.desc())
         result = await session.execute(query)
         rows = result.all()
-        
-        # Localize dates using house timezone
-        house = await session.get(House, ACTIVE_HOUSE_ID)
-        import zoneinfo
-        tz = zoneinfo.ZoneInfo(house.timezone if (house and house.timezone) else "Europe/Moscow")
-        from datetime import timezone
         
         res = []
         for comp, usr, inst, tmpl in rows:

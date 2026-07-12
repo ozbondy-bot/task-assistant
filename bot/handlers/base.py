@@ -795,10 +795,10 @@ async def cmd_raschet(message: types.Message):
         # Calculate current weekly earned points for each member
         msk_tz = zoneinfo.ZoneInfo("Europe/Moscow")
         start_msk = datetime.combine(monday_date, datetime.min.time()).replace(tzinfo=msk_tz)
-        start_utc = start_msk.astimezone(timezone.utc).replace(tzinfo=None)
+        start_utc = start_msk.astimezone(timezone.utc)
         end_sunday = monday_date + timedelta(days=6)
         end_msk = datetime.combine(end_sunday, datetime.max.time()).replace(tzinfo=msk_tz)
-        end_utc = end_msk.astimezone(timezone.utc).replace(tzinfo=None)
+        end_utc = end_msk.astimezone(timezone.utc)
         
         members_data = []
         target_info = []
