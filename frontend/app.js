@@ -138,19 +138,13 @@ window.connectWebSocket = connectWebSocket;
 
 function preloadCurrentWeek() {
   const today = new Date();
-  let dayOfWeek = today.getDay(); // 0 is Sunday, 1-6 is Mon-Sat
-  if (dayOfWeek === 0) dayOfWeek = 7; // Treat Sunday as 7
-  
-  // Start date of the week (Monday)
-  const monday = new Date(today);
-  monday.setDate(today.getDate() - (dayOfWeek - 1));
-  
   window.personalTasksCache = window.personalTasksCache || {};
   window.tasksCache = window.tasksCache || {};
 
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(monday);
-    d.setDate(monday.getDate() + i);
+  // Preload rolling 14 days: 3 days in the past to 10 days in the future
+  for (let i = -3; i <= 10; i++) {
+    const d = new Date(today);
+    d.setDate(today.getDate() + i);
     const dateStr = formatLocalDate(d);
     
     // 1. Fetch house chores
@@ -303,13 +297,21 @@ async function openWeeklyGoalExplanation() {
       templatesHtml = `<p style="color: var(--text3); font-style: italic; text-align: center; padding: 12px 0;">Нет активных задач в этом доме</p>`;
     } else {
       templatesHtml = data.templates.map(t => {
+        let datesHtml = '';
+        if ((t.done_dates && t.done_dates.length) || (t.planned_dates && t.planned_dates.length)) {
+          const doneStr = t.done_dates && t.done_dates.length ? `<span style="color: #4cd964; text-decoration: line-through; font-weight: 500;">${t.done_dates.join(', ')}</span>` : '';
+          const planStr = t.planned_dates && t.planned_dates.length ? `<span style="color: var(--text3); font-weight: 500;">${t.planned_dates.join(', ')}</span>` : '';
+          const separator = doneStr && planStr ? ', ' : '';
+          datesHtml = `<div style="font-size: 11px; margin-top: 3px; color: var(--text2);">📅 ${doneStr}${separator}${planStr}</div>`;
+        }
         return `
           <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px dashed var(--border);">
             <div>
               <div style="font-weight: 600; font-size: 13px; color: var(--text);">${escHtml(t.title)}</div>
               <div style="font-size: 11px; color: var(--text2);">${recLabel(t.periodicity)} • ${t.points} ✨ за раз</div>
+              ${datesHtml}
             </div>
-            <div style="font-weight: 600; text-align: right; font-size: 12px;">
+            <div style="font-weight: 600; text-align: right; font-size: 12px; flex-shrink: 0; margin-left: 8px;">
               ${t.occurrences} раз${t.occurrences > 1 && t.occurrences < 5 ? 'а' : ''} / нед<br/>
               <span style="color: var(--accent2);">+${t.total} ✨</span>
             </div>

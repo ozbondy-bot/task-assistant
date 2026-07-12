@@ -1234,6 +1234,9 @@ async def calculate_weekly_target_points(session: AsyncSession, house_id: int, t
         next_occ = get_next_date_local(tmpl, monday_date)
         tmpl_insts_by_date = inst_by_tmpl_and_date.get(tmpl.id, {})
         
+        done_dates = []
+        planned_dates = []
+        
         for d_idx in range(7):
             curr_d = monday_date + timedelta(days=d_idx)
             if tmpl.start_date and curr_d < tmpl.start_date:
@@ -1247,8 +1250,12 @@ async def calculate_weekly_target_points(session: AsyncSession, house_id: int, t
             if day_insts:
                 # Count how many are active/done
                 for inst in day_insts:
-                    if inst.status in ["done", "free", "in_progress"]:
+                    if inst.status == "done":
                         occurrences += 1
+                        done_dates.append(curr_d.strftime("%d.%m"))
+                    elif inst.status in ["free", "in_progress"]:
+                        occurrences += 1
+                        planned_dates.append(curr_d.strftime("%d.%m"))
                 # Still advance next_occ if today was the scheduled date
                 if is_next_occ_day:
                     if p == "every_x_days":
@@ -1258,8 +1265,8 @@ async def calculate_weekly_target_points(session: AsyncSession, house_id: int, t
             else:
                 # No instances in DB. Determine if we should simulate
                 gen_done = (house.last_summary_date >= curr_d) if (house and house.last_summary_date) else False
+                should_run = False
                 if curr_d > today or (curr_d == today and not gen_done):
-                    should_run = False
                     if p == "daily":
                         should_run = True
                     elif p == "weekly":
@@ -1284,6 +1291,7 @@ async def calculate_weekly_target_points(session: AsyncSession, house_id: int, t
                             
                     if should_run:
                         occurrences += 1
+                        planned_dates.append(curr_d.strftime("%d.%m"))
                         
                 # Always advance next_occ for schedule tracking even if we didn't simulate the day
                 if is_next_occ_day:
@@ -1299,7 +1307,9 @@ async def calculate_weekly_target_points(session: AsyncSession, house_id: int, t
                 "periodicity": tmpl.periodicity,
                 "points": tmpl.points,
                 "occurrences": occurrences,
-                "total": occurrences * tmpl.points
+                "total": occurrences * tmpl.points,
+                "done_dates": done_dates,
+                "planned_dates": planned_dates
             })
             
     return total_weekly_target_points, templates_detail
