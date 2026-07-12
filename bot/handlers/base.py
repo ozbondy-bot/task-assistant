@@ -1144,9 +1144,10 @@ def get_period_label(tmpl: TaskTemplate) -> str:
 
 
 async def calculate_weekly_target_points(session: AsyncSession, house_id: int, today: date) -> tuple[int, list[dict]]:
-    from bot.handlers.base import get_template_next_date
+    from bot.handlers.base import get_template_next_date, get_house_today_date
     from datetime import timedelta
     
+    real_today = await get_house_today_date(session)
     monday_date = today - timedelta(days=today.weekday())
     sunday_date = monday_date + timedelta(days=6)
     
@@ -1260,7 +1261,7 @@ async def calculate_weekly_target_points(session: AsyncSession, house_id: int, t
                         tmpl_points_sum += actual_pts
                     elif inst.status in ["free", "in_progress"]:
                         # Only count uncompleted tasks if the date is today or in the future
-                        if curr_d >= today:
+                        if curr_d >= real_today:
                             occurrences += 1
                             planned_dates.append(curr_d.strftime("%d.%m"))
                             tmpl_points_sum += tmpl.points
@@ -1274,7 +1275,7 @@ async def calculate_weekly_target_points(session: AsyncSession, house_id: int, t
                 # No instances in DB. Determine if we should simulate
                 gen_done = (house.last_summary_date >= curr_d) if (house and house.last_summary_date) else False
                 should_run = False
-                if curr_d > today or (curr_d == today and not gen_done):
+                if curr_d > real_today or (curr_d == real_today and not gen_done):
                     if p == "daily":
                         should_run = True
                     elif p == "weekly":

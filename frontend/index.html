@@ -357,7 +357,10 @@
       <div id="weeklyGoalExplanationBody" style="font-size: 13px; color: var(--text2); display: flex; flex-direction: column; gap: 10px; flex: 1; overflow-y: auto; padding-right: 4px;">
         <!-- Explanation will be injected here -->
       </div>
-      <button class="btn btn-primary" onclick="closeModal('weeklyGoalExplanationModal')" style="margin-top: 16px; width: 100%; padding: 14px; font-weight: 600; flex: none;">Понятно ✓</button>
+      <div style="display: flex; gap: 12px; margin-top: 16px; width: 100%; flex-shrink: 0;">
+        <button class="btn" onclick="copyWeeklyGoalExplanation()" style="padding: 14px; font-weight: 600; flex: 1; background: var(--surface3); border: 1px solid var(--border); color: var(--text);">Скопировать 📋</button>
+        <button class="btn btn-primary" onclick="closeModal('weeklyGoalExplanationModal')" style="padding: 14px; font-weight: 600; flex: 1.5;">Понятно ✓</button>
+      </div>
     </div>
   </div>
 
@@ -373,6 +376,6 @@
   <!-- Toast notification -->
   <div class="toast hidden" id="toast"></div>
 
-  <script src="app.js?v=34"></script>
+  <script src="app.js?v=35"></script>
 </body>
 </html>

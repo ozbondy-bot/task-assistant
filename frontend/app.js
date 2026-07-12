@@ -312,6 +312,7 @@ async function openWeeklyGoalExplanation(offset = null) {
     const targetDateStr = formatLocalDate(d);
     
     const data = await api('GET', `/api/house/weekly_goal_explanation?date=${targetDateStr}`);
+    window.lastWeeklyGoalExplanationData = data;
     
     // Sort templates: active tasks first (which have planned_dates), then fully completed/archived tasks
     const sortedTemplates = [...data.templates].sort((a, b) => {
@@ -385,6 +386,69 @@ async function openWeeklyGoalExplanation(offset = null) {
   }
 }
 window.openWeeklyGoalExplanation = openWeeklyGoalExplanation;
+
+function copyWeeklyGoalExplanation() {
+  const data = window.lastWeeklyGoalExplanationData;
+  if (!data) {
+    showToast('⚠️ Нет данных для копирования');
+    return;
+  }
+  
+  const startParts = data.start_date.split('-');
+  const endParts = data.end_date.split('-');
+  const weekLabel = `${startParts[2]}.${startParts[1]} - ${endParts[2]}.${endParts[1]}`;
+  
+  let text = `📅 Расчет целей на неделю: ${weekLabel}\n\n`;
+  text += `Сумма очков дома за неделю: ${data.total_points} ✨\n`;
+  text += `Количество участников: ${data.num_members}\n`;
+  
+  if (data.targets && data.targets.length) {
+    text += `\nЦели участников:\n`;
+    data.targets.forEach(t => {
+      text += `• ${t.name}: ${t.target} ✨\n`;
+    });
+  }
+  
+  if (data.templates && data.templates.length) {
+    text += `\nСписок планируемых задач:\n`;
+    
+    const sorted = [...data.templates].sort((a, b) => {
+      const aHasPlanned = a.planned_dates && a.planned_dates.length > 0;
+      const bHasPlanned = b.planned_dates && b.planned_dates.length > 0;
+      if (aHasPlanned && !bHasPlanned) return -1;
+      if (!aHasPlanned && bHasPlanned) return 1;
+      return 0;
+    });
+    
+    sorted.forEach(t => {
+      let datesStr = '';
+      const done = t.done_dates || [];
+      const plan = t.planned_dates || [];
+      if (done.length || plan.length) {
+        const doneText = done.length ? `[вып: ${done.join(', ')}]` : '';
+        const planText = plan.length ? `[план: ${plan.join(', ')}]` : '';
+        const sep = doneText && planText ? ' ' : '';
+        datesStr = ` (${doneText}${sep}${planText})`;
+      }
+      
+      let rec = t.periodicity;
+      if (rec === 'daily') rec = 'ежедневно';
+      else if (rec === 'weekly') rec = 'раз в неделю';
+      else if (rec === 'every_x_days') rec = `раз в ${t.period_days || 1} дн`;
+      else if (rec === 'once') rec = 'один раз';
+      
+      text += `• ${t.title} (+${t.total} ✨) — ${rec} • ${t.points} ✨ за раз • ${t.occurrences} р/нед${datesStr}\n`;
+    });
+  }
+  
+  navigator.clipboard.writeText(text).then(() => {
+    showToast('📋 Расчёт скопирован в буфер обмена!');
+  }).catch(err => {
+    console.error('Failed to copy text:', err);
+    showToast('❌ Ошибка при копировании');
+  });
+}
+window.copyWeeklyGoalExplanation = copyWeeklyGoalExplanation;
 
 // ── Toast ────────────────────────────────────────────────────────────────────
 let toastTimer;
