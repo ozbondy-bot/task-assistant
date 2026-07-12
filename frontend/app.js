@@ -304,28 +304,38 @@ async function openWeeklyGoalExplanation(offset = null) {
     
     const data = await api('GET', `/api/house/weekly_goal_explanation?date=${targetDateStr}`);
     
+    // Sort templates: active tasks first (which have planned_dates), then fully completed/archived tasks
+    const sortedTemplates = [...data.templates].sort((a, b) => {
+      const aHasPlanned = a.planned_dates && a.planned_dates.length > 0;
+      const bHasPlanned = b.planned_dates && b.planned_dates.length > 0;
+      if (aHasPlanned && !bHasPlanned) return -1;
+      if (!aHasPlanned && bHasPlanned) return 1;
+      return 0;
+    });
+
     let templatesHtml = '';
-    if (!data.templates.length) {
+    if (!sortedTemplates.length) {
       templatesHtml = `<p style="color: var(--text3); font-style: italic; text-align: center; padding: 12px 0;">Нет активных задач в этом доме</p>`;
     } else {
-      templatesHtml = data.templates.map(t => {
+      templatesHtml = sortedTemplates.map(t => {
         let datesHtml = '';
         if ((t.done_dates && t.done_dates.length) || (t.planned_dates && t.planned_dates.length)) {
           const doneStr = t.done_dates && t.done_dates.length ? `<span style="color: #4cd964; text-decoration: line-through; font-weight: 500;">${t.done_dates.join(', ')}</span>` : '';
           const planStr = t.planned_dates && t.planned_dates.length ? `<span style="color: var(--text3); font-weight: 500;">${t.planned_dates.join(', ')}</span>` : '';
           const separator = doneStr && planStr ? ', ' : '';
-          datesHtml = `<div style="font-size: 11px; margin-top: 3px; color: var(--text2);">📅 ${doneStr}${separator}${planStr}</div>`;
+          datesHtml = `${doneStr}${separator}${planStr}`;
+        } else {
+          datesHtml = 'Нет дат';
         }
         return `
-          <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px dashed var(--border);">
-            <div>
-              <div style="font-weight: 600; font-size: 13px; color: var(--text);">${escHtml(t.title)}</div>
-              <div style="font-size: 11px; color: var(--text2);">${recLabel(t.periodicity)} • ${t.points} ✨ за раз</div>
-              ${datesHtml}
+          <div style="display: flex; flex-direction: column; padding: 6px 0; border-bottom: 1px dashed var(--border); gap: 2px;">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 8px;">
+              <span style="font-weight: 600; font-size: 13px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escHtml(t.title)}</span>
+              <span style="font-weight: 600; font-size: 12px; color: var(--accent2); flex-shrink: 0;">+${t.total} ✨</span>
             </div>
-            <div style="font-weight: 600; text-align: right; font-size: 12px; flex-shrink: 0; margin-left: 8px;">
-              ${t.occurrences} раз${t.occurrences > 1 && t.occurrences < 5 ? 'а' : ''} / нед<br/>
-              <span style="color: var(--accent2);">+${t.total} ✨</span>
+            <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 11px; color: var(--text2);">
+              <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; padding-right: 8px;">${recLabel(t.periodicity)} • ${t.points} ✨ • 📅 ${datesHtml}</span>
+              <span style="flex-shrink: 0; font-weight: 500;">${t.occurrences} р/нед</span>
             </div>
           </div>
         `;
@@ -357,7 +367,7 @@ async function openWeeklyGoalExplanation(offset = null) {
         </div>
       </div>
       <h4 style="margin: 8px 0 2px 0; color: var(--text); font-size: 14px;">Список планируемых задач:</h4>
-      <div style="display: flex; flex-direction: column; gap: 4px; max-height: 200px; overflow-y: auto; padding-right: 4px;">
+      <div style="display: flex; flex-direction: column; gap: 4px;">
         ${templatesHtml}
       </div>
     `;
