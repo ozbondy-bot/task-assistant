@@ -151,28 +151,50 @@ function preloadCurrentWeek() {
   window.personalTasksCache = window.personalTasksCache || {};
   window.tasksCache = window.tasksCache || {};
 
-  // Preload rolling 14 days: 3 days in the past to 10 days in the future
-  for (let i = -3; i <= 10; i++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() + i);
-    const dateStr = formatLocalDate(d);
-    
-    // 1. Fetch house chores
-    api('GET', `/api/house/tasks?date=${dateStr}`, null, true).then(freshTasks => {
-      window.tasksCache[dateStr] = freshTasks;
-      if (getHouseActiveDateStr() === dateStr) {
-        renderHouseTasks(freshTasks);
+  // Preload current calendar week only: Monday to Sunday
+  const currentDay = today.getDay(); // 0 is Sunday, 1 is Monday, ... 6 is Saturday
+  const distanceToMonday = currentDay === 0 ? -6 : 1 - currentDay;
+  const startD = new Date(today);
+  startD.setDate(today.getDate() + distanceToMonday);
+
+  const endD = new Date(startD);
+  endD.setDate(startD.getDate() + 6);
+
+  const startStr = formatLocalDate(startD);
+  const endStr = formatLocalDate(endD);
+
+  api('GET', `/api/batch/tasks?start_date=${startStr}&end_date=${endStr}`, null, true).then(data => {
+    if (data.house) {
+      for (const dateStr in data.house) {
+        window.tasksCache[dateStr] = data.house[dateStr];
+        if (getHouseActiveDateStr() === dateStr) {
+          renderHouseTasks(data.house[dateStr]);
+        }
       }
-    }).catch(e => console.warn("Failed to preload house tasks for " + dateStr, e));
-    
-    // 2. Fetch personal tasks
-    api('GET', `/api/tasks/today?date=${dateStr}`, null, true).then(fresh => {
-      window.personalTasksCache[dateStr] = fresh;
-      if (getPersonalActiveDateStr() === dateStr) {
-        renderPersonalTasks(fresh.personal, fresh.household);
+    }
+    if (data.personal) {
+      for (const dateStr in data.personal) {
+        window.personalTasksCache[dateStr] = data.personal[dateStr];
+        if (getPersonalActiveDateStr() === dateStr) {
+          renderPersonalTasks(data.personal[dateStr].personal, data.personal[dateStr].household);
+        }
       }
-    }).catch(e => console.warn("Failed to preload personal tasks for " + dateStr, e));
-  }
+    }
+  }).catch(e => {
+    console.warn("Failed to preload batch tasks", e);
+    // Fallback: load active day tasks individually
+    const activeHouseDate = getHouseActiveDateStr();
+    api('GET', `/api/house/tasks?date=${activeHouseDate}`).then(res => {
+      window.tasksCache[activeHouseDate] = res;
+      renderHouseTasks(res);
+    }).catch(err => console.error("Fallback house tasks load failed", err));
+
+    const activePersonalDate = getPersonalActiveDateStr();
+    api('GET', `/api/tasks/today?date=${activePersonalDate}`).then(res => {
+      window.personalTasksCache[activePersonalDate] = res;
+      renderPersonalTasks(res.personal, res.household);
+    }).catch(err => console.error("Fallback personal tasks load failed", err));
+  });
 }
 window.preloadCurrentWeek = preloadCurrentWeek;
 

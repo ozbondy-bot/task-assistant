@@ -154,6 +154,363 @@ async def health():
     return {"status": "ok", "ts": datetime.utcnow().isoformat()}
 
 
+# -- Batch Tasks Loader --
+@app.get("/api/batch/tasks")
+async def get_batch_tasks(start_date: str, end_date: str, user: User = Depends(get_current_user)):
+    from bot.handlers.base import get_house_today_date, generate_daily_chores_if_needed
+    async with AsyncSessionLocal() as session:
+        # Trigger daily chores generation and rollover once
+        await generate_daily_chores_if_needed(session, ACTIVE_HOUSE_ID)
+        
+        today = await get_house_today_date(session)
+        house = await session.get(House, ACTIVE_HOUSE_ID)
+
+        # Parse start and end date
+        try:
+            start_d = datetime.strptime(start_date, "%Y-%m-%d").date()
+            end_d = datetime.strptime(end_date, "%Y-%m-%d").date()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
+
+        # Let's collect all dates in the range
+        num_days = (end_d - start_d).days + 1
+        all_dates = [start_d + timedelta(days=i) for i in range(num_days)]
+
+        # --- 1. PRE-FETCH ALL TEMPLATES & USER DATA ---
+        templates_res = await session.execute(
+            select(TaskTemplate).where(
+                and_(
+                    TaskTemplate.house_id == ACTIVE_HOUSE_ID,
+                    TaskTemplate.deleted == False
+                )
+            ).order_by(TaskTemplate.points.desc())
+        )
+        templates = templates_res.scalars().all()
+        tmpl_ids = [t.id for t in templates]
+
+        # Get all task instances in this date range
+        instances = []
+        if tmpl_ids:
+            inst_res = await session.execute(
+                select(TaskInstance).where(
+                    and_(
+                        TaskInstance.template_id.in_(tmpl_ids),
+                        TaskInstance.date.between(start_d, end_d),
+                        TaskInstance.status != "shifted"
+                    )
+                )
+            )
+            instances = inst_res.scalars().all()
+
+        # Map: template_id -> list of instances in range
+        inst_map = {}
+        for inst in instances:
+            inst_map.setdefault(inst.template_id, []).append(inst)
+
+        # Get all completions for templates
+        last_completed_map = {}
+        if tmpl_ids:
+            last_completed_res = await session.execute(
+                select(TaskInstance.template_id, func.max(Completion.created_at))
+                .join(Completion, Completion.task_instance_id == TaskInstance.id)
+                .where(TaskInstance.template_id.in_(tmpl_ids))
+                .group_by(TaskInstance.template_id)
+            )
+            last_completed_map = dict(last_completed_res.all())
+
+        # Next execution dates (for dates > today)
+        next_execution_map = {}
+        if tmpl_ids:
+            next_execution_res = await session.execute(
+                select(TaskInstance.template_id, func.min(TaskInstance.date))
+                .where(
+                    and_(
+                        TaskInstance.template_id.in_(tmpl_ids),
+                        TaskInstance.status == "free",
+                        TaskInstance.date > today
+                    )
+                )
+                .group_by(TaskInstance.template_id)
+            )
+            next_execution_map = dict(next_execution_res.all())
+
+        # For simulating future task occurrences in `every_x_days`
+        last_handled_map = {}
+        active_inst_map = {}
+        if tmpl_ids:
+            last_handled_res = await session.execute(
+                select(TaskInstance.template_id, func.max(TaskInstance.date))
+                .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
+                .where(and_(
+                    TaskTemplate.house_id == ACTIVE_HOUSE_ID,
+                    TaskInstance.status.in_(["done", "skipped"]),
+                    TaskInstance.date <= end_d
+                ))
+                .group_by(TaskInstance.template_id)
+            )
+            last_handled_map = dict(last_handled_res.all())
+
+            active_inst_res = await session.execute(
+                select(TaskInstance.template_id, func.min(TaskInstance.date))
+                .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
+                .where(and_(
+                    TaskTemplate.house_id == ACTIVE_HOUSE_ID,
+                    TaskInstance.status.in_(["free", "in_progress"]),
+                    TaskInstance.date < end_d
+                ))
+                .group_by(TaskInstance.template_id)
+            )
+            active_inst_map = dict(active_inst_res.all())
+
+        # Resolve done_by_user_id
+        user_result = await session.execute(
+            select(User).where(User.house_id == ACTIVE_HOUSE_ID)
+        )
+        users_map = {u.id: u for u in user_result.scalars().all()}
+
+        # --- 2. PRE-FETCH ALL PERSONAL TASKS ---
+        pers_res = await session.execute(
+            select(PersonalTask)
+            .where(and_(
+                PersonalTask.user_id == user.id,
+                PersonalTask.is_deleted == False,
+                PersonalTask.date_execution.between(start_d, end_d)
+            ))
+            .order_by(PersonalTask.id)
+        )
+        personal_tasks = pers_res.scalars().all()
+
+        today_pers_res = await session.execute(
+            select(PersonalTask)
+            .where(and_(
+                PersonalTask.user_id == user.id,
+                PersonalTask.is_deleted == False,
+                PersonalTask.date_execution < today,
+                PersonalTask.is_completed == False
+            ))
+            .order_by(PersonalTask.id)
+        )
+        today_uncompleted_pers = today_pers_res.scalars().all()
+
+        pers_by_date = {}
+        for pt in personal_tasks:
+            pers_by_date.setdefault(pt.date_execution, []).append(pt)
+
+        pers_last_completed = {}
+        pers_next_exec = {}
+        
+        pers_last_comp_res = await session.execute(
+            select(PersonalTask.text, func.max(PersonalTask.date_execution))
+            .where(and_(
+                PersonalTask.user_id == user.id,
+                PersonalTask.is_completed == True,
+                PersonalTask.is_deleted == False
+            ))
+            .group_by(PersonalTask.text)
+        )
+        pers_last_completed = dict(pers_last_comp_res.all())
+
+        pers_next_exec_res = await session.execute(
+            select(PersonalTask.text, func.min(PersonalTask.date_execution))
+            .where(and_(
+                PersonalTask.user_id == user.id,
+                PersonalTask.is_completed == False,
+                PersonalTask.is_deleted == False,
+                PersonalTask.date_execution > today
+            ))
+            .group_by(PersonalTask.text)
+        )
+        pers_next_exec = dict(pers_next_exec_res.all())
+
+        # Claimed household tasks for personal view (in progress)
+        in_progress_house_res = await session.execute(
+            select(TaskInstance, TaskTemplate).join(
+                TaskTemplate, TaskInstance.template_id == TaskTemplate.id
+            ).where(
+                and_(
+                    TaskInstance.done_by_user_id == user.id,
+                    TaskInstance.status == "in_progress"
+                )
+            )
+        )
+        in_progress_house = in_progress_house_res.all()
+
+        # --- 3. BUILD HOUSE & PERSONAL DATA BY DATE ---
+        house_by_date_res = {}
+        personal_by_date_res = {}
+
+        for d in all_dates:
+            d_str = str(d)
+            
+            # --- Build Household tasks for date `d` ---
+            raw_tasks = []
+            if d > today:
+                existing_for_d = []
+                for tmpl in templates:
+                    insts = inst_map.get(tmpl.id, [])
+                    matching_inst = next((i for i in insts if i.date == d), None)
+                    if matching_inst:
+                        existing_for_d.append((matching_inst, tmpl))
+                existing_template_ids = {r[1].id for r in existing_for_d}
+
+                for inst, tmpl in existing_for_d:
+                    raw_tasks.append((inst.id, tmpl.id, tmpl.title, tmpl.points, tmpl.periodicity, tmpl.period_days, d_str, inst.status, inst))
+
+                weekday = d.weekday()
+                day_of_month = d.day
+                month = d.month
+                for tmpl in templates:
+                    if tmpl.id in existing_template_ids:
+                        continue
+                    if tmpl.start_date and d < tmpl.start_date:
+                        continue
+
+                    p = tmpl.periodicity
+                    should_run = False
+                    if p == "daily":
+                        should_run = True
+                    elif p == "weekly":
+                        should_run = (weekday == (tmpl.weekday if tmpl.weekday is not None else 0))
+                    elif p == "twice_weekly":
+                        should_run = (weekday in (0, 3))
+                    elif p == "monthly":
+                        should_run = (day_of_month == (tmpl.month_day if tmpl.month_day is not None else 1))
+                    elif p == "twice_monthly":
+                        should_run = (day_of_month in (5, 20))
+                    elif p == "quarterly":
+                        if day_of_month == (tmpl.month_day if tmpl.month_day is not None else 1):
+                            pos = ((month - 1) % 3) + 1
+                            if pos == (tmpl.weekday if tmpl.weekday is not None else 1):
+                                should_run = True
+                    elif p == "every_x_days":
+                        last_handled_date = last_handled_map.get(tmpl.id)
+                        active_inst_date = active_inst_map.get(tmpl.id)
+                        from bot.handlers.base import get_template_next_date
+                        nd = get_template_next_date(tmpl, last_handled_date, active_inst_date, today)
+                        if nd < d:
+                            days = tmpl.period_days or 1
+                            diff = (d - nd).days
+                            k = (diff + days - 1) // days
+                            nd += timedelta(days=k * days)
+                        if nd == d:
+                            should_run = True
+                    elif p == "once":
+                        last_handled_date = last_handled_map.get(tmpl.id)
+                        active_inst_date = active_inst_map.get(tmpl.id)
+                        from bot.handlers.base import get_template_next_date
+                        nd = get_template_next_date(tmpl, last_handled_date, active_inst_date, today)
+                        if nd == d:
+                            should_run = True
+
+                    if should_run:
+                        raw_tasks.append((0, tmpl.id, tmpl.title, tmpl.points, tmpl.periodicity, tmpl.period_days, d_str, "free", None))
+
+            elif d == today:
+                for tmpl in templates:
+                    insts = inst_map.get(tmpl.id, [])
+                    matching_inst = next((i for i in insts if i.date == today), None)
+                    if matching_inst:
+                        raw_tasks.append((matching_inst.id, tmpl.id, tmpl.title, tmpl.points, tmpl.periodicity, tmpl.period_days, d_str, matching_inst.status, matching_inst))
+            else:
+                # Past dates: show only completed (done) tasks
+                for tmpl in templates:
+                    insts = inst_map.get(tmpl.id, [])
+                    matching_inst = next((i for i in insts if i.date == d and i.status == "done"), None)
+                    if matching_inst:
+                        raw_tasks.append((matching_inst.id, tmpl.id, tmpl.title, tmpl.points, tmpl.periodicity, tmpl.period_days, d_str, matching_inst.status, matching_inst))
+
+            chores_list = []
+            for inst_id, tmpl_id, title, points, periodicity, period_days, date_str, status, inst in raw_tasks:
+                last_date = last_completed_map.get(tmpl_id)
+                next_date = next_execution_map.get(tmpl_id)
+                if next_date is None and d > today:
+                    next_date = d
+
+                completed_by = ""
+                done_at_str = ""
+                if inst and inst.status == "done" and inst.done_by_user_id:
+                    done_user = users_map.get(inst.done_by_user_id)
+                    if done_user:
+                        completed_by = done_user.display_name or done_user.username or "Участник"
+                    if inst.done_at:
+                        import zoneinfo
+                        tz = zoneinfo.ZoneInfo(house.timezone if (house and house.timezone) else "Europe/Moscow")
+                        dt_utc = inst.done_at.replace(tzinfo=timezone.utc)
+                        dt_local = dt_utc.astimezone(tz)
+                        done_at_str = dt_local.strftime("%d.%m.%Y в %H:%M")
+
+                chores_list.append({
+                    "id": inst_id,
+                    "template_id": tmpl_id,
+                    "title": title,
+                    "points": points,
+                    "periodicity": periodicity,
+                    "period_days": period_days,
+                    "date": date_str,
+                    "status": status,
+                    "last_completed": last_date.isoformat() if last_date else None,
+                    "next_execution": next_date.isoformat() if next_date else None,
+                    "completed_by": completed_by,
+                    "done_at": done_at_str,
+                })
+
+            house_by_date_res[d_str] = chores_list
+
+            # --- Build Personal tasks for date `d` ---
+            pts = pers_by_date.get(d, [])
+            if d == today:
+                pts = list(pts) + list(today_uncompleted_pers)
+                seen_ids = set()
+                pts_unique = []
+                for t in pts:
+                    if t.id not in seen_ids:
+                        seen_ids.add(t.id)
+                        pts_unique.append(t)
+                pts = pts_unique
+
+            pers_list = []
+            for t in pts:
+                last_date = pers_last_completed.get(t.text)
+                next_date = pers_next_exec.get(t.text)
+                pers_list.append({
+                    "id": t.id,
+                    "text": t.text,
+                    "date": str(t.date_execution),
+                    "recurrence": t.recurrence,
+                    "category": t.category,
+                    "type": "personal",
+                    "is_completed": t.is_completed,
+                    "last_completed": last_date.isoformat() if last_date else None,
+                    "next_execution": next_date.isoformat() if next_date else None,
+                })
+
+            household_in_progress = []
+            if d == today:
+                for inst, tmpl in in_progress_house:
+                    last_date = last_completed_map.get(tmpl.id)
+                    next_date = next_execution_map.get(tmpl.id)
+                    household_in_progress.append({
+                        "id": inst.id,
+                        "text": tmpl.title,
+                        "points": tmpl.points,
+                        "template_id": tmpl.id,
+                        "type": "household",
+                        "status": "in_progress",
+                        "last_completed": last_date.isoformat() if last_date else None,
+                        "next_execution": next_date.isoformat() if next_date else None,
+                    })
+
+            personal_by_date_res[d_str] = {
+                "personal": pers_list,
+                "household": household_in_progress
+            }
+
+        return {
+            "house": house_by_date_res,
+            "personal": personal_by_date_res
+        }
+
+
 # -- Personal tasks --
 @app.get("/api/tasks/today")
 async def get_today_tasks(date: Optional[str] = None, user: User = Depends(get_current_user)):

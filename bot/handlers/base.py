@@ -513,28 +513,40 @@ async def generate_chores_for_week(session, house_id: int, monday_date: date):
                 ))
             )
             
+            today = await get_house_today_date(session)
             if last_done is None and active_inst_date is None:
-                next_occ = tmpl.start_date or monday_date
+                # Если задача еще не выполнялась, то она тоже должна стоять на сегодня
+                next_occ = today
             else:
                 ref_date = active_inst_date or last_done or tmpl.start_date or (monday_date - timedelta(days=1))
                 next_occ = ref_date + timedelta(days=days)
             
-            if next_occ < monday_date:
-                diff = (monday_date - next_occ).days
-                k = (diff + days - 1) // days
-                first_occ = next_occ + timedelta(days=k * days)
-            else:
-                first_occ = next_occ
+            # если в прошлом то кинь эти задачи на сегодняшний день
+            if next_occ < today:
+                next_occ = today
                 
+            first_occ = next_occ
+            
             curr_occ = first_occ
             while curr_occ <= sunday_date:
                 if curr_occ >= monday_date:
                     scheduled_dates.append(curr_occ)
                 curr_occ += timedelta(days=days)
         elif p == "once":
-            anchor = tmpl.start_date or monday_date
-            if monday_date <= anchor <= sunday_date:
-                scheduled_dates.append(anchor)
+            has_done = await session.scalar(
+                select(TaskInstance.id).where(and_(
+                    TaskInstance.template_id == tmpl.id,
+                    TaskInstance.status == "done"
+                ))
+            )
+            if not has_done:
+                # Если задача еще не выполнялась, то она тоже должна стоять на сегодня
+                today = await get_house_today_date(session)
+                anchor = tmpl.start_date or today
+                if anchor < today:
+                    anchor = today
+                if monday_date <= anchor <= sunday_date:
+                    scheduled_dates.append(anchor)
 
         # Clean up any incorrect future/uncompleted instances of this template for this week
         if p in ("every_x_days", "once"):
@@ -1107,23 +1119,32 @@ def get_template_next_date(t: TaskTemplate, last_done_date: date, active_inst_da
     if p == "once":
         if last_done_date:
             return date(2099, 12, 31)
-        return t.start_date or today_date
+        # Если задача еще не выполнялась, то она тоже должна стоять на сегодня
+        anchor = t.start_date or today_date
+        if anchor < today_date:
+            anchor = today_date
+        return anchor
 
-    # If the task has never been done and has no active instance, its first scheduled date is its start_date.
+    # Если задача еще не выполнялась, то она тоже должна стоять на сегодня
     if last_done_date is None and active_inst_date is None:
-        return t.start_date or today_date
+        return today_date
 
     ref_date = active_inst_date or last_done_date or t.start_date or (today_date - timedelta(days=1))
-    
-    # For find_scheduled_date_on_or_after, we search starting from ref_date + 1 day
-    search_start = ref_date + timedelta(days=1)
     
     # If the task is every_x_days, it shifts relative to ref_date
     if p == "every_x_days":
         days = t.period_days or 1
-        return ref_date + timedelta(days=days)
+        nd = ref_date + timedelta(days=days)
+    else:
+        # For find_scheduled_date_on_or_after, we search starting from ref_date + 1 day
+        search_start = ref_date + timedelta(days=1)
+        nd = find_scheduled_date_on_or_after(t, search_start)
         
-    return find_scheduled_date_on_or_after(t, search_start)
+    # если в прошлом то кинь эти задачи на сегодняшний день
+    if nd < today_date:
+        return today_date
+        
+    return nd
 
 
 
