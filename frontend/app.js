@@ -511,34 +511,10 @@ function showSpinnerIfNeeded(container, selector = '.task-card, .reward-card, .s
 }
 
 // ── House Tab ─────────────────────────────────────────────────────────────────
-// Background prefetching helper
+// Background prefetching helper — disabled since batch endpoint already loads all week dates
 function prefetchDatesAround(centerDateStr) {
-  const parts = centerDateStr.split('-');
-  const y = parseInt(parts[0], 10);
-  const m = parseInt(parts[1], 10) - 1;
-  const d = parseInt(parts[2], 10);
-  
-  const centerDt = new Date(y, m, d);
-  
-  const yesterdayDt = new Date(centerDt);
-  yesterdayDt.setDate(centerDt.getDate() - 1);
-  const yesterdayStr = formatLocalDate(yesterdayDt);
-  
-  const tomorrowDt = new Date(centerDt);
-  tomorrowDt.setDate(centerDt.getDate() + 1);
-  const tomorrowStr = formatLocalDate(tomorrowDt);
-  
-  if (!window.tasksCache[yesterdayStr]) {
-    api('GET', `/api/house/tasks?date=${yesterdayStr}`, null, true).then(data => {
-      window.tasksCache[yesterdayStr] = data;
-    }).catch(e => console.warn("Failed to prefetch tasks for " + yesterdayStr, e));
-  }
-  
-  if (!window.tasksCache[tomorrowStr]) {
-    api('GET', `/api/house/tasks?date=${tomorrowStr}`, null, true).then(data => {
-      window.tasksCache[tomorrowStr] = data;
-    }).catch(e => console.warn("Failed to prefetch tasks for " + tomorrowStr, e));
-  }
+  // No-op: batch endpoint preloads all 7 days of the current week at startup.
+  // Individual prefetch calls would re-trigger generate_daily_chores_if_needed.
 }
 
 async function loadHouseTab() {
@@ -568,14 +544,8 @@ async function loadHouseTab() {
     if (hasCachedTasks) {
       const cachedTasks = window.tasksCache[dateStr];
       renderHouseTasks(cachedTasks);
-      
-      tasksPromise = api('GET', `/api/house/tasks?date=${dateStr}`, null, true).then(freshTasks => {
-        if (JSON.stringify(window.tasksCache[dateStr]) !== JSON.stringify(freshTasks)) {
-          window.tasksCache[dateStr] = freshTasks;
-          renderHouseTasks(freshTasks);
-        }
-        return freshTasks;
-      });
+      // Use cached data — no background re-fetch, batch endpoint already loaded the week
+      tasksPromise = Promise.resolve(cachedTasks);
     } else {
       tasksPromise = api('GET', `/api/house/tasks?date=${dateStr}`).then(freshTasks => {
         window.tasksCache[dateStr] = freshTasks;
@@ -831,14 +801,8 @@ async function loadPersonalTab() {
     if (hasCached) {
       const cached = window.personalTasksCache[dateStr];
       renderPersonalTasks(cached.personal, cached.household);
-      
-      tasksPromise = api('GET', `/api/tasks/today?date=${dateStr}`, null, true).then(fresh => {
-        if (JSON.stringify(window.personalTasksCache[dateStr]) !== JSON.stringify(fresh)) {
-          window.personalTasksCache[dateStr] = fresh;
-          renderPersonalTasks(fresh.personal, fresh.household);
-        }
-        return fresh;
-      });
+      // Use cached data — no background re-fetch, batch endpoint already loaded the week
+      tasksPromise = Promise.resolve(cached);
     } else {
       tasksPromise = api('GET', `/api/tasks/today?date=${dateStr}`).then(fresh => {
         window.personalTasksCache[dateStr] = fresh;
