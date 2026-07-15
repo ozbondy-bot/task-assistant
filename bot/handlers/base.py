@@ -604,14 +604,18 @@ async def generate_daily_chores_if_needed(session, house_id: int):
 
     _last_generation_check = (house_id, today)
 
-    # 2. Rollover old uncompleted household task instances
+    # 2. Rollover old uncompleted household task instances for this house
     old_instances = (await session.execute(
-        select(TaskInstance).where(and_(
+        select(TaskInstance)
+        .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
+        .where(and_(
+            TaskTemplate.house_id == house_id,
             TaskInstance.date < today,
             TaskInstance.status.in_(["free", "in_progress"])
         ))
     )).scalars().all()
 
+    shifts_to_run = []
     for inst in old_instances:
         tmpl = await session.get(TaskTemplate, inst.template_id)
         if not tmpl:
@@ -625,7 +629,7 @@ async def generate_daily_chores_if_needed(session, house_id: int):
         else:
             # check if a copy exists today
             exists_today = await session.scalar(
-                select(TaskInstance).where(and_(
+                select(TaskInstance.id).where(and_(
                     TaskInstance.template_id == tmpl.id,
                     TaskInstance.date == today
                 ))
@@ -642,26 +646,34 @@ async def generate_daily_chores_if_needed(session, house_id: int):
                         inst.done_by_user_id = None
                         inst.done_at = None
                     
-                    # Also shift all future uncompleted instances of this template
-                    await session.execute(
-                        update(TaskInstance)
-                        .where(and_(
-                            TaskInstance.template_id == tmpl.id,
-                            TaskInstance.date > old_date,
-                            TaskInstance.status.in_(["free", "in_progress"])
-                        ))
-                        .values(date=TaskInstance.date + timedelta(days=diff_days))
-                    )
+                    # Store shift parameters to run after the loop to prevent greenlet_spawn error
+                    shifts_to_run.append((tmpl.id, old_date, diff_days))
             else:
                 # delete yesterday's duplicate copy
                 await session.delete(inst)
 
     await session.flush()
 
-    # Rollover old uncompleted personal tasks to today
+    # Execute shifts now that we are done iterating over old_instances
+    for tmpl_id, old_date, diff_days in shifts_to_run:
+        await session.execute(
+            update(TaskInstance)
+            .where(and_(
+                TaskInstance.template_id == tmpl_id,
+                TaskInstance.date > old_date,
+                TaskInstance.status.in_(["free", "in_progress"])
+            ))
+            .values(date=TaskInstance.date + timedelta(days=diff_days))
+        )
+
+    # Rollover old uncompleted personal tasks to today for users of this house
+    from db.models import User
     await session.execute(
         update(PersonalTask)
         .where(and_(
+            PersonalTask.user_id.in_(
+                select(User.id).where(User.house_id == house_id)
+            ),
             PersonalTask.date_execution < today,
             PersonalTask.is_completed == False,
             PersonalTask.is_deleted == False
