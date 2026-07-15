@@ -14,3 +14,6 @@ build/
 temp_*.ogg
 temp_*.wav
 .DS_Store
+.venv/
+venv/
+scratch/

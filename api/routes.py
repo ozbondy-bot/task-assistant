@@ -154,6 +154,56 @@ async def health():
     return {"status": "ok", "ts": datetime.utcnow().isoformat()}
 
 
+
+# -- Admin: force-reset all task instances for current week --
+@app.post("/api/admin/reset-instances")
+async def admin_reset_instances(user: User = Depends(get_current_user)):
+    """Delete all future/free task instances and reset generation lock so they get regenerated correctly."""
+    from bot.handlers.base import get_house_today_date, generate_chores_for_week
+    from sqlalchemy import delete as sa_delete, update as sa_update
+    async with AsyncSessionLocal() as session:
+        today = await get_house_today_date(session)
+        monday_date = today - timedelta(days=today.weekday())
+        
+        # Step 1: Delete ALL free/in_progress instances for current week and future
+        # (keeps done and skipped intact)
+        tmpl_ids_res = await session.execute(
+            select(TaskTemplate.id).where(
+                and_(TaskTemplate.house_id == ACTIVE_HOUSE_ID, TaskTemplate.deleted == False)
+            )
+        )
+        tmpl_ids = [r[0] for r in tmpl_ids_res.all()]
+        
+        if tmpl_ids:
+            await session.execute(
+                sa_delete(TaskInstance).where(
+                    and_(
+                        TaskInstance.template_id.in_(tmpl_ids),
+                        TaskInstance.date >= monday_date,
+                        TaskInstance.status.in_(["free", "in_progress", "shifted"])
+                    )
+                )
+            )
+        
+        # Step 2: Reset generation lock so it runs fresh
+        await session.execute(
+            sa_update(House)
+            .where(House.id == ACTIVE_HOUSE_ID)
+            .values(last_summary_date=None)
+        )
+        await session.commit()
+        
+        # Step 3: Regenerate for current week
+        async with AsyncSessionLocal() as session2:
+            # Also clear the in-memory lock
+            import bot.handlers.base as base_module
+            base_module._last_generation_check = None
+            await generate_chores_for_week(session2, ACTIVE_HOUSE_ID, monday_date)
+            await session2.commit()
+        
+        return {"status": "ok", "message": f"Reset and regenerated instances from {monday_date}"}
+
+
 # -- Batch Tasks Loader --
 @app.get("/api/batch/tasks")
 async def get_batch_tasks(start_date: str, end_date: str, user: User = Depends(get_current_user)):
@@ -218,7 +268,7 @@ async def get_batch_tasks(start_date: str, end_date: str, user: User = Depends(g
             )
             last_completed_map = dict(last_completed_res.all())
 
-        # Next execution dates (for dates > today)
+        # Next execution dates (for showing "next_execution" metadata)
         next_execution_map = {}
         if tmpl_ids:
             next_execution_res = await session.execute(
@@ -233,34 +283,6 @@ async def get_batch_tasks(start_date: str, end_date: str, user: User = Depends(g
                 .group_by(TaskInstance.template_id)
             )
             next_execution_map = dict(next_execution_res.all())
-
-        # For simulating future task occurrences in `every_x_days`
-        last_handled_map = {}
-        active_inst_map = {}
-        if tmpl_ids:
-            last_handled_res = await session.execute(
-                select(TaskInstance.template_id, func.max(TaskInstance.date))
-                .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
-                .where(and_(
-                    TaskTemplate.house_id == ACTIVE_HOUSE_ID,
-                    TaskInstance.status.in_(["done", "skipped"]),
-                    TaskInstance.date <= end_d
-                ))
-                .group_by(TaskInstance.template_id)
-            )
-            last_handled_map = dict(last_handled_res.all())
-
-            active_inst_res = await session.execute(
-                select(TaskInstance.template_id, func.min(TaskInstance.date))
-                .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
-                .where(and_(
-                    TaskTemplate.house_id == ACTIVE_HOUSE_ID,
-                    TaskInstance.status.in_(["free", "in_progress"]),
-                    TaskInstance.date < end_d
-                ))
-                .group_by(TaskInstance.template_id)
-            )
-            active_inst_map = dict(active_inst_res.all())
 
         # Resolve done_by_user_id
         user_result = await session.execute(
@@ -343,81 +365,19 @@ async def get_batch_tasks(start_date: str, end_date: str, user: User = Depends(g
             d_str = str(d)
             
             # --- Build Household tasks for date `d` ---
+            # IMPORTANT: Only show what's actually in the DB. 
+            # generate_chores_for_week already put the right instances there.
+            # No virtual task generation here — that was causing triple-display bugs.
             raw_tasks = []
-            if d > today:
-                existing_for_d = []
-                for tmpl in templates:
-                    insts = inst_map.get(tmpl.id, [])
-                    matching_inst = next((i for i in insts if i.date == d), None)
-                    if matching_inst:
-                        existing_for_d.append((matching_inst, tmpl))
-                existing_template_ids = {r[1].id for r in existing_for_d}
-
-                for inst, tmpl in existing_for_d:
-                    raw_tasks.append((inst.id, tmpl.id, tmpl.title, tmpl.points, tmpl.periodicity, tmpl.period_days, d_str, inst.status, inst))
-
-                weekday = d.weekday()
-                day_of_month = d.day
-                month = d.month
-                for tmpl in templates:
-                    if tmpl.id in existing_template_ids:
-                        continue
-                    if tmpl.start_date and d < tmpl.start_date:
-                        continue
-
-                    p = tmpl.periodicity
-                    should_run = False
-                    if p == "daily":
-                        should_run = True
-                    elif p == "weekly":
-                        should_run = (weekday == (tmpl.weekday if tmpl.weekday is not None else 0))
-                    elif p == "twice_weekly":
-                        should_run = (weekday in (0, 3))
-                    elif p == "monthly":
-                        should_run = (day_of_month == (tmpl.month_day if tmpl.month_day is not None else 1))
-                    elif p == "twice_monthly":
-                        should_run = (day_of_month in (5, 20))
-                    elif p == "quarterly":
-                        if day_of_month == (tmpl.month_day if tmpl.month_day is not None else 1):
-                            pos = ((month - 1) % 3) + 1
-                            if pos == (tmpl.weekday if tmpl.weekday is not None else 1):
-                                should_run = True
-                    elif p == "every_x_days":
-                        last_handled_date = last_handled_map.get(tmpl.id)
-                        active_inst_date = active_inst_map.get(tmpl.id)
-                        from bot.handlers.base import get_template_next_date
-                        nd = get_template_next_date(tmpl, last_handled_date, active_inst_date, today)
-                        if nd < d:
-                            days = tmpl.period_days or 1
-                            diff = (d - nd).days
-                            k = (diff + days - 1) // days
-                            nd += timedelta(days=k * days)
-                        if nd == d:
-                            should_run = True
-                    elif p == "once":
-                        last_handled_date = last_handled_map.get(tmpl.id)
-                        active_inst_date = active_inst_map.get(tmpl.id)
-                        from bot.handlers.base import get_template_next_date
-                        nd = get_template_next_date(tmpl, last_handled_date, active_inst_date, today)
-                        if nd == d:
-                            should_run = True
-
-                    if should_run:
-                        raw_tasks.append((0, tmpl.id, tmpl.title, tmpl.points, tmpl.periodicity, tmpl.period_days, d_str, "free", None))
-
-            elif d == today:
-                for tmpl in templates:
-                    insts = inst_map.get(tmpl.id, [])
-                    matching_inst = next((i for i in insts if i.date == today), None)
-                    if matching_inst:
-                        raw_tasks.append((matching_inst.id, tmpl.id, tmpl.title, tmpl.points, tmpl.periodicity, tmpl.period_days, d_str, matching_inst.status, matching_inst))
-            else:
-                # Past dates: show only completed (done) tasks
-                for tmpl in templates:
-                    insts = inst_map.get(tmpl.id, [])
-                    matching_inst = next((i for i in insts if i.date == d and i.status == "done"), None)
-                    if matching_inst:
-                        raw_tasks.append((matching_inst.id, tmpl.id, tmpl.title, tmpl.points, tmpl.periodicity, tmpl.period_days, d_str, matching_inst.status, matching_inst))
+            for tmpl in templates:
+                insts = inst_map.get(tmpl.id, [])
+                for inst in insts:
+                    if inst.date == d and inst.status != "shifted":
+                        # For past dates: only show completed tasks
+                        if d < today and inst.status != "done":
+                            continue
+                        raw_tasks.append((inst.id, tmpl.id, tmpl.title, tmpl.points, 
+                                         tmpl.periodicity, tmpl.period_days, d_str, inst.status, inst))
 
             chores_list = []
             for inst_id, tmpl_id, title, points, periodicity, period_days, date_str, status, inst in raw_tasks:
