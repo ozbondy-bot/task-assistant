@@ -153,14 +153,13 @@ function preloadCurrentWeek() {
   window.personalTasksCache = window.personalTasksCache || {};
   window.tasksCache = window.tasksCache || {};
 
-  // Preload current calendar week only: Monday to Sunday
-  const currentDay = today.getDay(); // 0 is Sunday, 1 is Monday, ... 6 is Saturday
-  const distanceToMonday = currentDay === 0 ? -6 : 1 - currentDay;
+  // Load sliding 14 days window (3 days back to 10 days ahead)
+  // This guarantees yesterday, today, and tomorrow are fully cached at startup
   const startD = new Date(today);
-  startD.setDate(today.getDate() + distanceToMonday);
+  startD.setDate(today.getDate() - 3);
 
-  const endD = new Date(startD);
-  endD.setDate(startD.getDate() + 6);
+  const endD = new Date(today);
+  endD.setDate(today.getDate() + 10);
 
   const startStr = formatLocalDate(startD);
   const endStr = formatLocalDate(endD);
