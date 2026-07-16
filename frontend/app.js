@@ -100,26 +100,7 @@ document.addEventListener('DOMContentLoaded', () => {
   setupFABs();
   loadWeeklyGoal();
   
-  // One-time fix for corrupted task instances: reset and regenerate on first session load.
-  // This clears any instances that drifted to wrong future dates.
-  const RESET_VERSION = 'v2-2026-07-15';
-  if (sessionStorage.getItem('instancesReset') !== RESET_VERSION) {
-    api('POST', '/api/admin/reset-instances', null, true)
-      .then(() => {
-        sessionStorage.setItem('instancesReset', RESET_VERSION);
-        console.log('[Init] Task instances reset completed');
-        // After reset, clear caches and reload week data
-        window.tasksCache = {};
-        window.personalTasksCache = {};
-        preloadCurrentWeek();
-      })
-      .catch(e => {
-        console.warn('[Init] Reset failed, loading without reset:', e);
-        preloadCurrentWeek();
-      });
-  } else {
-    preloadCurrentWeek();
-  }
+  preloadCurrentWeek();
   
   connectWebSocket();
 });

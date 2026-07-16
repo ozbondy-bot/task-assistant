@@ -420,8 +420,11 @@ async def get_house_today_date(session: AsyncSession) -> date:
 
 
 async def generate_chores_for_week(session, house_id: int, monday_date: date):
-    from sqlalchemy import select, and_, func
+    from sqlalchemy import select, and_, func, text
     from datetime import timedelta, date
+    
+    # Acquire pg_advisory_xact_lock to prevent concurrent executions for the same house
+    await session.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": 81000 + house_id})
     
     house = await session.get(House, house_id)
     if not house:
