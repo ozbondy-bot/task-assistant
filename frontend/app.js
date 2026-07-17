@@ -95,12 +95,18 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   setupTabs();
-  loadHouseTab();
   setupModals();
   setupFABs();
+
+  // Preload sliding window tasks silently (awaits completion to prevent parallel HTTP requests)
+  try {
+    await preloadCurrentWeek();
+  } catch (e) {
+    console.error("Failed initial preloading", e);
+  }
+
+  loadHouseTab();
   loadWeeklyGoal();
-  
-  preloadCurrentWeek();
   
   connectWebSocket();
 });
@@ -164,7 +170,7 @@ function preloadCurrentWeek() {
   const startStr = formatLocalDate(startD);
   const endStr = formatLocalDate(endD);
 
-  api('GET', `/api/batch/tasks?start_date=${startStr}&end_date=${endStr}`, null, true).then(data => {
+  return api('GET', `/api/batch/tasks?start_date=${startStr}&end_date=${endStr}`, null, true).then(data => {
     if (data.house) {
       for (const dateStr in data.house) {
         window.tasksCache[dateStr] = data.house[dateStr];
@@ -185,16 +191,18 @@ function preloadCurrentWeek() {
     console.warn("Failed to preload batch tasks", e);
     // Fallback: load active day tasks individually
     const activeHouseDate = getHouseActiveDateStr();
-    api('GET', `/api/house/tasks?date=${activeHouseDate}`).then(res => {
+    const p1 = api('GET', `/api/house/tasks?date=${activeHouseDate}`).then(res => {
       window.tasksCache[activeHouseDate] = res;
       renderHouseTasks(res);
     }).catch(err => console.error("Fallback house tasks load failed", err));
 
     const activePersonalDate = getPersonalActiveDateStr();
-    api('GET', `/api/tasks/today?date=${activePersonalDate}`).then(res => {
+    const p2 = api('GET', `/api/tasks/today?date=${activePersonalDate}`).then(res => {
       window.personalTasksCache[activePersonalDate] = res;
       renderPersonalTasks(res.personal, res.household);
     }).catch(err => console.error("Fallback personal tasks load failed", err));
+
+    return Promise.all([p1, p2]);
   });
 }
 window.preloadCurrentWeek = preloadCurrentWeek;
@@ -1997,7 +2005,6 @@ async function openAddFromDatabaseModal() {
   // IDs шаблонов, уже активных сегодня
   const activeIds = new Set(
     activeTasks
-      .filter(t => t.status === 'free' || t.status === 'in_progress')
       .map(t => t.template_id)
       .filter(id => id != null)
   );

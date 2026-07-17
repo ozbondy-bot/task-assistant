@@ -447,25 +447,64 @@ async def generate_chores_for_week(session, house_id: int, monday_date: date):
         )
     )).scalars().all()
 
+    if not templates:
+        return
+
+    tmpl_ids = [t.id for t in templates]
+    today = await get_house_today_date(session)
+
+    # 1. Bulk query last COMPLETED date for every template (for every_x_days)
+    last_done_map = {}
+    if tmpl_ids:
+        last_done_result = await session.execute(
+            select(TaskInstance.template_id, func.max(TaskInstance.date))
+            .where(and_(TaskInstance.template_id.in_(tmpl_ids), TaskInstance.status == "done"))
+            .group_by(TaskInstance.template_id)
+        )
+        last_done_map = dict(last_done_result.all())
+
+    # 2. Bulk query if templates ever had a COMPLETED instance (for once)
+    once_done_ids = set()
+    if tmpl_ids:
+        once_done_result = await session.execute(
+            select(TaskInstance.template_id)
+            .where(and_(
+                TaskInstance.template_id.in_(tmpl_ids),
+                TaskInstance.status == "done"
+            ))
+            .distinct()
+        )
+        once_done_ids = {row[0] for row in once_done_result.all()}
+
+    # 3. Bulk query all existing task instances for this week to check "exists" and "has_instances"
+    week_instances = []
+    if tmpl_ids:
+        week_inst_result = await session.execute(
+            select(TaskInstance)
+            .where(and_(
+                TaskInstance.template_id.in_(tmpl_ids),
+                TaskInstance.date.between(monday_date, sunday_date)
+            ))
+        )
+        week_instances = week_inst_result.scalars().all()
+
+    # Map: template_id -> list of instances this week
+    inst_list_by_tmpl = {}
+    # Map: (template_id, date) -> TaskInstance
+    inst_by_tmpl_and_date = {}
+    for inst in week_instances:
+        inst_list_by_tmpl.setdefault(inst.template_id, []).append(inst)
+        inst_by_tmpl_and_date[(inst.template_id, inst.date)] = inst
+
     for tmpl in templates:
         if week_already_generated:
-            # Check if this template already has any instances generated for this week (including done, skipped or shifted)
-            has_instances = await session.scalar(
-                select(TaskInstance.id)
-                .where(
-                    and_(
-                        TaskInstance.template_id == tmpl.id,
-                        TaskInstance.date.between(monday_date, sunday_date)
-                    )
-                )
-                .limit(1)
-            )
+            # Check if this template already has any instances generated for this week
+            has_instances = len(inst_list_by_tmpl.get(tmpl.id, [])) > 0
             if has_instances:
                 continue
 
         p = tmpl.periodicity
         days = tmpl.period_days or 1
-        
         scheduled_dates = []
         
         if p == "daily" or (p == "every_x_days" and days == 1):
@@ -498,46 +537,23 @@ async def generate_chores_for_week(session, house_id: int, monday_date: date):
                     if pos == target_q_month:
                         scheduled_dates.append(curr_d)
         elif p == "every_x_days":
-            # Use only the last COMPLETED instance as reference point.
-            # Do NOT use active_inst_date — it causes double-booking when rollover
-            # already moved an instance to today and generate_chores_for_week creates another.
-            last_done = await session.scalar(
-                select(func.max(TaskInstance.date))
-                .where(and_(
-                    TaskInstance.template_id == tmpl.id,
-                    TaskInstance.status == "done"
-                ))
-            )
-            
-            today = await get_house_today_date(session)
-            
+            last_done = last_done_map.get(tmpl.id)
             if last_done is None:
-                # Task never completed: first occurrence is today
                 first_occ = today
             else:
-                # Calculate next from last_done
                 next_occ = last_done + timedelta(days=days)
-                # If the next occurrence is in the past, snap to today
                 if next_occ < today:
                     next_occ = today
                 first_occ = next_occ
             
-            # Collect all occurrences within the week range
             curr_occ = first_occ
             while curr_occ <= sunday_date:
                 if curr_occ >= monday_date:
                     scheduled_dates.append(curr_occ)
                 curr_occ += timedelta(days=days)
         elif p == "once":
-            has_done = await session.scalar(
-                select(TaskInstance.id).where(and_(
-                    TaskInstance.template_id == tmpl.id,
-                    TaskInstance.status == "done"
-                ))
-            )
+            has_done = tmpl.id in once_done_ids
             if not has_done:
-                # Если задача еще не выполнялась, то она тоже должна стоять на сегодня
-                today = await get_house_today_date(session)
                 anchor = tmpl.start_date or today
                 if anchor < today:
                     anchor = today
@@ -546,15 +562,10 @@ async def generate_chores_for_week(session, house_id: int, monday_date: date):
 
         # Clean up any incorrect future/uncompleted instances of this template for this week
         if p in ("every_x_days", "once"):
-            existing_uncompleted = (await session.execute(
-                select(TaskInstance)
-                .where(and_(
-                    TaskInstance.template_id == tmpl.id,
-                    TaskInstance.date.between(monday_date, sunday_date),
-                    TaskInstance.status.in_(["free", "in_progress"])
-                ))
-            )).scalars().all()
-            
+            existing_uncompleted = [
+                inst for inst in inst_list_by_tmpl.get(tmpl.id, [])
+                if inst.status in ("free", "in_progress")
+            ]
             for inst in existing_uncompleted:
                 if inst.date not in scheduled_dates:
                     await session.delete(inst)
@@ -565,14 +576,7 @@ async def generate_chores_for_week(session, house_id: int, monday_date: date):
             if tmpl.start_date and s_date < tmpl.start_date:
                 continue
             
-            exists = await session.scalar(
-                select(TaskInstance.id).where(
-                    and_(
-                        TaskInstance.template_id == tmpl.id,
-                        TaskInstance.date == s_date
-                    )
-                )
-            )
+            exists = (tmpl.id, s_date) in inst_by_tmpl_and_date
             if not exists:
                 inst = TaskInstance(
                     template_id=tmpl.id,
@@ -614,8 +618,10 @@ async def generate_daily_chores_if_needed(session, house_id: int):
     _last_generation_check = (house_id, today)
 
     # 2. Rollover old uncompleted household task instances for this house
+    from sqlalchemy.orm import joinedload
     old_instances = (await session.execute(
         select(TaskInstance)
+        .options(joinedload(TaskInstance.template))
         .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
         .where(and_(
             TaskTemplate.house_id == house_id,
@@ -624,8 +630,20 @@ async def generate_daily_chores_if_needed(session, house_id: int):
         ))
     )).scalars().all()
 
+    old_tmpl_ids = [inst.template_id for inst in old_instances if inst.template_id is not None]
+    exists_today_ids = set()
+    if old_tmpl_ids:
+        exists_today_result = await session.execute(
+            select(TaskInstance.template_id)
+            .where(and_(
+                TaskInstance.template_id.in_(old_tmpl_ids),
+                TaskInstance.date == today
+            ))
+        )
+        exists_today_ids = {row[0] for row in exists_today_result.all()}
+
     for inst in old_instances:
-        tmpl = await session.get(TaskTemplate, inst.template_id)
+        tmpl = inst.template
         if not tmpl:
             await session.delete(inst)
             continue
@@ -642,12 +660,7 @@ async def generate_daily_chores_if_needed(session, house_id: int):
             await session.delete(inst)
         else:
             # For fixed-schedule tasks (weekly, monthly, etc): move to today if no copy exists
-            exists_today = await session.scalar(
-                select(TaskInstance.id).where(and_(
-                    TaskInstance.template_id == tmpl.id,
-                    TaskInstance.date == today
-                ))
-            )
+            exists_today = tmpl.id in exists_today_ids
             if not exists_today:
                 inst.date = today
                 if inst.status == "in_progress":
