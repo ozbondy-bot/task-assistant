@@ -71,7 +71,7 @@ function rewardIcon(id) {
 }
 
 // ── Init ─────────────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   if (tg) {
     tg.ready();
     tg.expand();
