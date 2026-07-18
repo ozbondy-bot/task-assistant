@@ -2409,9 +2409,21 @@ async def debug_inspect(reset: Optional[int] = None):
 
 
 # ── Static files for Mini App ─────────────────────────────────────────────────
+from starlette.responses import Response
+
+class NoCacheStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope) -> Response:
+        response = await super().get_response(path, scope)
+        # Disable caching for HTML files to force index.html reloads in Telegram WebApp
+        if path == "" or path == "index.html" or response.headers.get("content-type", "").startswith("text/html"):
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        return response
+
 frontend_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend")
 if os.path.exists(frontend_dir):
-    app.mount("/app", StaticFiles(directory=frontend_dir, html=True), name="frontend")
+    app.mount("/app", NoCacheStaticFiles(directory=frontend_dir, html=True), name="frontend")
 
 
 @app.get("/")
@@ -2419,5 +2431,12 @@ if os.path.exists(frontend_dir):
 async def root():
     index = os.path.join(frontend_dir, "index.html")
     if os.path.exists(index):
-        return FileResponse(index)
+        return FileResponse(
+            index,
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0"
+            }
+        )
     return {"message": "Task Assistant API", "docs": "/health"}
