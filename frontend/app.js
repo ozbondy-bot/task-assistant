@@ -691,11 +691,35 @@ function renderHouseTasks(tasks) {
 }
 
 async function claimTask(instanceId) {
+  const activeHouseDate = getHouseActiveDateStr();
+  const houseTasks = window.tasksCache[activeHouseDate];
+  const t = houseTasks ? houseTasks.find(item => item.id === instanceId) : null;
+
+  const originalStatus = t ? t.status : null;
+
+  if (t) {
+    t.status = 'in_progress';
+    renderHouseTasks(houseTasks);
+  }
+
+  showToast('🏠 Задача взята!');
+
   try {
-    await api('POST', `/api/house/tasks/${instanceId}/claim`);
-    showToast('🏠 Задача взята! Теперь она в «Мои дела»');
-    await Promise.all([loadHouseTab(), loadPersonalTab(), loadWeeklyGoal()]);
+    await api('POST', `/api/house/tasks/${instanceId}/claim`, null, true);
+    
+    const [freshHouse, freshPersonal] = await Promise.all([
+      api('GET', `/api/house/tasks?date=${activeHouseDate}`, null, true),
+      api('GET', `/api/tasks/today?date=${getPersonalActiveDateStr()}`, null, true)
+    ]);
+    window.tasksCache[activeHouseDate] = freshHouse;
+    window.personalTasksCache[getPersonalActiveDateStr()] = freshPersonal;
+    renderHouseTasks(freshHouse);
+    renderPersonalTasks(freshPersonal.personal, freshPersonal.household);
   } catch (e) {
+    if (t) {
+      t.status = originalStatus;
+      renderHouseTasks(houseTasks);
+    }
     showToast(`⚠️ ${e.message}`);
   }
 }
@@ -910,13 +934,84 @@ function renderPersonalTasks(personal, household) {
   list.innerHTML = rows.join('');
 }
 
+function optimisticCompleteHouseTask(id, pointsEarned) {
+  const activeDate = getHouseActiveDateStr();
+  const tasks = window.tasksCache[activeDate];
+  if (!tasks) return null;
+  
+  const t = tasks.find(item => item.id === id);
+  if (!t) return null;
+  
+  const rollbackState = {
+    status: t.status,
+    completed_by: t.completed_by,
+    done_at: t.done_at
+  };
+  
+  t.status = 'done';
+  t.completed_by = (currentUser && currentUser.first_name) || 'Шурик';
+  
+  let rollbackPoints = null;
+  if (window.houseMembersList) {
+    const me = window.houseMembersList.find(m => m.is_me);
+    if (me) {
+      rollbackPoints = { points: me.points, weekly_earned: me.weekly_earned };
+      me.points += pointsEarned;
+      me.weekly_earned += pointsEarned;
+      renderMembers(window.houseMembersList);
+    }
+  }
+  
+  renderHouseTasks(tasks);
+  return { rollbackState, rollbackPoints, taskRef: t };
+}
+
+function rollbackHouseTask(taskRef, rollbackState, rollbackPoints) {
+  if (taskRef && rollbackState) {
+    taskRef.status = rollbackState.status;
+    taskRef.completed_by = rollbackState.completed_by;
+    taskRef.done_at = rollbackState.done_at;
+    
+    const activeDate = getHouseActiveDateStr();
+    if (window.tasksCache[activeDate]) {
+      renderHouseTasks(window.tasksCache[activeDate]);
+    }
+  }
+  
+  if (rollbackPoints && window.houseMembersList) {
+    const me = window.houseMembersList.find(m => m.is_me);
+    if (me) {
+      me.points = rollbackPoints.points;
+      me.weekly_earned = rollbackPoints.weekly_earned;
+      renderMembers(window.houseMembersList);
+    }
+  }
+}
+
 async function completePersonalTask(id) {
+  const activeDate = getPersonalActiveDateStr();
+  const cached = window.personalTasksCache[activeDate];
+  const t = (cached && cached.personal) ? cached.personal.find(item => item.id === id) : null;
+
+  const originalCompleted = t ? t.is_completed : null;
+
+  if (t) {
+    t.is_completed = true;
+    renderPersonalTasks(cached.personal, cached.household);
+  }
+
+  showToast('✅ Выполнено!');
+
   try {
-    await api('POST', `/api/tasks/${id}/complete`);
-    showToast('✅ Выполнено!');
-    loadPersonalTab();
-    loadWeeklyGoal();
+    await api('POST', `/api/tasks/${id}/complete`, null, true);
+    const freshPersonal = await api('GET', `/api/tasks/today?date=${activeDate}`, null, true);
+    window.personalTasksCache[activeDate] = freshPersonal;
+    renderPersonalTasks(freshPersonal.personal, freshPersonal.household);
   } catch (e) {
+    if (t) {
+      t.is_completed = originalCompleted;
+      renderPersonalTasks(cached.personal, cached.household);
+    }
     showToast(`⚠️ ${e.message}`);
   }
 }
@@ -924,17 +1019,32 @@ async function completePersonalTask(id) {
 let pendingCookingTaskId = null;
 
 async function completeHouseTask(id, title) {
-  if (title && (title.toLowerCase().includes('готов') || title.toLowerCase().includes('cook'))) {
+  const activeDate = getHouseActiveDateStr();
+  const tasks = window.tasksCache[activeDate];
+  const t = tasks ? tasks.find(item => item.id === id) : null;
+  const isCooking = title && (title.toLowerCase().includes('готов') || title.toLowerCase().includes('cook'));
+  
+  if (isCooking) {
     pendingCookingTaskId = id;
     document.getElementById('cookingDurationModal').classList.remove('hidden');
     return;
   }
+  
+  const points = t ? (t.points || 0) : 0;
+  const opt = optimisticCompleteHouseTask(id, points);
+  
+  showToast(`✅ Готово! +${points} ✨`);
+
   try {
-    const res = await api('POST', `/api/house/tasks/${id}/done`);
-    showToast(`✅ Готово! ${res.points_earned} ✨`);
-    await Promise.all([loadPersonalTab(), loadHouseTab(), loadWeeklyGoal()]);
+    await api('POST', `/api/house/tasks/${id}/done`, null, true);
+    const freshMembers = await api('GET', `/api/house/members?date=${activeDate}`, null, true);
+    window.houseMembersList = freshMembers;
+    renderMembers(freshMembers);
   } catch (e) {
-    showToast(`⚠️ ${e.message}`);
+    if (opt) {
+      rollbackHouseTask(opt.taskRef, opt.rollbackState, opt.rollbackPoints);
+    }
+    showToast(`⚠️ Ошибка: ${e.message}`);
   }
 }
 
@@ -942,12 +1052,53 @@ async function submitCookingDone(points) {
   const id = pendingCookingTaskId;
   document.getElementById('cookingDurationModal').classList.add('hidden');
   if (!id) return;
+
+  const activeDate = getHouseActiveDateStr();
+  const tasks = window.tasksCache[activeDate];
+  const t = tasks ? tasks.find(item => item.id === id) : null;
+
+  const originalStatus = t ? t.status : null;
+  const originalCompletedBy = t ? t.completed_by : null;
+  
+  let originalPoints = null;
+  if (t && window.houseMembersList) {
+    const me = window.houseMembersList.find(m => m.is_me);
+    if (me) {
+      originalPoints = { points: me.points, weekly_earned: me.weekly_earned };
+      me.points += points;
+      me.weekly_earned += points;
+      renderMembers(window.houseMembersList);
+    }
+  }
+
+  if (t) {
+    t.status = 'done';
+    t.completed_by = (currentUser && currentUser.first_name) || 'Шурик';
+    renderHouseTasks(tasks);
+  }
+
+  showToast(`✅ Готово! +${points} ✨`);
+
   try {
-    const res = await api('POST', `/api/house/tasks/${id}/done?points=${points}`);
-    showToast(`✅ Готово! ${res.points_earned} ✨`);
-    await Promise.all([loadPersonalTab(), loadHouseTab(), loadWeeklyGoal()]);
+    await api('POST', `/api/house/tasks/${id}/done?points=${points}`, null, true);
+    const freshMembers = await api('GET', `/api/house/members?date=${activeDate}`, null, true);
+    window.houseMembersList = freshMembers;
+    renderMembers(freshMembers);
   } catch (e) {
-    showToast(`⚠️ ${e.message}`);
+    if (t) {
+      t.status = originalStatus;
+      t.completed_by = originalCompletedBy;
+      renderHouseTasks(tasks);
+    }
+    if (originalPoints && window.houseMembersList) {
+      const me = window.houseMembersList.find(m => m.is_me);
+      if (me) {
+        me.points = originalPoints.points;
+        me.weekly_earned = originalPoints.weekly_earned;
+        renderMembers(window.houseMembersList);
+      }
+    }
+    showToast(`⚠️ Ошибка: ${e.message}`);
   }
 }
 
@@ -1443,21 +1594,70 @@ async function deleteReward(id) {
 async function unclaimChore(id) {
   closeModal('myTaskDetailsModal');
   if (!confirm('Вернуть задачу в свободные?')) return;
+
+  const activeHouseDate = getHouseActiveDateStr();
+  const houseTasks = window.tasksCache[activeHouseDate];
+  const t = houseTasks ? houseTasks.find(item => item.id === id) : null;
+
+  const originalStatus = t ? t.status : null;
+
+  if (t) {
+    t.status = 'free';
+    renderHouseTasks(houseTasks);
+  }
+
+  showToast('↩ Задача возвращена в свободные');
+
   try {
-    await api('POST', `/api/house/tasks/${id}/unclaim`);
-    showToast('↩ Задача возвращена в свободные');
-    await Promise.all([loadHouseTab(), loadPersonalTab(), loadWeeklyGoal()]);
+    await api('POST', `/api/house/tasks/${id}/unclaim`, null, true);
+    
+    const [freshHouse, freshPersonal] = await Promise.all([
+      api('GET', `/api/house/tasks?date=${activeHouseDate}`, null, true),
+      api('GET', `/api/tasks/today?date=${getPersonalActiveDateStr()}`, null, true)
+    ]);
+    window.tasksCache[activeHouseDate] = freshHouse;
+    window.personalTasksCache[getPersonalActiveDateStr()] = freshPersonal;
+    renderHouseTasks(freshHouse);
+    renderPersonalTasks(freshPersonal.personal, freshPersonal.household);
   } catch (e) {
+    if (t) {
+      t.status = originalStatus;
+      renderHouseTasks(houseTasks);
+    }
     showToast(`⚠️ ${e.message}`);
   }
 }
 
 async function skipChore(id) {
+  const activeHouseDate = getHouseActiveDateStr();
+  const houseTasks = window.tasksCache[activeHouseDate];
+  const t = houseTasks ? houseTasks.find(item => item.id === id) : null;
+
+  const originalStatus = t ? t.status : null;
+
+  if (t) {
+    t.status = 'skipped';
+    renderHouseTasks(houseTasks);
+  }
+
+  showToast('🗑 Задача пропущена на сегодня');
+
   try {
-    await api('POST', `/api/house/tasks/${id}/skip`);
-    showToast('🗑 Задача пропущена на сегодня');
-    await Promise.all([loadHouseTab(), loadPersonalTab(), loadWeeklyGoal()]);
+    await api('POST', `/api/house/tasks/${id}/skip`, null, true);
+    
+    const [freshHouse, freshPersonal] = await Promise.all([
+      api('GET', `/api/house/tasks?date=${activeHouseDate}`, null, true),
+      api('GET', `/api/tasks/today?date=${getPersonalActiveDateStr()}`, null, true)
+    ]);
+    window.tasksCache[activeHouseDate] = freshHouse;
+    window.personalTasksCache[getPersonalActiveDateStr()] = freshPersonal;
+    renderHouseTasks(freshHouse);
+    renderPersonalTasks(freshPersonal.personal, freshPersonal.household);
   } catch (e) {
+    if (t) {
+      t.status = originalStatus;
+      renderHouseTasks(houseTasks);
+    }
     showToast(`⚠️ ${e.message}`);
   }
 }
@@ -1496,11 +1696,36 @@ async function nudgeTask(instanceId) {
 async function skipFreeChore(instanceId) {
   closeModal('choreDetailsModal');
   if (!confirm('Удалить эту копию дела на сегодня?')) return;
+
+  const activeHouseDate = getHouseActiveDateStr();
+  const houseTasks = window.tasksCache[activeHouseDate];
+  const t = houseTasks ? houseTasks.find(item => item.id === instanceId) : null;
+
+  const originalStatus = t ? t.status : null;
+
+  if (t) {
+    t.status = 'skipped';
+    renderHouseTasks(houseTasks);
+  }
+
+  showToast('🗑 Копия дела удалена на сегодня');
+
   try {
-    await api('POST', `/api/house/tasks/${instanceId}/skip`);
-    showToast('🗑 Копия дела удалена на сегодня');
-    await Promise.all([loadHouseTab(), loadWeeklyGoal()]);
+    await api('POST', `/api/house/tasks/${instanceId}/skip`, null, true);
+    
+    const [freshHouse, freshMembers] = await Promise.all([
+      api('GET', `/api/house/tasks?date=${activeHouseDate}`, null, true),
+      api('GET', `/api/house/members?date=${activeHouseDate}`, null, true)
+    ]);
+    window.tasksCache[activeHouseDate] = freshHouse;
+    window.houseMembersList = freshMembers;
+    renderHouseTasks(freshHouse);
+    renderMembers(freshMembers);
   } catch (e) {
+    if (t) {
+      t.status = originalStatus;
+      renderHouseTasks(houseTasks);
+    }
     showToast(`⚠️ ${e.message}`);
   }
 }
@@ -1665,11 +1890,31 @@ async function loadPurchasesArchive(page) {
 async function deletePersonalTask(id) {
   closeModal('myTaskDetailsModal');
   if (!confirm('Удалить эту задачу?')) return;
+
+  const activeDate = getPersonalActiveDateStr();
+  const cached = window.personalTasksCache[activeDate];
+  if (!cached || !cached.personal) return;
+
+  const idx = cached.personal.findIndex(item => item.id === id);
+  if (idx === -1) return;
+
+  const deletedTask = cached.personal[idx];
+  
+  // Оптимистично удаляем из массива
+  cached.personal.splice(idx, 1);
+  renderPersonalTasks(cached.personal, cached.household);
+
+  showToast('🗑 Задача удалена');
+
   try {
-    await api('DELETE', `/api/tasks/${id}`);
-    showToast('🗑 Задача удалена');
-    loadPersonalTab();
+    await api('DELETE', `/api/tasks/${id}`, null, true);
+    const freshPersonal = await api('GET', `/api/tasks/today?date=${activeDate}`, null, true);
+    window.personalTasksCache[activeDate] = freshPersonal;
+    renderPersonalTasks(freshPersonal.personal, freshPersonal.household);
   } catch (e) {
+    // Откатываем при ошибке
+    cached.personal.splice(idx, 0, deletedTask);
+    renderPersonalTasks(cached.personal, cached.household);
     showToast(`⚠️ ${e.message}`);
   }
 }
