@@ -94,17 +94,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (av) av.textContent = 'Ш';
   }
 
+  // 1. Instantly display correct localized dates in pagination bars
+  const houseEl = document.getElementById('houseActiveDateDisplay');
+  if (houseEl) houseEl.textContent = getHouseActiveDateLabel();
+  const personalEl = document.getElementById('personalActiveDateDisplay');
+  if (personalEl) personalEl.textContent = getPersonalActiveDateLabel();
+  const shoppingEl = document.getElementById('shoppingActiveDateDisplay');
+  if (shoppingEl) shoppingEl.textContent = getShoppingActiveDateLabel();
+
   setupTabs();
   setupModals();
   setupFABs();
 
-  // Preload sliding window tasks silently (awaits completion to prevent parallel HTTP requests)
-  try {
-    await preloadCurrentWeek();
-  } catch (e) {
-    console.error("Failed initial preloading", e);
-  }
+  // 2. Start preloading in background and store the promise
+  window.preloadPromise = preloadCurrentWeek();
 
+  // 3. Load UI (which will await preloadPromise internally before rendering/fetching)
   loadHouseTab();
   loadWeeklyGoal();
   
@@ -529,14 +534,23 @@ function prefetchDatesAround(centerDateStr) {
 async function loadHouseTab() {
   const list = document.getElementById('houseTasksList');
   const dateStr = getHouseActiveDateStr();
+
+  const display = document.getElementById('houseActiveDateDisplay');
+  if (display) display.textContent = getHouseActiveDateLabel();
+
+  // If background preloading is active, await it to populate window.tasksCache
+  if (window.preloadPromise) {
+    try {
+      await window.preloadPromise;
+    } catch (e) {
+      console.warn("Failed awaiting preloadPromise in loadHouseTab", e);
+    }
+  }
   
   const hasCachedTasks = !!window.tasksCache[dateStr];
   if (!hasCachedTasks) {
     showSpinnerIfNeeded(list, '.task-card');
   }
-
-  const display = document.getElementById('houseActiveDateDisplay');
-  if (display) display.textContent = getHouseActiveDateLabel();
 
   try {
     let membersPromise;
@@ -795,15 +809,24 @@ window.shiftShoppingDay = shiftShoppingDay;
 async function loadPersonalTab() {
   const list = document.getElementById('personalTasksList');
   const dateStr = getPersonalActiveDateStr();
+
+  const display = document.getElementById('personalActiveDateDisplay');
+  if (display) display.textContent = getPersonalActiveDateLabel();
+
+  // If background preloading is active, await it to populate window.personalTasksCache
+  if (window.preloadPromise) {
+    try {
+      await window.preloadPromise;
+    } catch (e) {
+      console.warn("Failed awaiting preloadPromise in loadPersonalTab", e);
+    }
+  }
   
   window.personalTasksCache = window.personalTasksCache || {};
   const hasCached = !!window.personalTasksCache[dateStr];
   if (!hasCached) {
     showSpinnerIfNeeded(list, '.task-card');
   }
-
-  const display = document.getElementById('personalActiveDateDisplay');
-  if (display) display.textContent = getPersonalActiveDateLabel();
 
   try {
     let tasksPromise;
