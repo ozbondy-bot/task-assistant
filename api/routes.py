@@ -465,9 +465,68 @@ async def get_batch_tasks(start_date: str, end_date: str, user: User = Depends(g
                 "household": household_in_progress
             }
 
+        # --- 4. RESOLVE MEMBERS WITH WEEKLY SCORES AND TARGETS ---
+        import zoneinfo
+        msk_tz = zoneinfo.ZoneInfo("Europe/Moscow")
+        monday_date = today - timedelta(days=today.weekday())
+        
+        # Monday 00:00:00 MSK in UTC
+        start_msk = datetime.combine(monday_date, datetime.min.time()).replace(tzinfo=msk_tz)
+        start_utc = start_msk.astimezone(timezone.utc).replace(tzinfo=None)
+        
+        # Sunday 23:59:59 MSK in UTC
+        sunday_date = monday_date + timedelta(days=6)
+        end_msk = datetime.combine(sunday_date, datetime.max.time()).replace(tzinfo=msk_tz)
+        end_utc = end_msk.astimezone(timezone.utc).replace(tzinfo=None)
+        
+        from bot.handlers.base import calculate_weekly_target_points
+        total_weekly_target_points, _ = await calculate_weekly_target_points(session, ACTIVE_HOUSE_ID, today)
+        
+        sorted_members = sorted(users_map.values(), key=lambda x: x.id)
+        
+        # Bulk query earned points for all members
+        earned_res = await session.execute(
+            select(Completion.user_id, func.sum(Completion.points))
+            .where(
+                and_(
+                    Completion.user_id.in_([m.id for m in sorted_members]),
+                    Completion.created_at >= start_utc,
+                    Completion.created_at <= end_utc
+                )
+            )
+            .group_by(Completion.user_id)
+        )
+        earned_map = dict(earned_res.all())
+        
+        members_list = []
+        for index, m in enumerate(sorted_members):
+            earned = earned_map.get(m.id, 0)
+            
+            # Split target 2/3 for first, 1/3 for second member
+            if len(sorted_members) == 2:
+                member_target = round(total_weekly_target_points * 2 / 3) if index == 0 else (total_weekly_target_points - round(total_weekly_target_points * 2 / 3))
+            elif len(sorted_members) >= 3:
+                member_target = int(total_weekly_target_points / len(sorted_members))
+            else:
+                member_target = total_weekly_target_points
+                
+            if member_target < 1:
+                member_target = 1
+                
+            members_list.append({
+                "id": m.id,
+                "display_name": m.display_name or m.full_name or "Участник",
+                "points": m.points or 0,
+                "is_owner": m.is_house_owner,
+                "is_me": m.id == user.id,
+                "weekly_earned": earned,
+                "weekly_target": member_target
+            })
+
         return {
             "house": house_by_date_res,
-            "personal": personal_by_date_res
+            "personal": personal_by_date_res,
+            "members": members_list
         }
 
 

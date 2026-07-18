@@ -94,7 +94,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (av) av.textContent = 'Ш';
   }
 
-  // 1. Instantly display correct localized dates in pagination bars
+  // 1. Start the unified initial splash screen timer
+  startInitialSplashTimer();
+
+  // 2. Instantly display correct localized dates in pagination bars
   const houseEl = document.getElementById('houseActiveDateDisplay');
   if (houseEl) houseEl.textContent = getHouseActiveDateLabel();
   const personalEl = document.getElementById('personalActiveDateDisplay');
@@ -106,12 +109,23 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupModals();
   setupFABs();
 
-  // 2. Start preloading in background and store the promise
+  // 3. Start preloading (batch fetch tasks + members) in the background
   window.preloadPromise = preloadCurrentWeek();
 
-  // 3. Load UI (which will await preloadPromise internally before rendering/fetching)
-  loadHouseTab();
-  loadWeeklyGoal();
+  // 4. Load UI and hide splash screen once everything has rendered
+  (async () => {
+    try {
+      await Promise.all([
+        loadHouseTab(),
+        loadWeeklyGoal()
+      ]);
+    } catch (e) {
+      console.error("Initial load error:", e);
+    } finally {
+      // Hide the unified loading screen
+      hideInitialSplash();
+    }
+  })();
   
   connectWebSocket();
 });
@@ -127,21 +141,18 @@ function connectWebSocket() {
     try {
       const msg = JSON.parse(event.data);
       if (msg.type === 'refresh') {
-        showToast('🔄 Обновление данных...');
-        // Clear caches
-        window.tasksCache = {};
-        window.personalTasksCache = {};
-        window.houseMembersList = null;
-        // Reload active views
-        const activeTab = document.querySelector('.tab-btn.active')?.dataset.tab;
-        if (activeTab === 'house') {
-          loadHouseTab();
-        } else if (activeTab === 'personal') {
-          loadPersonalTab();
-        } else if (activeTab === 'shopping') {
-          loadShoppingTab();
-        }
-        loadWeeklyGoal();
+        // Run preloading silently in the background without clearing UI state
+        preloadCurrentWeek().then(() => {
+          const activeTab = document.querySelector('.tab-btn.active')?.dataset.tab;
+          if (activeTab === 'house') {
+            loadHouseTab();
+          } else if (activeTab === 'personal') {
+            loadPersonalTab();
+          } else if (activeTab === 'shopping') {
+            loadShoppingTab();
+          }
+          loadWeeklyGoal();
+        }).catch(err => console.error("WS background refresh failed", err));
       }
     } catch (e) {
       console.error("WS message error:", e);
@@ -176,6 +187,17 @@ function preloadCurrentWeek() {
   const endStr = formatLocalDate(endD);
 
   return api('GET', `/api/batch/tasks?start_date=${startStr}&end_date=${endStr}`, null, true).then(data => {
+    if (data.members) {
+      window.houseMembersList = data.members;
+      renderMembers(data.members);
+      
+      const me = data.members.find(m => m.is_me);
+      if (me) {
+        const up = document.getElementById('userPoints');
+        if (up) up.textContent = `${me.points} ✨`;
+        currentPoints = me.points;
+      }
+    }
     if (data.house) {
       for (const dateStr in data.house) {
         window.tasksCache[dateStr] = data.house[dateStr];
@@ -236,36 +258,35 @@ function logClientAction(actionName, durationMs) {
 }
 
 function showLoadingOverlay() {
+  // Fully disabled per user requirements to completely remove the loading timer overlay during app usage
+  return;
+}
+
+function hideLoadingOverlay() {
+  // Fully disabled per user requirements
+  return;
+}
+
+function startInitialSplashTimer() {
   const overlay = document.getElementById('globalLoadingOverlay');
   const timerText = document.getElementById('globalLoadingTimer');
   if (!overlay || !timerText) return;
   
-  if (hideTimeoutId) {
-    clearTimeout(hideTimeoutId);
-    hideTimeoutId = null;
-  }
+  globalLoadingStartMs = performance.now();
+  loadingStartSecs = 0;
+  timerText.textContent = '0 сек';
   
-  if (overlay.classList.contains('hidden')) {
-    globalLoadingStartMs = performance.now();
-    loadingStartSecs = 0;
-    timerText.textContent = '0 сек';
-    overlay.classList.remove('hidden');
-    
-    if (loadingTimerInterval) clearInterval(loadingTimerInterval);
-    loadingTimerInterval = setInterval(() => {
-      loadingStartSecs++;
-      timerText.textContent = `${loadingStartSecs} сек`;
-    }, 1000);
-  }
+  if (loadingTimerInterval) clearInterval(loadingTimerInterval);
+  loadingTimerInterval = setInterval(() => {
+    loadingStartSecs++;
+    timerText.textContent = `${loadingStartSecs} sec`;
+  }, 1000);
 }
 
-function hideLoadingOverlay() {
-  if (activeRequestsCount > 0) return;
+function hideInitialSplash() {
   const overlay = document.getElementById('globalLoadingOverlay');
-  if (overlay && !overlay.classList.contains('hidden')) {
+  if (overlay) {
     overlay.classList.add('hidden');
-    const duration = Math.round(performance.now() - globalLoadingStartMs);
-    logClientAction('global_ui_flow', duration);
   }
   if (loadingTimerInterval) {
     clearInterval(loadingTimerInterval);
@@ -1995,7 +2016,7 @@ function isFutureDate(dateStr) {
   return dateStr > todayStr;
 }
 
-async function openChoreDetails(t) {
+function openChoreDetails(t) {
   window.currentChoreDetailsTemplate = t;
   document.getElementById('choreDetailsTitle').textContent = stripEmoji(t.title);
   document.getElementById('choreDetailsPeriod').textContent = periodLabel(t.periodicity, t.period_days);
@@ -2015,35 +2036,38 @@ async function openChoreDetails(t) {
       : '—';
   }
   
+  // Open modal instantly
+  document.getElementById('choreDetailsModal').classList.remove('hidden');
+  
   const historyDiv = document.getElementById('choreDetailsHistory');
   const historyList = document.getElementById('choreDetailsHistoryList');
   if (historyDiv && historyList) {
-    historyDiv.style.display = 'none';
-    historyList.innerHTML = '';
+    historyDiv.style.display = 'block';
+    // Show local spinner inside history list
+    historyList.innerHTML = '<div style="text-align:center;padding:10px;color:var(--text3)"><div class="spinner" style="width:16px;height:16px;margin:0 auto 6px auto;border:2px solid rgba(255,255,255,0.1);border-top:2px solid var(--accent);border-radius:50%;animation:spin 1s linear infinite;"></div>Загрузка истории...</div>';
     
     const tmplId = t.template_id || t.id;
     if (tmplId) {
-      try {
-        const history = await api('GET', `/api/chores/templates/${tmplId}/history`);
+      api('GET', `/api/chores/templates/${tmplId}/history`, null, true).then(history => {
         if (history && history.length > 0) {
           historyList.innerHTML = history.map(item => {
             const dt = parseDateSafe(item.done_at);
             const timeStr = dt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
             const dateStr = dt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
-            return `<div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.05); padding:2px 0;">
+            return `<div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.05); padding:4px 0; font-size:12px;">
               <span>👤 ${escHtml(item.done_by)}</span>
               <span>📅 ${dateStr} в ${timeStr} (${item.points} ✨)</span>
             </div>`;
           }).join('');
-          historyDiv.style.display = 'block';
         } else {
-          historyList.innerHTML = '<div style="text-align:center;color:var(--text3)">История пуста</div>';
-          historyDiv.style.display = 'block';
+          historyList.innerHTML = '<div style="text-align:center;color:var(--text3);font-size:12px;padding:6px 0;">История пуста</div>';
         }
-      } catch (e) {
+      }).catch(e => {
         console.error("Failed to load template history", e);
-        showToast(`⚠️ Ошибка истории: ${e.message}`);
-      }
+        historyList.innerHTML = `<div style="text-align:center;color:var(--danger);font-size:12px;padding:6px 0;">Ошибка: ${escHtml(e.message)}</div>`;
+      });
+    } else {
+      historyList.innerHTML = '<div style="text-align:center;color:var(--text3);font-size:12px;padding:6px 0;">История пуста</div>';
     }
   }
   
