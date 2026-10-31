@@ -209,151 +209,84 @@ async def handle_reject_action(call: types.CallbackQuery, db_user: User = None):
             logger.error(f"Failed to broadcast websocket refresh from bot reject: {e}")
 
 
-async def send_morning_message():
+async def send_10am_task_notification():
+    """10:00 AM daily notification sent to each house member with their assigned chores and personal tasks for today."""
     async with AsyncSessionLocal() as session:
         today = await get_house_today_date(session)
         await generate_daily_chores_if_needed(session, ACTIVE_HOUSE_ID)
-        result = await session.execute(
-            select(TaskInstance, TaskTemplate)
-            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
-            .where(and_(
-                TaskTemplate.house_id == ACTIVE_HOUSE_ID,
-                TaskInstance.date <= today,
-                TaskInstance.status == "free",
-                TaskTemplate.deleted == False
-            ))
-            .order_by(TaskTemplate.points.desc())
-        )
-        chores = result.all()
         users = (await session.execute(select(User).where(User.house_id == ACTIVE_HOUSE_ID))).scalars().all()
         
     if not users:
         return
-        
-    if chores:
-        text = (
-            "🌅 *Доброе утро!*\n\n"
-            "Новый день начался, задачи уже ждут в приложении. Выполняй дела и отдыхай! ☕️\n\n"
-            "👉 Откройте Mini App, чтобы посмотреть список задач!"
-        )
-    else:
-        text = "🌅 *Доброе утро!*\n\nНа сегодня свободных домашних дел нет. Отдыхаем! ☕️"
-        
-    app_url = MINI_APP_URL
-    if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
-        app_url = app_url.rstrip("/") + "/app"
-    if app_url:
-        app_url = app_url.rstrip("/") + "/?v=28"
-        
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        InlineKeyboardButton(
-            text="📱 Открыть App",
-            web_app=WebAppInfo(url=app_url)
-        )
-    )
-    markup = builder.as_markup()
-        
-    for u in users:
-        try:
-            await bot.send_message(chat_id=u.telegram_id, text=text, parse_mode="Markdown", reply_markup=markup)
-        except Exception as e:
-            logger.error(f"Failed to send morning message to {u.telegram_id}: {e}")
- 
- 
-# send_14_reminder and send_17_reminder have been disabled as per optimization settings
 
-
-async def send_midnight_summary():
-    from zoneinfo import ZoneInfo
-    from datetime import timezone as dt_timezone
     async with AsyncSessionLocal() as session:
-        house = await session.get(House, ACTIVE_HOUSE_ID)
-        tz_str = house.timezone if house else "Europe/Moscow"
-        
-    tz = ZoneInfo(tz_str)
-    now = datetime.now(tz)
-    summary_date = (now - timedelta(days=1)).date()
-    
-    async with AsyncSessionLocal() as session:
-        users = (await session.execute(select(User).where(User.house_id == ACTIVE_HOUSE_ID))).scalars().all()
-        user_name_map = {u.id: (u.display_name or u.username or "?") for u in users}
-        
-        result = await session.execute(
-            select(Completion, User, TaskTemplate)
-            .join(User, Completion.user_id == User.id)
-            .join(TaskInstance, Completion.task_instance_id == TaskInstance.id)
-            .join(TaskTemplate, TaskInstance.template_id == TaskTemplate.id)
-            .where(TaskTemplate.house_id == ACTIVE_HOUSE_ID)
-        )
-        all_comps = result.all()
-        
-        comps_today = []
-        for comp, usr, tmpl in all_comps:
-            utc_dt = comp.created_at.replace(tzinfo=dt_timezone.utc)
-            local_dt = utc_dt.astimezone(tz)
-            if local_dt.date() == summary_date:
-                comps_today.append((comp, usr, tmpl))
+        today = await get_house_today_date(session)
+        for u in users:
+            # 1. Household tasks assigned to this user today
+            h_res = await session.execute(
+                select(TaskTemplate.title)
+                .join(TaskInstance, TaskInstance.template_id == TaskTemplate.id)
+                .where(and_(
+                    TaskTemplate.house_id == ACTIVE_HOUSE_ID,
+                    TaskTemplate.deleted == False,
+                    TaskInstance.date == today,
+                    TaskInstance.done_by_user_id == u.id,
+                    TaskInstance.status == "in_progress"
+                ))
+                .order_by(TaskTemplate.points.desc())
+            )
+            house_tasks = [clean_task_text(t) for t in h_res.scalars().all()]
+            
+            # 2. Personal tasks for this user today
+            p_res = await session.execute(
+                select(PersonalTask.text)
+                .where(and_(
+                    PersonalTask.user_id == u.id,
+                    PersonalTask.date_execution == today,
+                    PersonalTask.is_completed == False,
+                    PersonalTask.is_deleted == False
+                ))
+                .order_by(PersonalTask.id.asc())
+            )
+            personal_tasks = [clean_task_text(t) for t in p_res.scalars().all()]
+            
+            all_user_tasks = house_tasks + personal_tasks
+            
+            app_url = MINI_APP_URL
+            if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
+                app_url = app_url.rstrip("/") + "/app"
+            if app_url:
+                app_url = app_url.rstrip("/") + "/?v=50"
                 
-        pt_result = await session.execute(
-            select(PersonalTask).where(and_(
-                PersonalTask.user_id.in_([u.id for u in users]),
-                PersonalTask.is_completed == True,
-                PersonalTask.is_deleted == False,
-                PersonalTask.date_execution == summary_date
-            ))
-        )
-        pt_comps = pt_result.scalars().all()
-        
-    user_chores = {u.id: [] for u in users}
-    user_pts = {u.id: 0 for u in users}
-    for comp, usr, tmpl in comps_today:
-        user_chores[usr.id].append(tmpl.title)
-        user_pts[usr.id] += comp.points
-        
-    user_pts_list = sorted(user_pts.items(), key=lambda x: x[1], reverse=True)
-    
-    text = (
-        f"🌙 *Итоги дня ({summary_date.strftime('%d.%m.%Y')}):*\n\n"
-    )
-    
-    for uid, total_earned in user_pts_list:
-        u_name = user_name_map.get(uid, "?")
-        text += f"🦸 *{u_name}* заработал *{total_earned}* искр ✨\n"
-        chores_list = user_chores[uid]
-        pts_for_user = [pt for pt in pt_comps if pt.user_id == uid]
-        
-        if chores_list or pts_for_user:
-            text += "Выполненные задачи:\n"
-            for ch in chores_list:
-                text += f"• {ch} 🏠\n"
-            for pt in pts_for_user:
-                clean = clean_task_text(pt.text)
-                text += f"• {clean} 👤\n"
-        else:
-            text += "Задач не выполнял.\n"
-        text += "\n"
-        
-    app_url = MINI_APP_URL
-    if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
-        app_url = app_url.rstrip("/") + "/app"
-    if app_url:
-        app_url = app_url.rstrip("/") + "/?v=28"
-        
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        InlineKeyboardButton(
-            text="📱 Открыть App",
-            web_app=WebAppInfo(url=app_url)
-        )
-    )
-    markup = builder.as_markup()
-        
-    for u in users:
-        try:
-            await bot.send_message(chat_id=u.telegram_id, text=text, parse_mode="Markdown", reply_markup=markup)
-        except Exception as e:
-            logger.error(f"Failed to send midnight summary to {u.telegram_id}: {e}")
+            builder = InlineKeyboardBuilder()
+            builder.row(
+                InlineKeyboardButton(
+                    text="📱 Открыть App",
+                    web_app=WebAppInfo(url=app_url)
+                )
+            )
+            markup = builder.as_markup()
+            
+            if all_user_tasks:
+                formatted_tasks = []
+                for t in all_user_tasks:
+                    c = t.replace("*", "").replace("_", "").strip()
+                    if c:
+                        formatted_tasks.append(f"*{c}*")
+                tasks_joined = ", ".join(formatted_tasks)
+                text = (
+                    f"🌅 *Доброе утро!*\n\n"
+                    f"Не забудь сегодня {tasks_joined}.\n\n"
+                    f"Хорошего дня! ✨"
+                )
+            else:
+                text = "🌅 *Доброе утро!*\n\nНа сегодня назначенных задач нет. Отдыхаем! ☕️"
+                
+            try:
+                await bot.send_message(chat_id=u.telegram_id, text=text, parse_mode="Markdown", reply_markup=markup)
+                logger.info(f"Sent 10am task notification to {u.telegram_id} ({len(all_user_tasks)} tasks)")
+            except Exception as e:
+                logger.error(f"Failed to send 10am notification to {u.telegram_id}: {e}")
 
 
 async def scheduler_loop():
@@ -389,13 +322,9 @@ async def scheduler_loop():
             hour = now.hour
             minute = now.minute
             
-            if hour == 9 and minute == 0 and (today, "morning") not in sent_events:
-                await send_morning_message()
-                sent_events.add((today, "morning"))
-                
-            if hour == 0 and minute == 0 and (today, "midnight_summary") not in sent_events:
-                await send_midnight_summary()
-                sent_events.add((today, "midnight_summary"))
+            if hour == 10 and minute == 0 and (today, "10am_notification") not in sent_events:
+                await send_10am_task_notification()
+                sent_events.add((today, "10am_notification"))
                 
             sent_events = { (d, e) for (d, e) in sent_events if d >= today - timedelta(days=1) }
             
@@ -449,6 +378,10 @@ async def generate_chores_for_week(session, house_id: int, monday_date: date):
 
     if not templates:
         return
+
+    owner_id = await session.scalar(
+        select(User.id).where(and_(User.house_id == house_id, User.is_house_owner == True)).limit(1)
+    )
 
     tmpl_ids = [t.id for t in templates]
     today = await get_house_today_date(session)
@@ -581,7 +514,8 @@ async def generate_chores_for_week(session, house_id: int, monday_date: date):
                 inst = TaskInstance(
                     template_id=tmpl.id,
                     date=s_date,
-                    status="free",
+                    status="in_progress",
+                    done_by_user_id=tmpl.assigned_user_id or owner_id,
                     priority=0
                 )
                 session.add(inst)
@@ -618,6 +552,9 @@ async def generate_daily_chores_if_needed(session, house_id: int):
     _last_generation_check = (house_id, today)
 
     # 2. Rollover old uncompleted household task instances for this house
+    owner_id = await session.scalar(
+        select(User.id).where(and_(User.house_id == house_id, User.is_house_owner == True)).limit(1)
+    )
     from sqlalchemy.orm import joinedload
     old_instances = (await session.execute(
         select(TaskInstance)
@@ -663,10 +600,9 @@ async def generate_daily_chores_if_needed(session, house_id: int):
             exists_today = tmpl.id in exists_today_ids
             if not exists_today:
                 inst.date = today
-                if inst.status == "in_progress":
-                    inst.status = "free"
-                    inst.done_by_user_id = None
-                    inst.done_at = None
+                inst.status = "in_progress"
+                if not inst.done_by_user_id:
+                    inst.done_by_user_id = tmpl.assigned_user_id or owner_id
             else:
                 await session.delete(inst)
 
@@ -749,7 +685,7 @@ async def cmd_start(message: types.Message, db_user: User = None):
     if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
         app_url = app_url.rstrip("/") + "/app"
     if app_url:
-        app_url = app_url.rstrip("/") + "/?v=28"
+        app_url = app_url.rstrip("/") + "/?v=50"
     try:
         await message.bot.set_chat_menu_button(
             chat_id=message.chat.id,
@@ -765,12 +701,9 @@ async def cmd_start(message: types.Message, db_user: User = None):
     
     text = (
         "👋 Привет!\n\n"
-        "Все функции управления домашними делами, личными задачами, покупками и наградами теперь доступны только в <b>Mini App</b>! 📱\n\n"
-        "В чате бота вы будете получать только:\n"
-        "• Утренний список дел (в 9:00) 🌅\n"
-        "• Итоги дня (в полночь) 🌙\n"
-        "• Запросы на одобрение изменений и удалений от вашего партнера 🔔\n\n"
-        "Нажмите на кнопку ниже, чтобы открыть приложение и приступить к работе!"
+        "Все функции управления делами дома и личными задачами доступны в <b>Mini App</b>! 📱\n\n"
+        "В чате бота каждое утро в 10:00 вы будете получать напоминание со списком назначенных на вас задач на сегодня ☀️\n\n"
+        "Нажмите на кнопку ниже, чтобы открыть приложение!"
     )
     builder = InlineKeyboardBuilder()
     builder.row(
@@ -1426,7 +1359,7 @@ async def catch_all_messages(message: types.Message):
     if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
         app_url = app_url.rstrip("/") + "/app"
     if app_url:
-        app_url = app_url.rstrip("/") + "/?v=28"
+        app_url = app_url.rstrip("/") + "/?v=50"
         
     builder = InlineKeyboardBuilder()
     builder.row(
@@ -1436,7 +1369,7 @@ async def catch_all_messages(message: types.Message):
         )
     )
     await message.answer(
-        "🤖 Все функции управления домашними делами, личными задачами, покупками и наградами доступны только в <b>Mini App</b>!\n\n"
+        "🤖 Все функции управления домашними делами и личными задачами доступны в <b>Mini App</b>!\n\n"
         "Пожалуйста, откройте приложение с помощью кнопки ниже.",
         reply_markup=builder.as_markup(),
         parse_mode="HTML"

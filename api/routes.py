@@ -360,14 +360,15 @@ async def get_batch_tasks(start_date: str, end_date: str, user: User = Depends(g
         # --- 3. BUILD HOUSE & PERSONAL DATA BY DATE ---
         house_by_date_res = {}
         personal_by_date_res = {}
+        partner_by_date_res = {}
+
+        partner_user = next((u for u in users_map.values() if u.id != user.id), None)
+        partner_id = partner_user.id if partner_user else None
 
         for d in all_dates:
             d_str = str(d)
             
             # --- Build Household tasks for date `d` ---
-            # IMPORTANT: Only show what's actually in the DB. 
-            # generate_chores_for_week already put the right instances there.
-            # No virtual task generation here — that was causing triple-display bugs.
             raw_tasks = []
             for tmpl in templates:
                 insts = inst_map.get(tmpl.id, [])
@@ -388,6 +389,11 @@ async def get_batch_tasks(start_date: str, end_date: str, user: User = Depends(g
 
                 completed_by = ""
                 done_at_str = ""
+                assigned_name = "Шурик"
+                if inst and inst.done_by_user_id:
+                    u_obj = users_map.get(inst.done_by_user_id)
+                    if u_obj:
+                        assigned_name = u_obj.display_name or u_obj.username or "Шурик"
                 if inst and inst.status == "done" and inst.done_by_user_id:
                     done_user = users_map.get(inst.done_by_user_id)
                     if done_user:
@@ -403,15 +409,20 @@ async def get_batch_tasks(start_date: str, end_date: str, user: User = Depends(g
                     "id": inst_id,
                     "template_id": tmpl_id,
                     "title": title,
+                    "text": title,
                     "points": points,
                     "periodicity": periodicity,
                     "period_days": period_days,
                     "date": date_str,
                     "status": status,
+                    "is_completed": (status == "done"),
+                    "done_by_user_id": inst.done_by_user_id if inst else None,
+                    "assigned_to_name": assigned_name,
                     "last_completed": last_date.isoformat() if last_date else None,
                     "next_execution": next_date.isoformat() if next_date else None,
                     "completed_by": completed_by,
                     "done_at": done_at_str,
+                    "type": "household",
                 })
 
             house_by_date_res[d_str] = chores_list
@@ -439,30 +450,24 @@ async def get_batch_tasks(start_date: str, end_date: str, user: User = Depends(g
                     "recurrence": t.recurrence,
                     "category": t.category,
                     "type": "personal",
+                    "points": 0,
                     "is_completed": t.is_completed,
                     "last_completed": last_date.isoformat() if last_date else None,
                     "next_execution": next_date.isoformat() if next_date else None,
                 })
 
-            household_in_progress = []
-            if d == today:
-                for inst, tmpl in in_progress_house:
-                    last_date = last_completed_map.get(tmpl.id)
-                    next_date = next_execution_map.get(tmpl.id)
-                    household_in_progress.append({
-                        "id": inst.id,
-                        "text": tmpl.title,
-                        "points": tmpl.points,
-                        "template_id": tmpl.id,
-                        "type": "household",
-                        "status": "in_progress",
-                        "last_completed": last_date.isoformat() if last_date else None,
-                        "next_execution": next_date.isoformat() if next_date else None,
-                    })
-
+            # Household tasks assigned to current user for date `d`
+            my_chores = [c for c in chores_list if c["done_by_user_id"] == user.id]
             personal_by_date_res[d_str] = {
                 "personal": pers_list,
-                "household": household_in_progress
+                "household": my_chores
+            }
+
+            # Household tasks assigned to partner for date `d`
+            partner_chores = [c for c in chores_list if partner_id and c["done_by_user_id"] == partner_id]
+            partner_by_date_res[d_str] = {
+                "personal": [],
+                "household": partner_chores
             }
 
         # --- 4. RESOLVE MEMBERS WITH WEEKLY SCORES AND TARGETS ---
@@ -526,19 +531,36 @@ async def get_batch_tasks(start_date: str, end_date: str, user: User = Depends(g
         return {
             "house": house_by_date_res,
             "personal": personal_by_date_res,
+            "partner": partner_by_date_res,
+            "templates": [
+                {
+                    "id": t.id,
+                    "title": t.title,
+                    "points": t.points,
+                    "periodicity": t.periodicity,
+                    "period_days": t.period_days,
+                    "start_date": str(t.start_date) if t.start_date else None,
+                    "assigned_user_id": t.assigned_user_id,
+                    "assigned_to_name": users_map[t.assigned_user_id].display_name if (t.assigned_user_id in users_map and users_map[t.assigned_user_id].display_name) else "Шурик",
+                    "last_completed": last_completed_map.get(t.id).isoformat() if last_completed_map.get(t.id) else None,
+                    "next_execution": next_execution_map.get(t.id).isoformat() if next_execution_map.get(t.id) else None
+                }
+                for t in templates
+            ],
             "members": members_list
         }
 
 
 # -- Personal tasks --
 @app.get("/api/tasks/today")
-async def get_today_tasks(date: Optional[str] = None, user: User = Depends(get_current_user)):
+async def get_today_tasks(date: Optional[str] = None, user_id: Optional[int] = None, user: User = Depends(get_current_user)):
     from bot.handlers.base import get_house_today_date, generate_daily_chores_if_needed
     async with AsyncSessionLocal() as session:
         # Trigger daily chores generation and rollover on personal tab load too
         await generate_daily_chores_if_needed(session, ACTIVE_HOUSE_ID)
 
         today = await get_house_today_date(session)
+        target_uid = user_id if (user_id and user.is_house_owner) else user.id
         
         target_date = today
         if date:
@@ -549,7 +571,7 @@ async def get_today_tasks(date: Optional[str] = None, user: User = Depends(get_c
                 
         if target_date == today:
             cond = and_(
-                PersonalTask.user_id == user.id,
+                PersonalTask.user_id == target_uid,
                 PersonalTask.is_deleted == False,
                 or_(
                     and_(PersonalTask.date_execution <= today, PersonalTask.is_completed == False),
@@ -559,14 +581,14 @@ async def get_today_tasks(date: Optional[str] = None, user: User = Depends(get_c
         else:
             if target_date < today:
                 cond = and_(
-                    PersonalTask.user_id == user.id,
+                    PersonalTask.user_id == target_uid,
                     PersonalTask.date_execution == target_date,
                     PersonalTask.is_completed == True,
                     PersonalTask.is_deleted == False,
                 )
             else:
                 cond = and_(
-                    PersonalTask.user_id == user.id,
+                    PersonalTask.user_id == target_uid,
                     PersonalTask.date_execution == target_date,
                     PersonalTask.is_deleted == False,
                 )
@@ -580,7 +602,7 @@ async def get_today_tasks(date: Optional[str] = None, user: User = Depends(get_c
         last_completed_res = await session.execute(
             select(PersonalTask.text, func.max(PersonalTask.date_execution))
             .where(and_(
-                PersonalTask.user_id == user.id,
+                PersonalTask.user_id == target_uid,
                 PersonalTask.is_completed == True,
                 PersonalTask.is_deleted == False
             ))
@@ -591,7 +613,7 @@ async def get_today_tasks(date: Optional[str] = None, user: User = Depends(get_c
         next_exec_res = await session.execute(
             select(PersonalTask.text, func.min(PersonalTask.date_execution))
             .where(and_(
-                PersonalTask.user_id == user.id,
+                PersonalTask.user_id == target_uid,
                 PersonalTask.is_completed == False,
                 PersonalTask.is_deleted == False,
                 PersonalTask.date_execution > today
@@ -611,6 +633,7 @@ async def get_today_tasks(date: Optional[str] = None, user: User = Depends(get_c
                 "recurrence": t.recurrence,
                 "category": t.category,
                 "type": "personal",
+                "points": 0,
                 "is_completed": t.is_completed,
                 "last_completed": last_date.isoformat() if last_date else None,
                 "next_execution": next_date.isoformat() if next_date else None,
@@ -625,7 +648,7 @@ async def get_today_tasks(date: Optional[str] = None, user: User = Depends(get_c
                     TaskTemplate, TaskInstance.template_id == TaskTemplate.id
                 ).where(
                     and_(
-                        TaskInstance.done_by_user_id == user.id,
+                        TaskInstance.done_by_user_id == target_uid,
                         TaskInstance.status == "in_progress",
                     )
                 )
@@ -647,7 +670,7 @@ async def get_today_tasks(date: Optional[str] = None, user: User = Depends(get_c
                     select(TaskInstance.template_id, func.min(TaskInstance.date))
                     .where(and_(
                         TaskInstance.template_id.in_(tmpl_ids),
-                        TaskInstance.status == "free",
+                        TaskInstance.status.in_(["free", "in_progress"]),
                         TaskInstance.date > today
                     ))
                     .group_by(TaskInstance.template_id)
@@ -660,10 +683,12 @@ async def get_today_tasks(date: Optional[str] = None, user: User = Depends(get_c
                     res_household.append({
                         "id": inst.id,
                         "text": tmpl.title,
+                        "title": tmpl.title,
                         "points": tmpl.points,
                         "template_id": tmpl.id,
                         "type": "household",
                         "status": "in_progress",
+                        "is_completed": False,
                         "last_completed": last_date.isoformat() if last_date else None,
                         "next_execution": next_date.isoformat() if next_date else None,
                     })
@@ -1532,6 +1557,9 @@ async def get_chores_templates(user: User = Depends(get_current_user)):
         house = await session.get(House, ACTIVE_HOUSE_ID)
         generation_done = (house.last_summary_date >= today) if (house and house.last_summary_date) else False
         
+        users = (await session.execute(select(User).where(User.house_id == ACTIVE_HOUSE_ID))).scalars().all()
+        user_name_map = {u.id: (u.display_name or u.username or "Шурик") for u in users}
+
         res_list = []
         for t in templates:
             last_done = done_dates.get(t.id)
@@ -1552,6 +1580,8 @@ async def get_chores_templates(user: User = Depends(get_current_user)):
                 "periodicity": t.periodicity,
                 "period_days": t.period_days,
                 "start_date": str(t.start_date) if t.start_date else None,
+                "assigned_user_id": t.assigned_user_id,
+                "assigned_to_name": user_name_map.get(t.assigned_user_id, "Шурик"),
                 "last_completed": last_done.isoformat() if last_done else None,
                 "next_execution": nd.isoformat() if nd else None
             })
@@ -1591,9 +1621,13 @@ class CreateTemplateRequest(BaseModel):
     periodicity: str = "daily"
     period_days: Optional[int] = None
     start_date: Optional[str] = None
+    assigned_user_id: Optional[int] = None
 
 @app.post("/api/chores/templates")
 async def create_chore_template(req: CreateTemplateRequest, user: User = Depends(get_current_user)):
+    if not user.is_house_owner:
+        raise HTTPException(status_code=403, detail="Только хозяин дома может создавать шаблоны задач")
+
     start_date = None
     if req.start_date:
         try:
@@ -1608,88 +1642,54 @@ async def create_chore_template(req: CreateTemplateRequest, user: User = Depends
         clean_title = f"{emoji} {clean_title}"
         
     async with AsyncSessionLocal() as session:
-        from bot.handlers.base import get_house_today_date, get_partner_user, bot
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
-        from aiogram.types import InlineKeyboardButton
-        import json
+        from bot.handlers.base import get_house_today_date
         
+        today = await get_house_today_date(session)
         if not start_date:
-            start_date = await get_house_today_date(session)
+            start_date = today
             
         p_days = req.period_days
         if req.periodicity == "every_x_days" and not p_days:
             p_days = 30
             
-        partner = await get_partner_user(session, user.id)
-        if partner:
-            pending = PendingAction(
-                house_id=ACTIVE_HOUSE_ID,
-                initiator_id=user.id,
-                action_type="create_template",
-                data_payload=json.dumps({
-                    "title": clean_title,
-                    "points": req.points,
-                    "periodicity": req.periodicity,
-                    "period_days": p_days
-                })
+        target_assigned_user = req.assigned_user_id or user.id
+        target_u = await session.get(User, target_assigned_user)
+        if not target_u or target_u.house_id != ACTIVE_HOUSE_ID:
+            target_assigned_user = user.id
+
+        tmpl = TaskTemplate(
+            house_id=ACTIVE_HOUSE_ID,
+            title=clean_title,
+            points=req.points,
+            periodicity=req.periodicity,
+            period_days=p_days,
+            start_date=start_date,
+            assigned_user_id=target_assigned_user,
+            deleted=False
+        )
+        session.add(tmpl)
+        await session.commit()
+        await session.refresh(tmpl)
+        
+        # If start_date <= today, immediately create today's instance
+        if start_date <= today:
+            inst = TaskInstance(
+                template_id=tmpl.id,
+                date=today,
+                status="in_progress",
+                done_by_user_id=target_assigned_user,
+                priority=0
             )
-            session.add(pending)
+            session.add(inst)
             await session.commit()
-            await session.refresh(pending)
             
-            p_label = req.periodicity
-            if req.periodicity == "daily":
-                p_label = "каждый день"
-            elif req.periodicity == "weekly":
-                p_label = "раз в неделю"
-            elif req.periodicity == "twice_weekly":
-                p_label = "2 раза в неделю"
-            elif req.periodicity == "monthly":
-                p_label = "раз в месяц"
-            elif req.periodicity == "twice_monthly":
-                p_label = "2 раза в месяц"
-            elif req.periodicity == "quarterly":
-                p_label = "раз в квартал"
-            elif req.periodicity == "once":
-                p_label = "один раз"
-            elif req.periodicity == "every_x_days":
-                p_label = f"каждые {p_days} дней"
-                
-            partner_text = (
-                f"🔔 *Согласование новой задачи!*\n\n"
-                f"*{user.display_name or user.username or 'Партнёр'}* хочет добавить домашнюю задачу:\n"
-                f"📋 *Название:* {clean_title}\n"
-                f"✨ *Награда:* {req.points} искр\n"
-                f"📅 *Цикл:* {p_label}\n\n"
-                f"Одобряете добавление?"
-            )
-            builder = InlineKeyboardBuilder()
-            builder.row(
-                InlineKeyboardButton(text="✅ Одобрить", callback_data=f"approve_act:{pending.id}"),
-                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_act:{pending.id}")
-            )
-            try:
-                await bot.send_message(chat_id=partner.telegram_id, text=partner_text, reply_markup=builder.as_markup(), parse_mode="Markdown")
-            except Exception as e:
-                logger.error(f"Failed to send approval message to partner: {e}")
-            return {"ok": True, "pending": True, "message": "⏳ Запрос отправлен на согласование партнёру!"}
-        else:
-            tmpl = TaskTemplate(
-                house_id=ACTIVE_HOUSE_ID,
-                title=clean_title,
-                points=req.points,
-                periodicity=req.periodicity,
-                period_days=p_days,
-                start_date=start_date,
-                deleted=False
-            )
-            session.add(tmpl)
-            await session.commit()
-            await session.refresh(tmpl)
-            return {"ok": True, "id": tmpl.id, "title": tmpl.title}
+        return {"ok": True, "id": tmpl.id, "title": tmpl.title, "assigned_user_id": tmpl.assigned_user_id}
 
 @app.put("/api/chores/templates/{template_id}")
 async def update_chore_template(template_id: int, req: CreateTemplateRequest, user: User = Depends(get_current_user)):
+    if not user.is_house_owner:
+        raise HTTPException(status_code=403, detail="Только хозяин дома может редактировать шаблоны")
+        
     try:
         start_date = datetime.strptime(req.start_date, "%Y-%m-%d").date() if req.start_date else None
     except Exception:
@@ -1700,110 +1700,59 @@ async def update_chore_template(template_id: int, req: CreateTemplateRequest, us
         p_days = 30
 
     async with AsyncSessionLocal() as session:
-        from bot.handlers.base import get_partner_user, bot
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
-        from aiogram.types import InlineKeyboardButton
-        import json
-        
         tmpl = await session.get(TaskTemplate, template_id)
         if not tmpl or tmpl.house_id != ACTIVE_HOUSE_ID:
             raise HTTPException(status_code=404, detail="Template not found")
             
-        partner = await get_partner_user(session, user.id)
-        if partner:
-            pending = PendingAction(
-                house_id=ACTIVE_HOUSE_ID,
-                initiator_id=user.id,
-                action_type="edit_template",
-                data_payload=json.dumps({
-                    "template_id": template_id,
-                    "title": req.title,
-                    "points": req.points,
-                    "periodicity": req.periodicity,
-                    "period_days": p_days,
-                    "start_date": req.start_date
-                })
-            )
-            session.add(pending)
-            await session.commit()
-            await session.refresh(pending)
+        tmpl.title = req.title
+        tmpl.points = req.points
+        tmpl.periodicity = req.periodicity
+        tmpl.period_days = p_days
+        if start_date:
+            tmpl.start_date = start_date
             
-            p_map = {"daily": "Каждый день", "weekly": "Каждую неделю", "monthly": "Каждый месяц", "every_x_days": f"Раз в {p_days} дн."}
-            p_label = p_map.get(req.periodicity, req.periodicity)
-            
-            partner_text = (
-                f"🔔 *Согласование изменения задачи!*\n\n"
-                f"*{user.display_name or user.username or 'Партнёр'}* хочет изменить домашнюю задачу:\n"
-                f"📝 *Было:* {tmpl.title} ({tmpl.points} ✨, {p_map.get(tmpl.periodicity, tmpl.periodicity)})\n"
-                f"✨ *Станет:* {req.title} ({req.points} ✨, {p_label})\n\n"
-                f"Одобряете изменения?"
-            )
-            builder = InlineKeyboardBuilder()
-            builder.row(
-                InlineKeyboardButton(text="✅ Одобрить", callback_data=f"approve_act:{pending.id}"),
-                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_act:{pending.id}")
-            )
-            try:
-                await bot.send_message(chat_id=partner.telegram_id, text=partner_text, reply_markup=builder.as_markup(), parse_mode="Markdown")
-            except Exception as e:
-                logger.error(f"Failed to send approval message to partner: {e}")
-            return {"ok": True, "pending": True, "message": "⏳ Запрос на изменение отправлен партнёру!"}
-        else:
-            tmpl.title = req.title
-            tmpl.points = req.points
-            tmpl.periodicity = req.periodicity
-            tmpl.period_days = p_days
-            if start_date:
-                tmpl.start_date = start_date
-            await session.commit()
-            return {"ok": True}
+        if req.assigned_user_id:
+            target_u = await session.get(User, req.assigned_user_id)
+            if target_u and target_u.house_id == ACTIVE_HOUSE_ID:
+                tmpl.assigned_user_id = req.assigned_user_id
+                
+        # Propagate to active uncompleted instances
+        from sqlalchemy import update
+        await session.execute(
+            update(TaskInstance)
+            .where(and_(
+                TaskInstance.template_id == tmpl.id,
+                TaskInstance.status.in_(["free", "in_progress"])
+            ))
+            .values(done_by_user_id=tmpl.assigned_user_id, status="in_progress")
+        )
+        
+        await session.commit()
+        return {"ok": True}
 
 @app.delete("/api/chores/templates/{template_id}")
 async def delete_chore_template(template_id: int, user: User = Depends(get_current_user)):
-    async with AsyncSessionLocal() as session:
-        from bot.handlers.base import get_partner_user, bot
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
-        from aiogram.types import InlineKeyboardButton
-        import json
+    if not user.is_house_owner:
+        raise HTTPException(status_code=403, detail="Только хозяин дома может удалять шаблоны")
         
+    async with AsyncSessionLocal() as session:
         tmpl = await session.get(TaskTemplate, template_id)
         if not tmpl or tmpl.house_id != ACTIVE_HOUSE_ID:
             raise HTTPException(status_code=404, detail="Template not found")
             
-        partner = await get_partner_user(session, user.id)
-        if partner:
-            pending = PendingAction(
-                house_id=ACTIVE_HOUSE_ID,
-                initiator_id=user.id,
-                action_type="delete_template",
-                data_payload=json.dumps({
-                    "template_id": template_id
-                })
-            )
-            session.add(pending)
-            await session.commit()
-            await session.refresh(pending)
-            
-            partner_text = (
-                f"🔔 *Согласование удаления задачи!*\n\n"
-                f"*{user.display_name or user.username or 'Партнёр'}* хочет удалить домашнюю задачу:\n"
-                f"🗑 *{tmpl.title}*\n\n"
-                f"Одобряете удаление?"
-            )
-            builder = InlineKeyboardBuilder()
-            builder.row(
-                InlineKeyboardButton(text="✅ Одобрить", callback_data=f"approve_act:{pending.id}"),
-                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_act:{pending.id}")
-            )
-            try:
-                await bot.send_message(chat_id=partner.telegram_id, text=partner_text, reply_markup=builder.as_markup(), parse_mode="Markdown")
-            except Exception as e:
-                logger.error(f"Failed to send approval message to partner: {e}")
-            return {"ok": True, "pending": True, "message": "⏳ Запрос на удаление отправлен партнёру!"}
-        else:
-            tmpl.deleted = True
-            await session.commit()
-            return {"ok": True}
+        tmpl.deleted = True
+        
+        from bot.handlers.base import get_house_today_date
+        today = await get_house_today_date(session)
+        await session.execute(
+            delete(TaskInstance).where(and_(
+                TaskInstance.template_id == tmpl.id,
+                TaskInstance.date >= today,
+                TaskInstance.status.in_(["free", "in_progress"])
+            ))
+        )
+        await session.commit()
+        return {"ok": True}
 
 
 # -- Rewards templates --
@@ -1908,6 +1857,25 @@ async def skip_chore(instance_id: int, user: User = Depends(get_current_user)):
 class ShiftRequest(BaseModel):
     new_date: str
 
+class AssignTaskRequest(BaseModel):
+    user_id: int
+
+@app.post("/api/house/tasks/{instance_id}/assign")
+async def assign_chore_instance(instance_id: int, req: AssignTaskRequest, user: User = Depends(get_current_user)):
+    if not user.is_house_owner:
+        raise HTTPException(status_code=403, detail="Только хозяин дома может переназначать задачи")
+    async with AsyncSessionLocal() as session:
+        inst = await session.get(TaskInstance, instance_id)
+        if not inst:
+            raise HTTPException(status_code=404, detail="Task not found")
+        target_user = await session.get(User, req.user_id)
+        if not target_user or target_user.house_id != user.house_id:
+            raise HTTPException(status_code=400, detail="Invalid target user")
+        inst.done_by_user_id = target_user.id
+        inst.status = "in_progress"
+        await session.commit()
+    return {"ok": True, "done_by_user_id": target_user.id}
+
 @app.post("/api/house/tasks/{instance_id}/shift")
 async def shift_chore_instance(instance_id: int, req: ShiftRequest, user: User = Depends(get_current_user)):
     try:
@@ -1924,16 +1892,17 @@ async def shift_chore_instance(instance_id: int, req: ShiftRequest, user: User =
         if not tmpl or tmpl.house_id != user.house_id:
             raise HTTPException(status_code=403, detail="Access denied")
             
-        if inst.done_by_user_id != user.id and inst.status != "free":
+        if not user.is_house_owner and inst.done_by_user_id != user.id:
             raise HTTPException(status_code=403, detail="Access denied")
             
         inst.status = "shifted"
+        assignee_id = inst.done_by_user_id or tmpl.assigned_user_id or user.id
         exists = await session.scalar(
             select(TaskInstance).where(
                 and_(
                     TaskInstance.template_id == inst.template_id,
                     TaskInstance.date == new_date,
-                    TaskInstance.status.in_(["free", "shifted"])
+                    TaskInstance.status.in_(["free", "in_progress", "shifted"])
                 )
             )
         )
@@ -1941,7 +1910,8 @@ async def shift_chore_instance(instance_id: int, req: ShiftRequest, user: User =
             new_inst = TaskInstance(
                 template_id=inst.template_id,
                 date=new_date,
-                status="free",
+                status="in_progress",
+                done_by_user_id=assignee_id,
                 priority=0
             )
             session.add(new_inst)
@@ -2274,6 +2244,7 @@ async def spawn_chore_instance(req: SpawnChoreRequest, user: User = Depends(get_
         if not tmpl or tmpl.house_id != user.house_id:
             raise HTTPException(status_code=404, detail="Template not found")
             
+        assignee_id = tmpl.assigned_user_id or user.id
         # Check if already has free/in_progress instance today
         exists = await session.scalar(
             select(TaskInstance).where(
@@ -2288,7 +2259,8 @@ async def spawn_chore_instance(req: SpawnChoreRequest, user: User = Depends(get_
             inst = TaskInstance(
                 template_id=tmpl.id,
                 date=today,
-                status="free",
+                status="in_progress",
+                done_by_user_id=assignee_id,
                 priority=0
             )
             session.add(inst)
@@ -2367,7 +2339,8 @@ async def spawn_chore_instance(req: SpawnChoreRequest, user: User = Depends(get_
                 inst_new = TaskInstance(
                     template_id=tmpl.id,
                     date=s_date,
-                    status="free",
+                    status="in_progress",
+                    done_by_user_id=assignee_id,
                     priority=0
                 )
                 session.add(inst_new)

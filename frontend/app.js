@@ -98,12 +98,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   startInitialSplashTimer();
 
   // 2. Instantly display correct localized dates in pagination bars
-  const houseEl = document.getElementById('houseActiveDateDisplay');
-  if (houseEl) houseEl.textContent = getHouseActiveDateLabel();
   const personalEl = document.getElementById('personalActiveDateDisplay');
   if (personalEl) personalEl.textContent = getPersonalActiveDateLabel();
-  const shoppingEl = document.getElementById('shoppingActiveDateDisplay');
-  if (shoppingEl) shoppingEl.textContent = getShoppingActiveDateLabel();
+  const partnerEl = document.getElementById('partnerActiveDateDisplay');
+  if (partnerEl) partnerEl.textContent = getPartnerActiveDateLabel();
 
   setupTabs();
   setupModals();
@@ -116,7 +114,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   (async () => {
     try {
       await Promise.all([
-        loadHouseTab(),
+        loadPersonalTab(),
         loadWeeklyGoal()
       ]);
     } catch (e) {
@@ -144,12 +142,12 @@ function connectWebSocket() {
         // Run preloading silently in the background without clearing UI state
         preloadCurrentWeek().then(() => {
           const activeTab = document.querySelector('.tab-btn.active')?.dataset.tab;
-          if (activeTab === 'house') {
-            loadHouseTab();
-          } else if (activeTab === 'personal') {
+          if (activeTab === 'personal') {
             loadPersonalTab();
-          } else if (activeTab === 'shopping') {
-            loadShoppingTab();
+          } else if (activeTab === 'partner') {
+            loadPartnerTab();
+          } else if (activeTab === 'templates') {
+            loadTemplatesTab();
           }
           loadWeeklyGoal();
         }).catch(err => console.error("WS background refresh failed", err));
@@ -173,10 +171,11 @@ window.connectWebSocket = connectWebSocket;
 function preloadCurrentWeek() {
   const today = new Date();
   window.personalTasksCache = window.personalTasksCache || {};
+  window.partnerTasksCache = window.partnerTasksCache || {};
+  window.templatesCache = window.templatesCache || [];
   window.tasksCache = window.tasksCache || {};
 
   // Load sliding 14 days window (3 days back to 10 days ahead)
-  // This guarantees yesterday, today, and tomorrow are fully cached at startup
   const startD = new Date(today);
   startD.setDate(today.getDate() - 3);
 
@@ -197,12 +196,27 @@ function preloadCurrentWeek() {
         if (up) up.textContent = `${me.points} ✨`;
         currentPoints = me.points;
       }
+
+      const partner = data.members.find(m => !m.is_me);
+      if (partner) {
+        window.partnerMember = partner;
+        const pLabel = document.getElementById('partnerTabLabel');
+        if (pLabel) pLabel.textContent = partner.display_name || 'Партнёр';
+      }
+
+      const assigneeSelect = document.getElementById('choreTmplAssignee');
+      if (assigneeSelect) {
+        assigneeSelect.innerHTML = data.members.map(m => `<option value="${m.id}">${escHtml(m.display_name)}</option>`).join('');
+      }
     }
-    if (data.house) {
-      for (const dateStr in data.house) {
-        window.tasksCache[dateStr] = data.house[dateStr];
-        if (getHouseActiveDateStr() === dateStr) {
-          renderHouseTasks(data.house[dateStr]);
+    if (data.templates) {
+      window.templatesCache = data.templates;
+    }
+    if (data.partner) {
+      for (const dateStr in data.partner) {
+        window.partnerTasksCache[dateStr] = data.partner[dateStr];
+        if (typeof getPartnerActiveDateStr === 'function' && getPartnerActiveDateStr() === dateStr) {
+          renderPartnerTasks(data.partner[dateStr].household || []);
         }
       }
     }
@@ -216,20 +230,11 @@ function preloadCurrentWeek() {
     }
   }).catch(e => {
     console.warn("Failed to preload batch tasks", e);
-    // Fallback: load active day tasks individually
-    const activeHouseDate = getHouseActiveDateStr();
-    const p1 = api('GET', `/api/house/tasks?date=${activeHouseDate}`).then(res => {
-      window.tasksCache[activeHouseDate] = res;
-      renderHouseTasks(res);
-    }).catch(err => console.error("Fallback house tasks load failed", err));
-
     const activePersonalDate = getPersonalActiveDateStr();
-    const p2 = api('GET', `/api/tasks/today?date=${activePersonalDate}`).then(res => {
+    return api('GET', `/api/tasks/today?date=${activePersonalDate}`).then(res => {
       window.personalTasksCache[activePersonalDate] = res;
       renderPersonalTasks(res.personal, res.household);
     }).catch(err => console.error("Fallback personal tasks load failed", err));
-
-    return Promise.all([p1, p2]);
   });
 }
 window.preloadCurrentWeek = preloadCurrentWeek;
@@ -530,11 +535,13 @@ function setupTabs() {
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
       btn.classList.add('active');
-      document.getElementById(`pane-${tab}`).classList.add('active');
+      const pane = document.getElementById(`pane-${tab}`);
+      if (pane) pane.classList.add('active');
 
-      if (tab === 'house') loadHouseTab();
-      else if (tab === 'personal') loadPersonalTab();
-      else if (tab === 'shopping') loadShoppingTab();
+      if (tab === 'personal') loadPersonalTab();
+      else if (tab === 'partner') loadPartnerTab();
+      else if (tab === 'templates') loadTemplatesTab();
+      else if (tab === 'house') loadHouseTab();
     });
   });
 }
@@ -809,6 +816,38 @@ function shiftPersonalDay(diff) {
 }
 window.shiftPersonalDay = shiftPersonalDay;
 
+// Partner Offset functions
+let partnerActiveOffset = 0;
+function getPartnerActiveDateStr() {
+  const d = new Date();
+  d.setDate(d.getDate() + partnerActiveOffset);
+  return formatLocalDate(d);
+}
+function getPartnerActiveDateLabel() {
+  const d = new Date();
+  d.setDate(d.getDate() + partnerActiveOffset);
+  return formatPaginationDate(d);
+}
+function shiftPartnerDay(diff) {
+  partnerActiveOffset += diff;
+  const list = document.getElementById('partnerTasksList');
+  const dateStr = getPartnerActiveDateStr();
+  const isCached = window.partnerTasksCache && window.partnerTasksCache[dateStr];
+  showSpinnerIfNeeded(list, '.task-card', !isCached);
+  loadPartnerTab();
+  loadWeeklyGoal();
+}
+window.shiftPartnerDay = shiftPartnerDay;
+
+function isUserHouseOwner() {
+  if (window.houseMembersList && window.houseMembersList.length) {
+    const me = window.houseMembersList.find(m => m.is_me);
+    if (me) return Boolean(me.is_owner);
+  }
+  return true;
+}
+window.isUserHouseOwner = isUserHouseOwner;
+
 // House Offset functions
 function getHouseActiveDateStr() {
   const d = new Date();
@@ -897,39 +936,51 @@ async function loadPersonalTab() {
 
 function renderPersonalTasks(personal, household) {
   const list = document.getElementById('personalTasksList');
+  if (!list) return;
   const isToday = personalActiveOffset === 0;
   const all = [
     ...household.map(t => ({ ...t, isHousehold: true })),
     ...personal.map(t => ({ ...t, isHousehold: false })),
   ];
 
+  const addBtnAction = isUserHouseOwner()
+    ? `document.getElementById('addChoreChoiceModal').classList.remove('hidden')`
+    : `document.getElementById('addTaskModal').classList.remove('hidden'); document.getElementById('newTaskInput').focus()`;
+
   if (!all.length) {
-    list.innerHTML = `<div class="empty-state"><div class="empty-icon">🎉</div><div class="empty-title">Всё сделано!</div><div class="empty-sub">На сегодня задач нет</div></div>`;
+    list.innerHTML = `<div class="empty-state"><div class="empty-icon">🎉</div><div class="empty-title">Всё сделано!</div><div class="empty-sub">На этот день задач нет</div></div>`;
     if (isToday) {
-      list.innerHTML += `<div class="add-inline-btn task-card personal-task" onclick="document.getElementById('addTaskModal').classList.remove('hidden'); document.getElementById('newTaskInput').focus()">+ Добавить</div>`;
+      list.innerHTML += `<div class="add-inline-btn task-card personal-task" onclick="${addBtnAction}">+ Добавить задачу</div>`;
     }
     return;
   }
 
-  // Sort: completed tasks at the end
+  // Sort: uncompleted household chores (🏠) on top by points DESC, uncompleted personal tasks (👤) below, completed at end
   all.sort((a, b) => {
-    const aDone = a.is_completed === true;
-    const bDone = b.is_completed === true;
-    if (aDone && !bDone) return 1;
-    if (!aDone && bDone) return -1;
-    return 0;
+    const aDone = a.is_completed === true || a.status === 'done';
+    const bDone = b.is_completed === true || b.status === 'done';
+    if (aDone !== bDone) return aDone ? 1 : -1;
+    if (!aDone) {
+      if (a.isHousehold !== b.isHousehold) return a.isHousehold ? -1 : 1;
+      if (a.isHousehold) return (b.points || 0) - (a.points || 0);
+      return (a.id || 0) - (b.id || 0);
+    }
+    return (a.id || 0) - (b.id || 0);
   });
 
   const rows = all.map(t => {
-    const isCompleted = t.is_completed === true;
+    const isCompleted = t.is_completed === true || t.status === 'done';
     const grayClass = isCompleted ? 'completed-gray' : '';
     
     if (t.isHousehold) {
+      const clickHandler = isCompleted
+        ? `openArchivedChoreDetails(${JSON.stringify(t).replace(/"/g, '&quot;')})`
+        : `openMyTaskDetails(${JSON.stringify(t).replace(/"/g, '&quot;')}, 'household')`;
       return `
-        <div class="task-card house-task flex-between ${grayClass}" onclick="openMyTaskDetails(${JSON.stringify(t).replace(/"/g, '&quot;')}, 'household')">
+        <div class="task-card house-task flex-between ${grayClass}" onclick="${clickHandler}">
           <div class="task-left flex-row" style="align-items: center; gap: 8px;">
             <span style="font-size: 16px;">🏠</span>
-            <span class="task-title" style="font-weight: 500; font-size: 14px;">${escHtml(stripEmoji(t.text))}</span>
+            <span class="task-title" style="font-weight: 500; font-size: 14px;">${escHtml(stripEmoji(t.text || t.title))}</span>
           </div>
           <span class="task-badge badge-points" style="font-size: 12px; margin-left: auto;">${t.points} ✨</span>
         </div>`;
@@ -950,26 +1001,34 @@ function renderPersonalTasks(personal, household) {
   });
 
   if (isToday) {
-    rows.push(`<div class="add-inline-btn task-card personal-task" onclick="document.getElementById('addTaskModal').classList.remove('hidden'); document.getElementById('newTaskInput').focus()">+ Добавить</div>`);
+    rows.push(`<div class="add-inline-btn task-card personal-task" onclick="${addBtnAction}">+ Добавить задачу</div>`);
   }
   list.innerHTML = rows.join('');
 }
 
 function optimisticCompleteHouseTask(id, pointsEarned) {
-  const activeDate = getHouseActiveDateStr();
-  const tasks = window.tasksCache[activeDate];
-  if (!tasks) return null;
-  
-  const t = tasks.find(item => item.id === id);
+  const pDate = getPersonalActiveDateStr();
+  const cachedPersonal = window.personalTasksCache && window.personalTasksCache[pDate];
+  let t = null;
+  if (cachedPersonal && cachedPersonal.household) {
+    t = cachedPersonal.household.find(item => item.id === id);
+  }
+  if (!t) {
+    const hDate = (typeof getHouseActiveDateStr === 'function') ? getHouseActiveDateStr() : pDate;
+    const tasks = window.tasksCache && window.tasksCache[hDate];
+    if (tasks) t = tasks.find(item => item.id === id);
+  }
   if (!t) return null;
   
   const rollbackState = {
     status: t.status,
+    is_completed: t.is_completed,
     completed_by: t.completed_by,
     done_at: t.done_at
   };
   
   t.status = 'done';
+  t.is_completed = true;
   t.completed_by = (currentUser && currentUser.first_name) || 'Шурик';
   
   let rollbackPoints = null;
@@ -983,19 +1042,23 @@ function optimisticCompleteHouseTask(id, pointsEarned) {
     }
   }
   
-  renderHouseTasks(tasks);
+  if (cachedPersonal) {
+    renderPersonalTasks(cachedPersonal.personal || [], cachedPersonal.household || []);
+  }
   return { rollbackState, rollbackPoints, taskRef: t };
 }
 
 function rollbackHouseTask(taskRef, rollbackState, rollbackPoints) {
   if (taskRef && rollbackState) {
     taskRef.status = rollbackState.status;
+    taskRef.is_completed = rollbackState.is_completed;
     taskRef.completed_by = rollbackState.completed_by;
     taskRef.done_at = rollbackState.done_at;
     
-    const activeDate = getHouseActiveDateStr();
-    if (window.tasksCache[activeDate]) {
-      renderHouseTasks(window.tasksCache[activeDate]);
+    const pDate = getPersonalActiveDateStr();
+    const cachedPersonal = window.personalTasksCache && window.personalTasksCache[pDate];
+    if (cachedPersonal) {
+      renderPersonalTasks(cachedPersonal.personal || [], cachedPersonal.household || []);
     }
   }
   
@@ -1214,28 +1277,37 @@ function setupModals() {
     const periodicity = document.getElementById('choreTmplPeriodicity').value;
     const periodDaysInput = document.getElementById('choreTmplPeriodDays');
     const periodDays = periodicity === 'every_x_days' ? (parseInt(periodDaysInput.value) || 30) : null;
+    const assigneeSelect = document.getElementById('choreTmplAssignee');
+    const assignedUserId = assigneeSelect ? (parseInt(assigneeSelect.value) || null) : null;
+
     if (!title) return;
     try {
       if (currentEditingTemplateId) {
-        const res = await api('PUT', `/api/chores/templates/${currentEditingTemplateId}`, { title, points, periodicity, period_days: periodDays });
-        if (res && res.pending) {
-          showToast(res.message || '⏳ Запрос на изменение отправлен партнёру!');
-        } else {
-          showToast('✅ Шаблон сохранен!');
-        }
+        await api('PUT', `/api/chores/templates/${currentEditingTemplateId}`, {
+          title,
+          points,
+          periodicity,
+          period_days: periodDays,
+          assigned_user_id: assignedUserId
+        });
+        showToast('✅ Шаблон сохранен!');
       } else {
-        const res = await api('POST', '/api/chores/templates', { title, points, periodicity, period_days: periodDays });
-        if (res && res.pending) {
-          showToast(res.message || '⏳ Запрос отправлен на согласование партнёру!');
-        } else {
-          showToast('✅ Шаблон добавлен!');
-        }
+        await api('POST', '/api/chores/templates', {
+          title,
+          points,
+          periodicity,
+          period_days: periodDays,
+          assigned_user_id: assignedUserId
+        });
+        showToast('✅ Шаблон добавлен!');
       }
       document.getElementById('addChoreModal').classList.add('hidden');
       document.getElementById('choreTmplTitle').value = '';
       document.getElementById('choreTmplPoints').value = '1';
-      loadHouseTab();
-      loadWeeklyGoal();
+      window.templatesCache = [];
+      window.personalTasksCache = {};
+      window.partnerTasksCache = {};
+      await Promise.all([loadPersonalTab(), loadPartnerTab(), loadTemplatesTab(), loadWeeklyGoal()]);
     } catch (e) {
       showToast(`⚠️ ${e.message}`);
     }
@@ -2198,8 +2270,22 @@ window.loadShoppingArchive = loadShoppingArchive;
 /* ── My Task Details Modal (Personal/Claimed) ── */
 let currentEditingTemplateId = null;
 
+async function reassignChoreInstance(instanceId, targetUserId) {
+  try {
+    await api('POST', `/api/house/tasks/${instanceId}/assign`, { user_id: targetUserId });
+    showToast('✅ Задача переназначена!');
+    window.personalTasksCache = {};
+    window.partnerTasksCache = {};
+    await Promise.all([loadPersonalTab(), loadPartnerTab()]);
+  } catch (e) {
+    showToast(`⚠️ ${e.message}`);
+  }
+}
+window.reassignChoreInstance = reassignChoreInstance;
+
 function openMyTaskDetails(t, type) {
-  const title = t.text;
+  const isOwner = isUserHouseOwner();
+  const title = t.text || t.title;
   document.getElementById('myTaskDetailsTitle').textContent = stripEmoji(title);
   
   const lastStr = t.last_completed
@@ -2215,6 +2301,7 @@ function openMyTaskDetails(t, type) {
       <div style="display: flex; flex-direction: column; gap: 6px;">
         <div>🏠 <strong>Тип:</strong> Домашнее дело</div>
         <div>✨ <strong>Награда:</strong> ${t.points} ✨</div>
+        <div>👤 <strong>Ответственный:</strong> <span>${escHtml(t.assigned_to_name || 'Шурик')}</span></div>
         <div>✅ <strong>Последнее выполнение:</strong> <span>${lastStr}</span></div>
         <div>⏭️ <strong>Следующее:</strong> <span>${nextStr}</span></div>
       </div>
@@ -2234,25 +2321,218 @@ function openMyTaskDetails(t, type) {
   
   const actions = document.getElementById('myTaskDetailsActions');
   if (type === 'household') {
+    const partner = window.partnerMember || (window.houseMembersList && window.houseMembersList.find(m => !m.is_me));
+    const partnerId = partner ? partner.id : null;
+    const partnerName = partner ? partner.display_name : 'Партнёра';
+
+    let reassignBtn = '';
+    if (isOwner && partnerId) {
+      reassignBtn = `<button class="btn btn-secondary" onclick="reassignChoreInstance(${t.id}, ${partnerId}); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center;">На ${escHtml(partnerName)}</button>`;
+    }
+
     actions.innerHTML = `
       <div style="display: flex; gap: 6px; width: 100%;">
-        <button class="btn btn-secondary" onclick="completeHouseTask(${t.id}, '${escAttr(title)}'); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center;">Done</button>
+        <button class="btn btn-primary" onclick="completeHouseTask(${t.id}, '${escAttr(title)}'); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center;">Done</button>
         <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'chore'); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center;">Shift</button>
-        <button class="btn btn-secondary" onclick="unclaimChore(${t.id});" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center;">Return</button>
+        ${reassignBtn}
       </div>
     `;
   } else {
     actions.innerHTML = `
       <div style="display: flex; gap: 6px; width: 100%;">
-        <button class="btn btn-secondary" onclick="completePersonalTask(${t.id}); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center;">Done</button>
+        <button class="btn btn-primary" onclick="completePersonalTask(${t.id}); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center;">Done</button>
         <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'personal'); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center;">Shift</button>
-        <button class="btn btn-secondary" onclick="deletePersonalTask(${t.id});" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center;">Delete</button>
+        <button class="btn btn-secondary" onclick="deletePersonalTask(${t.id});" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; background: var(--danger); border-color: var(--danger); color: #fff;">Delete</button>
       </div>
     `;
   }
   
   document.getElementById('myTaskDetailsModal').classList.remove('hidden');
 }
+
+/* ── Partner Tab and Tasks ── */
+async function loadPartnerTab() {
+  const list = document.getElementById('partnerTasksList');
+  if (!list) return;
+  const dateStr = getPartnerActiveDateStr();
+  const display = document.getElementById('partnerActiveDateDisplay');
+  if (display) display.textContent = getPartnerActiveDateLabel();
+
+  if (window.partnerTasksCache && window.partnerTasksCache[dateStr]) {
+    renderPartnerTasks(window.partnerTasksCache[dateStr].household || []);
+    return;
+  }
+
+  showSpinnerIfNeeded(list, '.task-card');
+  const partner = window.partnerMember || (window.houseMembersList && window.houseMembersList.find(m => !m.is_me));
+  if (!partner) {
+    list.innerHTML = `<div class="empty-state"><div class="empty-title">Второй участник не найден</div></div>`;
+    return;
+  }
+
+  try {
+    const data = await api('GET', `/api/tasks/today?date=${dateStr}&user_id=${partner.id}`);
+    if (!window.partnerTasksCache) window.partnerTasksCache = {};
+    window.partnerTasksCache[dateStr] = data;
+    renderPartnerTasks(data.household || []);
+  } catch (e) {
+    list.innerHTML = `<div class="empty-state"><div class="empty-title">Ошибка загрузки</div></div>`;
+  }
+}
+window.loadPartnerTab = loadPartnerTab;
+
+function renderPartnerTasks(household) {
+  const list = document.getElementById('partnerTasksList');
+  if (!list) return;
+
+  if (!household.length) {
+    list.innerHTML = `<div class="empty-state"><div class="empty-icon">🎉</div><div class="empty-title">Дел нет!</div><div class="empty-sub">У партнёра на этот день задач нет</div></div>`;
+    return;
+  }
+
+  const all = [...household];
+  all.sort((a, b) => {
+    const aDone = a.is_completed === true || a.status === 'done';
+    const bDone = b.is_completed === true || b.status === 'done';
+    if (aDone !== bDone) return aDone ? 1 : -1;
+    return (b.points || 0) - (a.points || 0);
+  });
+
+  const rows = all.map(t => {
+    const isCompleted = t.is_completed === true || t.status === 'done';
+    const grayClass = isCompleted ? 'completed-gray' : '';
+    const clickHandler = isCompleted
+      ? `openArchivedChoreDetails(${JSON.stringify(t).replace(/"/g, '&quot;')})`
+      : `openPartnerTaskDetails(${JSON.stringify(t).replace(/"/g, '&quot;')})`;
+
+    return `
+      <div class="task-card house-task flex-between ${grayClass}" onclick="${clickHandler}">
+        <div class="task-left flex-row" style="align-items: center; gap: 8px;">
+          <span style="font-size: 16px;">🏠</span>
+          <span class="task-title" style="font-weight: 500; font-size: 14px;">${escHtml(stripEmoji(t.text || t.title))}</span>
+        </div>
+        <span class="task-badge badge-points" style="font-size: 12px; margin-left: auto;">${t.points} ✨</span>
+      </div>`;
+  });
+
+  list.innerHTML = rows.join('');
+}
+window.renderPartnerTasks = renderPartnerTasks;
+
+function openPartnerTaskDetails(t) {
+  const isOwner = isUserHouseOwner();
+  const title = t.text || t.title;
+  document.getElementById('myTaskDetailsTitle').textContent = stripEmoji(title);
+  
+  const lastStr = t.last_completed
+    ? new Date(t.last_completed).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    : 'Ещё не выполнялось';
+  const nextStr = t.next_execution
+    ? new Date(t.next_execution).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    : '—';
+
+  let body = `
+    <div style="display: flex; flex-direction: column; gap: 6px;">
+      <div>🏠 <strong>Тип:</strong> Домашнее дело</div>
+      <div>✨ <strong>Награда:</strong> ${t.points} ✨</div>
+      <div>👤 <strong>Ответственный:</strong> <span>${escHtml(t.assigned_to_name || 'Партнёр')}</span></div>
+      <div>✅ <strong>Последнее выполнение:</strong> <span>${lastStr}</span></div>
+      <div>⏭️ <strong>Следующее:</strong> <span>${nextStr}</span></div>
+    </div>
+  `;
+  document.getElementById('myTaskDetailsBody').innerHTML = body;
+
+  const actions = document.getElementById('myTaskDetailsActions');
+  if (isOwner) {
+    const me = window.houseMembersList && window.houseMembersList.find(m => m.is_me);
+    const myId = me ? me.id : 1;
+    actions.innerHTML = `
+      <div style="display: flex; gap: 6px; width: 100%;">
+        <button class="btn btn-primary" onclick="reassignChoreInstance(${t.id}, ${myId}); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center;">На меня</button>
+        <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'chore'); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center;">Сдвиг</button>
+      </div>
+    `;
+  } else {
+    actions.innerHTML = `
+      <div style="display: flex; gap: 6px; width: 100%;">
+        <button class="btn btn-secondary" onclick="closeModal('myTaskDetailsModal');" style="width: 100%; height: 42px; font-size: 13px; font-weight: 600;">Закрыть</button>
+      </div>
+    `;
+  }
+  document.getElementById('myTaskDetailsModal').classList.remove('hidden');
+}
+window.openPartnerTaskDetails = openPartnerTaskDetails;
+
+/* ── Templates Tab ── */
+async function loadTemplatesTab() {
+  const list = document.getElementById('templatesList');
+  if (!list) return;
+
+  if (window.templatesCache && window.templatesCache.length) {
+    renderTemplatesList(window.templatesCache);
+    return;
+  }
+
+  showSpinnerIfNeeded(list, '.task-card');
+  try {
+    const templates = await api('GET', '/api/chores/templates');
+    window.templatesCache = templates;
+    renderTemplatesList(templates);
+  } catch (e) {
+    list.innerHTML = `<div class="empty-state"><div class="empty-title">Ошибка загрузки шаблонов</div></div>`;
+  }
+}
+window.loadTemplatesTab = loadTemplatesTab;
+
+function renderTemplatesList(templates) {
+  const list = document.getElementById('templatesList');
+  if (!list) return;
+
+  const isOwner = isUserHouseOwner();
+  let html = '';
+
+  if (isOwner) {
+    html += `
+      <div style="margin-bottom: 12px;">
+        <button class="btn btn-primary" onclick="openNewTemplateCreator();" style="width: 100%; padding: 12px; font-weight: 600; font-size: 14px;">+ Новый шаблон задачи</button>
+      </div>
+    `;
+  }
+
+  if (!templates || !templates.length) {
+    html += `<div class="empty-state"><div class="empty-icon">📋</div><div class="empty-title">Нет шаблонов</div><div class="empty-sub">Создайте первый шаблон задачи</div></div>`;
+    list.innerHTML = html;
+    return;
+  }
+
+  const rows = templates.map(t => {
+    let nextStr = '--.--';
+    if (t.next_execution) {
+      const parts = t.next_execution.split('-');
+      if (parts.length === 3) nextStr = `${parts[2]}.${parts[1]}.`;
+    }
+
+    const assignee = t.assigned_to_name || 'Шурик';
+    const pLabel = periodLabel(t.periodicity, t.period_days);
+
+    return `
+      <div class="task-card house-task" onclick="openTemplateDetailsModal(${JSON.stringify(t).replace(/"/g, '&quot;')})" style="cursor: pointer; display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; margin-bottom: 8px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+          <span style="font-weight: 600; font-size: 14px; color: var(--text);">${escHtml(stripEmoji(t.title))}</span>
+          <span class="task-badge badge-points" style="font-size: 12px;">${t.points} ✨</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; font-size: 12px; color: var(--text3);">
+          <span>👤 ${escHtml(assignee)} · 🔁 ${escHtml(pLabel)}</span>
+          <span class="task-badge" style="font-size: 11px; background: var(--surface2); color: var(--text2); border-radius: 4px; padding: 2px 6px;">⏭️ ${nextStr}</span>
+        </div>
+      </div>
+    `;
+  });
+
+  html += rows.join('');
+  list.innerHTML = html;
+}
+window.renderTemplatesList = renderTemplatesList;
 
 /* ── Restore Chore From Archive ── */
 async function restoreChoreFromArchive(id) {
@@ -2277,7 +2557,6 @@ async function openAddFromDatabaseModal() {
   modal.classList.remove('hidden');
   list.innerHTML = '<div class="loading-spinner"><div class="spinner"></div><p>Загрузка...</p></div>';
 
-  // Use raw fetch so the global loading overlay never appears here
   const headers = { 'Content-Type': 'application/json', 'X-Init-Data': initData };
 
   let templates, activeTasks;
@@ -2294,7 +2573,6 @@ async function openAddFromDatabaseModal() {
     return;
   }
 
-  // IDs шаблонов, уже активных сегодня
   const activeIds = new Set(
     activeTasks
       .map(t => t.template_id)
@@ -2314,7 +2592,6 @@ async function openAddFromDatabaseModal() {
     return da - db;
   });
 
-  // Строим список через createElement — не через innerHTML
   list.innerHTML = '';
 
   inactive.forEach(t => {
@@ -2338,24 +2615,20 @@ async function openAddFromDatabaseModal() {
     else if (t.periodicity === 'every_x_days') periodStr = String(t.period_days);
     else if (t.periodicity === 'once') periodStr = '0';
 
-    // Строка — те же классы что у обычных карточек дел
     const row = document.createElement('div');
     row.className = 'task-card house-task';
     row.style.cursor = 'pointer';
     row.style.justifyContent = 'space-between';
     row.style.marginBottom = '6px';
 
-    // Название
     const titleEl = document.createElement('div');
     titleEl.className = 'task-title';
     titleEl.style.flex = '1';
     titleEl.textContent = stripEmoji(t.title);
 
-    // Правый блок
     const right = document.createElement('div');
     right.style.cssText = 'display:flex;align-items:center;gap:8px;flex-shrink:0;';
 
-    // Бейдж со статистикой "10.07 14 24.07"
     const badge = document.createElement('span');
     badge.className = 'task-badge';
     badge.style.cssText = 'font-size:11px;font-weight:600;background:rgba(147,197,253,0.12);color:#60a5fa;border:1px solid rgba(147,197,253,0.2);padding:4px 8px;border-radius:6px;white-space:pre;';
@@ -2364,12 +2637,9 @@ async function openAddFromDatabaseModal() {
     row.addEventListener('click', function handler(e) {
       e.preventDefault();
       e.stopPropagation();
-      row.removeEventListener('click', handler); // срабатывает только один раз
+      row.removeEventListener('click', handler);
       row.style.opacity = '0.6';
-      
-      // Заменяем текст бейджа на "Загрузка..."
       badge.textContent = '⏳ Загрузка...';
-      
       doSpawnChore(t.id);
     });
 
@@ -2381,11 +2651,8 @@ async function openAddFromDatabaseModal() {
 }
 
 async function doSpawnChore(tmplId) {
-  // Закрываем модал немедленно
   document.getElementById('addFromDbModal').classList.add('hidden');
-
   try {
-    // Прямой fetch без глобального overlay
     const res = await fetch(API_BASE + '/api/house/tasks/spawn', {
       method: 'POST',
       headers: {
@@ -2401,14 +2668,15 @@ async function doSpawnChore(tmplId) {
     }
 
     showToast('✅ Задача активирована на сегодня!');
-    // Перезагружаем вкладку — показываем loading overlay только здесь
-    await Promise.all([loadHouseTab(), loadWeeklyGoal()]);
+    window.personalTasksCache = {};
+    window.partnerTasksCache = {};
+    window.templatesCache = [];
+    await Promise.all([loadPersonalTab(), loadPartnerTab(), loadTemplatesTab(), loadWeeklyGoal()]);
   } catch (e) {
     showToast(`⚠️ Ошибка: ${e.message}`);
   }
 }
 
-// Алиас для обратной совместимости с другими местами кода
 async function spawnChoreFromTemplate(tmplId) {
   return doSpawnChore(tmplId);
 }
@@ -2420,7 +2688,7 @@ function openArchivedChoreDetails(c) {
   let dtStr = c.done_at || '';
   if (!dtStr && c.date) {
     if (c.date.includes(' в ')) {
-      dtStr = c.date; // already formatted from backend
+      dtStr = c.date;
     } else {
       const dt = new Date(c.date);
       if (!isNaN(dt.getTime())) {
@@ -2459,25 +2727,40 @@ function openArchivedTaskDetails(t) {
 }
 
 function openTemplateDetailsModal(t) {
+  const isOwner = isUserHouseOwner();
   document.getElementById('templateDetailsTitle').textContent = stripEmoji(t.title);
   const last = t.last_completed ? new Date(t.last_completed).toLocaleDateString('ru-RU') : 'Нет данных';
   const next = t.next_execution ? new Date(t.next_execution).toLocaleDateString('ru-RU') : 'Нет данных';
+  const assignee = t.assigned_to_name || 'Шурик';
   
   document.getElementById('templateDetailsBody').innerHTML = `
-    <div>📅 <strong>Цикл повторения:</strong> <span>${periodLabel(t.periodicity, t.period_days)}</span></div>
+    <div>✨ <strong>Награда:</strong> <span>${t.points} ✨</span></div>
+    <div>👤 <strong>Ответственный:</strong> <span>${escHtml(assignee)}</span></div>
+    <div>🔁 <strong>Цикл повторения:</strong> <span>${periodLabel(t.periodicity, t.period_days)}</span></div>
     <div>📅 <strong>Последнее выполнение:</strong> <span>${last}</span></div>
     <div>🗓 <strong>Следующий повтор:</strong> <span>${next}</span></div>
-    <div>✨ <strong>Награда:</strong> <span>${t.points} ✨</span></div>
   `;
   
   const actions = document.getElementById('templateDetailsActions');
-  actions.innerHTML = `
-    <div style="display: flex; gap: 6px; width: 100%;">
-      <button class="btn btn-primary" onclick="startEditTemplate(${JSON.stringify(t).replace(/"/g, '&quot;')}); closeModal('templateDetailsModal');" style="flex: 1; padding: 10px 4px; font-size: 13px; font-weight: 600;">Изменить</button>
-      <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'template'); closeModal('templateDetailsModal');" style="flex: 1; padding: 10px 4px; font-size: 13px; font-weight: 600;">Сдвиг</button>
-      <button class="btn btn-secondary" onclick="deleteTemplate(${t.id}); closeModal('templateDetailsModal');" style="flex: 1; padding: 10px 4px; font-size: 13px; font-weight: 600; background: var(--danger); border-color: var(--danger);">Удалить</button>
-    </div>
-  `;
+  if (isOwner) {
+    actions.innerHTML = `
+      <div style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
+        <div style="display: flex; gap: 6px; width: 100%;">
+          <button class="btn btn-primary" onclick="startEditTemplate(${JSON.stringify(t).replace(/"/g, '&quot;')}); closeModal('templateDetailsModal');" style="flex: 1; height: 40px; font-size: 13px; font-weight: 600;">Изменить</button>
+          <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'template'); closeModal('templateDetailsModal');" style="flex: 1; height: 40px; font-size: 13px; font-weight: 600;">Сдвиг</button>
+          <button class="btn btn-secondary" onclick="spawnChoreFromTemplate(${t.id}); closeModal('templateDetailsModal');" style="flex: 1; height: 40px; font-size: 13px; font-weight: 600;">На сегодня</button>
+        </div>
+        <button class="btn btn-secondary" onclick="deleteTemplate(${t.id}); closeModal('templateDetailsModal');" style="width: 100%; height: 38px; font-size: 13px; font-weight: 600; background: var(--danger); border-color: var(--danger); color: #fff;">Удалить шаблон</button>
+      </div>
+    `;
+  } else {
+    actions.innerHTML = `
+      <div style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
+        <button class="btn btn-primary" onclick="spawnChoreFromTemplate(${t.id}); closeModal('templateDetailsModal');" style="width: 100%; height: 40px; font-size: 13px; font-weight: 600;">Добавить на сегодня</button>
+        <p style="font-size: 12px; color: var(--text3); text-align: center; margin: 4px 0 0 0;">Редактировать шаблоны может только хозяин дома</p>
+      </div>
+    `;
+  }
   document.getElementById('templateDetailsModal').classList.remove('hidden');
 }
 
@@ -2496,17 +2779,22 @@ function startEditTemplate(t) {
   document.getElementById('choreTmplTitle').value = stripEmoji(t.title);
   document.getElementById('choreTmplPoints').value = t.points;
   
+  const assigneeSelect = document.getElementById('choreTmplAssignee');
+  if (assigneeSelect && t.assigned_user_id) {
+    assigneeSelect.value = String(t.assigned_user_id);
+  }
+  
   let p = t.periodicity;
   let d = t.period_days;
-  if (p === 'daily') { p = 'every_x_days'; d = 1; }
-  else if (p === 'weekly') { p = 'every_x_days'; d = 7; }
-  else if (p === 'monthly') { p = 'every_x_days'; d = 30; }
+  if (p === 'daily') { p = 'daily'; d = 1; }
+  else if (p === 'weekly') { p = 'weekly'; d = 7; }
+  else if (p === 'monthly') { p = 'monthly'; d = 30; }
   else if (p === 'once') { p = 'once'; d = ''; }
   else if (p === 'every_x_days') { d = t.period_days || 30; }
   else { p = 'every_x_days'; d = 30; }
   
   document.getElementById('choreTmplPeriodicity').value = p;
-  document.getElementById('choreTmplPeriodDays').value = d;
+  document.getElementById('choreTmplPeriodDays').value = d || 30;
   toggleChorePeriodDays(p);
   
   const startEl = document.getElementById('choreTmplStartDate');
@@ -2524,9 +2812,16 @@ function openNewTemplateCreator() {
   document.getElementById('saveChoreTmplBtn').textContent = 'Создать ✓';
   document.getElementById('choreTmplTitle').value = '';
   document.getElementById('choreTmplPoints').value = '1';
-  document.getElementById('choreTmplPeriodicity').value = 'once';
+  document.getElementById('choreTmplPeriodicity').value = 'daily';
   document.getElementById('choreTmplPeriodDays').value = '30';
-  toggleChorePeriodDays('once');
+  toggleChorePeriodDays('daily');
+  
+  const me = window.houseMembersList && window.houseMembersList.find(m => m.is_me);
+  const assigneeSelect = document.getElementById('choreTmplAssignee');
+  if (assigneeSelect && me) {
+    assigneeSelect.value = String(me.id);
+  }
+  
   const startEl = document.getElementById('choreTmplStartDate');
   if (startEl) startEl.value = '';
   document.getElementById('addChoreModal').classList.remove('hidden');
@@ -2537,6 +2832,12 @@ function deleteTemplate(id) {
 }
 
 window.openMyTaskDetails = openMyTaskDetails;
+window.openPartnerTaskDetails = openPartnerTaskDetails;
+window.reassignChoreInstance = reassignChoreInstance;
+window.loadPartnerTab = loadPartnerTab;
+window.renderPartnerTasks = renderPartnerTasks;
+window.loadTemplatesTab = loadTemplatesTab;
+window.renderTemplatesList = renderTemplatesList;
 window.restoreChoreFromArchive = restoreChoreFromArchive;
 window.openAddFromDatabaseModal = openAddFromDatabaseModal;
 window.spawnChoreFromTemplate = spawnChoreFromTemplate;

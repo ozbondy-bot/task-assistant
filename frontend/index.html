@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <link rel="stylesheet" href="style.css?v=11" />
+  <link rel="stylesheet" href="style.css?v=50" />
 </head>
 <body>
   <div id="app">
@@ -26,44 +26,31 @@
 
     <!-- Tabs -->
     <nav class="tab-nav">
-      <button class="tab-btn active" data-tab="house" id="tabHouse">
-        <span class="tab-icon">🏠</span>
-        <span class="tab-label">Дом</span>
-      </button>
-      <button class="tab-btn" data-tab="personal" id="tabPersonal">
+      <button class="tab-btn active" data-tab="personal" id="tabPersonal">
         <span class="tab-icon">👤</span>
         <span class="tab-label">Мои дела</span>
       </button>
-      <button class="tab-btn" data-tab="shopping" id="tabShopping">
-        <span class="tab-icon">🛒</span>
-        <span class="tab-label">Покупки</span>
+      <button class="tab-btn" data-tab="partner" id="tabPartner">
+        <span class="tab-icon">👥</span>
+        <span class="tab-label" id="partnerTabLabel">Биба</span>
+      </button>
+      <button class="tab-btn" data-tab="templates" id="tabTemplates">
+        <span class="tab-icon">📋</span>
+        <span class="tab-label">Шаблоны</span>
       </button>
     </nav>
 
     <!-- Tab content -->
     <main class="tab-content">
 
-      <!-- HOUSEHOLD TASKS TAB -->
-      <section class="tab-pane active" id="pane-house">
-        <div id="houseTasksList" class="task-list">
+      <!-- PERSONAL TASKS TAB (MAIN TAB) -->
+      <section class="tab-pane active" id="pane-personal">
+        <div id="personalTasksList" class="task-list">
           <div class="loading-spinner">
             <div class="spinner"></div>
             <p>Загрузка...</p>
           </div>
         </div>
-        <!-- Date Pagination Bar for House Chores -->
-        <div class="pagination-sticky" style="position: relative;">
-          <button class="btn-pagination" onclick="shiftHouseDay(-1)">◀</button>
-          <div style="position: absolute; left: 50%; transform: translateX(-50%); font-weight: 600; font-size: 14px; color: var(--text); white-space: nowrap;">
-            <span id="houseActiveDateDisplay">06.07.</span>
-          </div>
-          <button class="btn-pagination" onclick="shiftHouseDay(1)">▶</button>
-        </div>
-      </section>
-
-      <!-- PERSONAL TASKS TAB -->
-      <section class="tab-pane" id="pane-personal">
-        <div id="personalTasksList" class="task-list"></div>
         <!-- Date Pagination Bar -->
         <div class="pagination-sticky" style="position: relative;">
           <button class="btn-pagination" onclick="shiftPersonalDay(-1)">◀</button>
@@ -75,8 +62,8 @@
         <!-- Add Task Modal -->
         <div class="modal-overlay hidden" id="addTaskModal">
           <div class="modal-card">
-            <h3>Новая задача</h3>
-            <p class="modal-hint">Напиши что угодно — я разберу дату, повторение и приоритет</p>
+            <h3>Новая личная задача</h3>
+            <p class="modal-hint">Напиши что угодно — разберу дату и повторение</p>
             <textarea id="newTaskInput" placeholder="Например: позвонить врачу завтра или выпить воду каждый день" rows="3"></textarea>
             <div class="form-group" style="margin-top: 8px">
               <label>Дата выполнения (необязательно)</label>
@@ -101,34 +88,30 @@
         </div>
       </section>
 
-      <!-- SHOPPING TAB -->
-      <section class="tab-pane" id="pane-shopping">
-        <div id="shoppingList" class="task-list"></div>
-        <!-- Date Pagination Bar for Shopping List -->
-        <div class="pagination-sticky" style="position: relative;">
-          <button class="btn-pagination" onclick="shiftShoppingDay(-1)">◀</button>
-          <div style="position: absolute; left: 50%; transform: translateX(-50%); font-weight: 600; font-size: 14px; color: var(--text); white-space: nowrap;">
-            <span id="shoppingActiveDateDisplay">06.07.</span>
-          </div>
-          <div style="display: flex; align-items: center; gap: 8px; margin-left: auto;">
-            <span id="shoppingTotal" style="font-size: 12px; font-weight: bold; color: var(--accent2); margin-right: 4px;">Сумма: 0 ₽</span>
-            <button class="btn-pagination" onclick="shiftShoppingDay(1)">▶</button>
+      <!-- PARTNER TASKS TAB -->
+      <section class="tab-pane" id="pane-partner">
+        <div id="partnerTasksList" class="task-list">
+          <div class="loading-spinner">
+            <div class="spinner"></div>
+            <p>Загрузка...</p>
           </div>
         </div>
-        <!-- Add shopping modal -->
-        <div class="modal-overlay hidden" id="addShopModal">
-          <div class="modal-card">
-            <h3>Добавить товар</h3>
-            <input id="shopItemName" type="text" placeholder="Название товара" />
-            <input id="shopItemPrice" type="number" placeholder="Цена (необязательно)" min="0" />
-            <label class="priority-toggle">
-              <input type="checkbox" id="shopItemUrgent" />
-              <span>🔴 Срочно</span>
-            </label>
-            <div class="modal-actions">
-              <button class="btn btn-ghost" id="cancelShopBtn">Отмена</button>
-              <button class="btn btn-primary" id="saveShopBtn">Добавить ✓</button>
-            </div>
+        <!-- Date Pagination Bar for Partner Chores -->
+        <div class="pagination-sticky" style="position: relative;">
+          <button class="btn-pagination" onclick="shiftPartnerDay(-1)">◀</button>
+          <div style="position: absolute; left: 50%; transform: translateX(-50%); font-weight: 600; font-size: 14px; color: var(--text); white-space: nowrap;">
+            <span id="partnerActiveDateDisplay">06.07.</span>
+          </div>
+          <button class="btn-pagination" onclick="shiftPartnerDay(1)">▶</button>
+        </div>
+      </section>
+
+      <!-- TEMPLATES TAB -->
+      <section class="tab-pane" id="pane-templates">
+        <div id="templatesList" class="task-list">
+          <div class="loading-spinner">
+            <div class="spinner"></div>
+            <p>Загрузка...</p>
           </div>
         </div>
       </section>
@@ -147,6 +130,16 @@
             </div>
             <input id="choreTmplTitle" type="text" placeholder="Например: Помыть посуду" />
           </div>
+          <div class="form-group-with-emoji" id="choreAssigneeGroup">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+              <span>👤</span>
+              <strong style="font-size: 13px; color: var(--text2);">Ответственный</strong>
+            </div>
+            <select id="choreTmplAssignee">
+              <option value="1">Шурик</option>
+              <option value="3">Биба</option>
+            </select>
+          </div>
           <div class="form-group-with-emoji">
             <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
               <span>✨</span>
@@ -160,8 +153,11 @@
               <strong style="font-size: 13px; color: var(--text2);">Периодичность</strong>
             </div>
             <select id="choreTmplPeriodicity" onchange="toggleChorePeriodDays(this.value)">
-              <option value="once">Единоразово</option>
+              <option value="daily">Каждый день</option>
               <option value="every_x_days">Каждые X дней</option>
+              <option value="weekly">Раз в неделю</option>
+              <option value="monthly">Раз в месяц</option>
+              <option value="once">Единоразово</option>
             </select>
           </div>
           <div class="form-group-with-emoji hidden" id="chorePeriodDaysGroup">
@@ -323,12 +319,12 @@
   <div class="modal-overlay hidden" id="addChoreChoiceModal">
     <div class="modal-card">
       <div class="modal-header-row" style="margin-bottom: 16px;">
-        <h3>Добавить домашнюю задачу</h3>
+        <h3>Добавить задачу</h3>
         <button class="btn-close-modal" onclick="closeModal('addChoreChoiceModal')">✕</button>
       </div>
       <div style="display: flex; flex-direction: column; gap: 10px; width: 100%;">
-        <button class="btn btn-primary" onclick="openNewTemplateCreator();" style="width: 100%; padding: 12px; font-weight: 600;">Создать новую задачу</button>
-        <button class="btn btn-secondary" onclick="openAddFromDatabaseModal();" style="width: 100%; padding: 12px; font-weight: 600;">Добавить из базы (шаблоны)</button>
+        <button class="btn btn-primary" onclick="openNewTemplateCreator();" style="width: 100%; padding: 12px; font-weight: 600;">🏠 Домашнее дело</button>
+        <button class="btn btn-secondary" onclick="closeModal('addChoreChoiceModal'); document.getElementById('addTaskModal').classList.remove('hidden'); document.getElementById('newTaskInput').focus();" style="width: 100%; padding: 12px; font-weight: 600;">👤 Личная задача</button>
       </div>
     </div>
   </div>
@@ -376,6 +372,6 @@
   <!-- Toast notification -->
   <div class="toast hidden" id="toast"></div>
 
-  <script src="app.js?v=48"></script>
+  <script src="app.js?v=50"></script>
 </body>
 </html>

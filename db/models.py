@@ -111,9 +111,11 @@ class TaskTemplate(Base):
     month_day = Column(Integer, nullable=True)
     start_date = Column(Date, nullable=True)
     deleted = Column(Boolean, default=False, nullable=False)
+    assigned_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
 
     house = relationship("House", back_populates="templates")
     instances = relationship("TaskInstance", back_populates="template")
+    assigned_user = relationship("User", foreign_keys=[assigned_user_id])
 
 
 class TaskInstance(Base):
