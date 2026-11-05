@@ -209,16 +209,10 @@ async def admin_reset_instances(user: User = Depends(get_current_user)):
 async def get_batch_tasks(start_date: str, end_date: str, user: User = Depends(get_current_user)):
     from bot.handlers.base import get_house_today_date, generate_daily_chores_if_needed
     async with AsyncSessionLocal() as session:
-        # Trigger daily chores generation and rollover once
+        # Trigger daily chores generation and rollover once per day
         await generate_daily_chores_if_needed(session, ACTIVE_HOUSE_ID)
         
         today = await get_house_today_date(session)
-        # Ensure chores are generated for the current calendar week
-        monday_date = today - timedelta(days=today.weekday())
-        from bot.handlers.base import generate_chores_for_week
-        await generate_chores_for_week(session, ACTIVE_HOUSE_ID, monday_date)
-        await session.commit()
-        
         house = await session.get(House, ACTIVE_HOUSE_ID)
 
         # Parse start and end date
@@ -615,59 +609,68 @@ async def get_today_tasks(date: Optional[str] = None, user_id: Optional[int] = N
                 "next_execution": next_date.isoformat() if next_date else None,
             })
 
-        # Also get in-progress household tasks (claimed by this user)
-        # Note: claimed chores only show up on today's dashboard
+        # Get household tasks for target_date
         res_household = []
-        if target_date == today:
-            house_result = await session.execute(
-                select(TaskInstance, TaskTemplate).join(
-                    TaskTemplate, TaskInstance.template_id == TaskTemplate.id
-                ).where(
-                    and_(
-                        TaskInstance.done_by_user_id == target_uid,
-                        TaskInstance.status == "in_progress",
-                    )
-                )
+        owner_u = next((u for u in (await session.execute(select(User).where(User.house_id == ACTIVE_HOUSE_ID))).scalars().all() if u.is_house_owner), user)
+        owner_id = owner_u.id if owner_u else user.id
+
+        house_cond = and_(
+            TaskTemplate.house_id == ACTIVE_HOUSE_ID,
+            TaskTemplate.deleted == False,
+            TaskInstance.date == target_date,
+            TaskInstance.status != "shifted",
+            or_(
+                TaskInstance.done_by_user_id == target_uid,
+                and_(target_uid == owner_id, TaskInstance.done_by_user_id.is_(None))
             )
-            house_tasks = house_result.all()
-            
-            if house_tasks:
-                # Bulk queries for household tasks
-                tmpl_ids = [tmpl.id for inst, tmpl in house_tasks]
-                completions_result = await session.execute(
-                    select(TaskInstance.template_id, func.max(Completion.created_at))
-                    .join(Completion, Completion.task_instance_id == TaskInstance.id)
-                    .where(TaskInstance.template_id.in_(tmpl_ids))
-                    .group_by(TaskInstance.template_id)
-                )
-                last_completions = dict(completions_result.all())
+        )
+        if target_date < today:
+            house_cond = and_(house_cond, TaskInstance.status == "done")
 
-                next_exec_res_house = await session.execute(
-                    select(TaskInstance.template_id, func.min(TaskInstance.date))
-                    .where(and_(
-                        TaskInstance.template_id.in_(tmpl_ids),
-                        TaskInstance.status.in_(["free", "in_progress"]),
-                        TaskInstance.date > today
-                    ))
-                    .group_by(TaskInstance.template_id)
-                )
-                next_exec_dates_house = dict(next_exec_res_house.all())
+        house_result = await session.execute(
+            select(TaskInstance, TaskTemplate).join(
+                TaskTemplate, TaskInstance.template_id == TaskTemplate.id
+            ).where(house_cond).order_by(TaskTemplate.points.desc())
+        )
+        house_tasks = house_result.all()
 
-                for inst, tmpl in house_tasks:
-                    last_date = last_completions.get(tmpl.id)
-                    next_date = next_exec_dates_house.get(tmpl.id)
-                    res_household.append({
-                        "id": inst.id,
-                        "text": tmpl.title,
-                        "title": tmpl.title,
-                        "points": tmpl.points,
-                        "template_id": tmpl.id,
-                        "type": "household",
-                        "status": "in_progress",
-                        "is_completed": False,
-                        "last_completed": last_date.isoformat() if last_date else None,
-                        "next_execution": next_date.isoformat() if next_date else None,
-                    })
+        if house_tasks:
+            tmpl_ids = [tmpl.id for inst, tmpl in house_tasks]
+            completions_result = await session.execute(
+                select(TaskInstance.template_id, func.max(Completion.created_at))
+                .join(Completion, Completion.task_instance_id == TaskInstance.id)
+                .where(TaskInstance.template_id.in_(tmpl_ids))
+                .group_by(TaskInstance.template_id)
+            )
+            last_completions = dict(completions_result.all())
+
+            next_exec_res_house = await session.execute(
+                select(TaskInstance.template_id, func.min(TaskInstance.date))
+                .where(and_(
+                    TaskInstance.template_id.in_(tmpl_ids),
+                    TaskInstance.status.in_(["free", "in_progress"]),
+                    TaskInstance.date > today
+                ))
+                .group_by(TaskInstance.template_id)
+            )
+            next_exec_dates_house = dict(next_exec_res_house.all())
+
+            for inst, tmpl in house_tasks:
+                last_date = last_completions.get(tmpl.id)
+                next_date = next_exec_dates_house.get(tmpl.id)
+                res_household.append({
+                    "id": inst.id,
+                    "text": tmpl.title,
+                    "title": tmpl.title,
+                    "points": tmpl.points,
+                    "template_id": tmpl.id,
+                    "type": "household",
+                    "status": inst.status,
+                    "is_completed": (inst.status == "done"),
+                    "done_by_user_id": inst.done_by_user_id,
+                    "last_completed": last_date.isoformat() if last_date else None,
+                    "next_execution": next_date.isoformat() if next_date else None,
+                })
  
     return {
         "personal": res_personal,

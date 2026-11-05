@@ -1337,3 +1337,68 @@ body {
   display: none !important;
 }
 
+
+/* ── Ultra-compact Templates List ── */
+#pane-templates .task-list,
+#templatesList {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 3px !important;
+  padding-bottom: 8px !important;
+}
+
+.template-card-compact {
+  padding: 5px 10px !important;
+  margin: 0 !important;
+  gap: 2px !important;
+  border-radius: 6px !important;
+  min-height: unset !important;
+  line-height: 1.2 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  background: var(--surface2) !important;
+  border: 1px solid var(--border) !important;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.template-card-compact:active {
+  background: var(--surface3) !important;
+}
+
+.template-card-compact .tmpl-line-1 {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  line-height: 1.2;
+}
+
+.template-card-compact .tmpl-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-right: 6px;
+}
+
+.template-card-compact .tmpl-owner {
+  font-size: 11px;
+  color: var(--primary);
+  font-weight: 500;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.template-card-compact .tmpl-line-2 {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  font-size: 11px;
+  color: var(--text3);
+  line-height: 1.2;
+  margin-top: 1px;
+}

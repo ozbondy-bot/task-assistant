@@ -176,12 +176,12 @@ function preloadCurrentWeek() {
   window.templatesCache = window.templatesCache || [];
   window.tasksCache = window.tasksCache || {};
 
-  // Load sliding 14 days window (3 days back to 10 days ahead)
+  // Load sliding 7 days window (1 day back to 5 days ahead)
   const startD = new Date(today);
-  startD.setDate(today.getDate() - 3);
+  startD.setDate(today.getDate() - 1);
 
   const endD = new Date(today);
-  endD.setDate(today.getDate() + 10);
+  endD.setDate(today.getDate() + 5);
 
   const startStr = formatLocalDate(startD);
   const endStr = formatLocalDate(endD);
@@ -911,36 +911,20 @@ async function loadPersonalTab() {
   const display = document.getElementById('personalActiveDateDisplay');
   if (display) display.textContent = getPersonalActiveDateLabel();
 
-  // If background preloading is active, await it to populate window.personalTasksCache
-  if (window.preloadPromise) {
-    try {
-      await window.preloadPromise;
-    } catch (e) {
-      console.warn("Failed awaiting preloadPromise in loadPersonalTab", e);
-    }
-  }
-  
   window.personalTasksCache = window.personalTasksCache || {};
   const hasCached = !!window.personalTasksCache[dateStr];
-  if (!hasCached) {
-    showSpinnerIfNeeded(list, '.task-card');
+  if (hasCached) {
+    const cached = window.personalTasksCache[dateStr];
+    renderPersonalTasks(cached.personal, cached.household);
+    return;
   }
 
+  showSpinnerIfNeeded(list, '.task-card');
+
   try {
-    let tasksPromise;
-    if (hasCached) {
-      const cached = window.personalTasksCache[dateStr];
-      renderPersonalTasks(cached.personal, cached.household);
-      // Use cached data — no background re-fetch, batch endpoint already loaded the week
-      tasksPromise = Promise.resolve(cached);
-    } else {
-      tasksPromise = api('GET', `/api/tasks/today?date=${dateStr}`).then(fresh => {
-        window.personalTasksCache[dateStr] = fresh;
-        renderPersonalTasks(fresh.personal, fresh.household);
-        return fresh;
-      });
-    }
-    await tasksPromise;
+    const fresh = await api('GET', `/api/tasks/today?date=${dateStr}`);
+    window.personalTasksCache[dateStr] = fresh;
+    renderPersonalTasks(fresh.personal, fresh.household);
   } catch (e) {
     if (!window.personalTasksCache[dateStr]) {
       list.innerHTML = `
@@ -959,10 +943,23 @@ function renderPersonalTasks(personal, household) {
   const list = document.getElementById('personalTasksList');
   if (!list) return;
   const isToday = personalActiveOffset === 0;
-  const all = [
-    ...household.map(t => ({ ...t, isHousehold: true })),
-    ...personal.map(t => ({ ...t, isHousehold: false })),
-  ];
+
+  const seenKeys = new Set();
+  const all = [];
+  for (const h of (household || [])) {
+    const key = `h_${h.id}`;
+    if (!seenKeys.has(key)) {
+      seenKeys.add(key);
+      all.push({ ...h, isHousehold: true });
+    }
+  }
+  for (const p of (personal || [])) {
+    const key = `p_${p.id}`;
+    if (!seenKeys.has(key)) {
+      seenKeys.add(key);
+      all.push({ ...p, isHousehold: false });
+    }
+  }
 
   const addBtnAction = isUserHouseOwner()
     ? `document.getElementById('addChoreChoiceModal').classList.remove('hidden')`
@@ -2488,12 +2485,20 @@ function renderPartnerTasks(household) {
   const list = document.getElementById('partnerTasksList');
   if (!list) return;
 
-  if (!household.length) {
+  const seenKeys = new Set();
+  const all = [];
+  for (const h of (household || [])) {
+    const key = `h_${h.id}`;
+    if (!seenKeys.has(key)) {
+      seenKeys.add(key);
+      all.push(h);
+    }
+  }
+
+  if (!all.length) {
     list.innerHTML = `<div class="empty-state"><div class="empty-icon">🎉</div><div class="empty-title">Дел нет!</div><div class="empty-sub">У партнёра на этот день задач нет</div></div>`;
     return;
   }
-
-  const all = [...household];
   all.sort((a, b) => {
     const aDone = a.is_completed === true || a.status === 'done';
     const bDone = b.is_completed === true || b.status === 'done';
@@ -2596,8 +2601,8 @@ function renderTemplatesList(templates) {
 
   if (isOwner) {
     html += `
-      <div style="margin-bottom: 6px;">
-        <button class="btn btn-primary" onclick="openNewTemplateCreator();" style="width: 100%; padding: 9px 12px; font-weight: 600; font-size: 13px;">+ Новый шаблон задачи</button>
+      <div style="margin-bottom: 4px;">
+        <button class="btn btn-primary" onclick="openNewTemplateCreator();" style="width: 100%; padding: 7px 12px; font-weight: 600; font-size: 13px;">+ Новый шаблон задачи</button>
       </div>
     `;
   }
@@ -2632,14 +2637,14 @@ function renderTemplatesList(templates) {
     const pLabel = periodLabel(t.periodicity, t.period_days);
 
     return `
-      <div class="task-card house-task" onclick="openTemplateDetailsModal(${JSON.stringify(t).replace(/"/g, '&quot;')})" style="cursor: pointer; display: flex; flex-direction: column; gap: 3px; padding: 7px 10px; margin-bottom: 4px; border-radius: 8px; min-height: unset;">
-        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-          <span style="font-weight: 600; font-size: 13px; color: var(--text);">${escHtml(stripEmoji(t.title))}</span>
-          <span class="task-badge badge-points" style="font-size: 11px; padding: 2px 6px;">${t.points} ✨</span>
+      <div class="template-card-compact" onclick="openTemplateDetailsModal(${JSON.stringify(t).replace(/"/g, '&quot;')})">
+        <div class="tmpl-line-1">
+          <span class="tmpl-title">${escHtml(stripEmoji(t.title))}</span>
+          <span class="task-badge badge-points" style="font-size: 11px; padding: 1px 5px; flex-shrink: 0;">${t.points} ✨</span>
         </div>
-        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; font-size: 11px; color: var(--text3);">
-          <span>👤 ${escHtml(assignee)} · 🔁 ${escHtml(pLabel)}</span>
-          <div style="display: flex; gap: 6px; align-items: center; white-space: nowrap;">
+        <div class="tmpl-line-2">
+          <span class="tmpl-owner">👤 ${escHtml(assignee)} · 🔁 ${escHtml(pLabel)}</span>
+          <div style="display: flex; gap: 6px; align-items: center; white-space: nowrap; flex-shrink: 0;">
             <span>🕒 ${lastStr}</span>
             <span style="color: var(--accent); font-weight: 600;">⏭️ ${nextStr}</span>
           </div>
