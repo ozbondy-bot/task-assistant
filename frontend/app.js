@@ -110,13 +110,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 3. Start preloading (batch fetch tasks + members) in the background
   window.preloadPromise = preloadCurrentWeek();
 
-  // 4. Load UI and hide splash screen once everything has rendered
+  // 4. Load UI and hide splash screen once everything has rendered or after at most 3.5 seconds
   (async () => {
     try {
-      await Promise.all([
+      const loadPromise = Promise.all([
         loadPersonalTab(),
         loadWeeklyGoal()
       ]);
+      const timeoutPromise = new Promise(resolve => setTimeout(resolve, 3500));
+      await Promise.race([loadPromise, timeoutPromise]);
     } catch (e) {
       console.error("Initial load error:", e);
     } finally {
@@ -272,10 +274,15 @@ function hideLoadingOverlay() {
   return;
 }
 
+let splashSafetyTimeoutId = null;
+
 function startInitialSplashTimer() {
   const overlay = document.getElementById('globalLoadingOverlay');
   const timerText = document.getElementById('globalLoadingTimer');
   if (!overlay || !timerText) return;
+  
+  overlay.style.display = 'flex';
+  overlay.classList.remove('hidden');
   
   globalLoadingStartMs = performance.now();
   loadingStartSecs = 0;
@@ -286,16 +293,26 @@ function startInitialSplashTimer() {
     loadingStartSecs++;
     timerText.textContent = `${loadingStartSecs} sec`;
   }, 1000);
+
+  if (splashSafetyTimeoutId) clearTimeout(splashSafetyTimeoutId);
+  splashSafetyTimeoutId = setTimeout(() => {
+    hideInitialSplash();
+  }, 3500);
 }
 
 function hideInitialSplash() {
   const overlay = document.getElementById('globalLoadingOverlay');
   if (overlay) {
+    overlay.style.display = 'none';
     overlay.classList.add('hidden');
   }
   if (loadingTimerInterval) {
     clearInterval(loadingTimerInterval);
     loadingTimerInterval = null;
+  }
+  if (splashSafetyTimeoutId) {
+    clearTimeout(splashSafetyTimeoutId);
+    splashSafetyTimeoutId = null;
   }
 }
 
@@ -310,12 +327,16 @@ async function api(method, path, body = null, silent = false) {
     activeRequestsCount++;
   }
   
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
+
   const opts = {
     method,
     headers: {
       'Content-Type': 'application/json',
       'X-Init-Data': initData,
     },
+    signal: controller.signal,
   };
   if (body) opts.body = JSON.stringify(body);
   
@@ -326,11 +347,18 @@ async function api(method, path, body = null, silent = false) {
       url += `${separator}_cb=${Date.now()}`;
     }
     const res = await fetch(url, opts);
+    clearTimeout(timeoutId);
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: 'Ошибка' }));
       throw new Error(err.detail || `HTTP ${res.status}`);
     }
     return await res.json();
+  } catch (err) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      throw new Error('Сервер не ответил за 10 сек (проверьте интернет или состояние сервиса)');
+    }
+    throw err;
   } finally {
     if (!silent) {
       activeRequestsCount--;
@@ -929,7 +957,14 @@ async function loadPersonalTab() {
     await tasksPromise;
   } catch (e) {
     if (!window.personalTasksCache[dateStr]) {
-      list.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-title">Ошибка</div><div class="empty-sub">${e.message}</div></div>`;
+      list.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">⏳</div>
+          <div class="empty-title">Сервер не отвечает</div>
+          <div class="empty-sub" style="margin-bottom: 12px;">${escHtml(e.message || 'Сервер Render просыпается или исчерпан лимит')}</div>
+          <button class="btn btn-primary" onclick="loadPersonalTab()" style="padding: 10px 18px; font-size: 13px; font-weight: 600;">Повторить попытку 🔄</button>
+        </div>
+      `;
     }
   }
 }

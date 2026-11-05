@@ -252,11 +252,15 @@ async def send_10am_task_notification():
             
             all_user_tasks = house_tasks + personal_tasks
             
+            if not all_user_tasks:
+                logger.info(f"No tasks for user {u.telegram_id} on {today_date}, skipping 10am notification")
+                continue
+
             app_url = MINI_APP_URL
             if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
                 app_url = app_url.rstrip("/") + "/app"
             if app_url:
-                app_url = app_url.rstrip("/") + "/?v=50"
+                app_url = app_url.rstrip("/") + "/?v=51"
                 
             builder = InlineKeyboardBuilder()
             builder.row(
@@ -267,20 +271,17 @@ async def send_10am_task_notification():
             )
             markup = builder.as_markup()
             
-            if all_user_tasks:
-                formatted_tasks = []
-                for t in all_user_tasks:
-                    c = t.replace("*", "").replace("_", "").strip()
-                    if c:
-                        formatted_tasks.append(f"*{c}*")
-                tasks_joined = ", ".join(formatted_tasks)
-                text = (
-                    f"🌅 *Доброе утро!*\n\n"
-                    f"Не забудь сегодня {tasks_joined}.\n\n"
-                    f"Хорошего дня! ✨"
-                )
-            else:
-                text = "🌅 *Доброе утро!*\n\nНа сегодня назначенных задач нет. Отдыхаем! ☕️"
+            formatted_tasks = []
+            for t in all_user_tasks:
+                c = t.replace("*", "").replace("_", "").strip()
+                if c:
+                    formatted_tasks.append(f"*{c}*")
+            tasks_joined = ", ".join(formatted_tasks)
+            text = (
+                f"🌅 *Доброе утро!*\n\n"
+                f"Не забудь сегодня {tasks_joined}.\n\n"
+                f"Хорошего дня! ✨"
+            )
                 
             try:
                 await bot.send_message(chat_id=u.telegram_id, text=text, parse_mode="Markdown", reply_markup=markup)
@@ -685,7 +686,7 @@ async def cmd_start(message: types.Message, db_user: User = None):
     if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
         app_url = app_url.rstrip("/") + "/app"
     if app_url:
-        app_url = app_url.rstrip("/") + "/?v=50"
+        app_url = app_url.rstrip("/") + "/?v=51"
     try:
         await message.bot.set_chat_menu_button(
             chat_id=message.chat.id,
@@ -1359,7 +1360,7 @@ async def catch_all_messages(message: types.Message):
     if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
         app_url = app_url.rstrip("/") + "/app"
     if app_url:
-        app_url = app_url.rstrip("/") + "/?v=50"
+        app_url = app_url.rstrip("/") + "/?v=51"
         
     builder = InlineKeyboardBuilder()
     builder.row(
