@@ -1769,9 +1769,7 @@ async function executeShiftTask(newDate) {
     await preloadCurrentWeek();
     loadPersonalTab();
     loadPartnerTab();
-    if (document.querySelector('.tab-btn.active')?.dataset.tab === 'templates') {
-      loadTemplatesTab();
-    }
+    loadTemplatesTab();
   } catch (err) {
     showToast(`⚠️ ${err.message}`);
   } finally {
@@ -2301,7 +2299,8 @@ async function reassignChoreInstance(instanceId, targetUserId) {
     showToast('✅ Задача переназначена!');
     window.personalTasksCache = {};
     window.partnerTasksCache = {};
-    await Promise.all([loadPersonalTab(), loadPartnerTab()]);
+    window.templatesCache = [];
+    await Promise.all([loadPersonalTab(), loadPartnerTab(), loadTemplatesTab()]);
   } catch (e) {
     showToast(`⚠️ ${e.message}`);
   }
@@ -2633,7 +2632,7 @@ function renderTemplatesList(templates) {
       if (parts.length === 3) lastStr = `${parts[2]}.${parts[1]}.`;
     }
 
-    const assignee = t.assigned_to_name || 'Шурик';
+    const assignee = t.assigned_to_name || (t.assigned_user_id === 3 ? 'Биба' : 'Шурик');
     const pLabel = periodLabel(t.periodicity, t.period_days);
 
     return `
@@ -2855,7 +2854,7 @@ function openTemplateDetailsModal(t) {
   document.getElementById('templateDetailsTitle').textContent = stripEmoji(t.title);
   const last = t.last_completed ? new Date(t.last_completed).toLocaleDateString('ru-RU') : 'Нет данных';
   const next = t.next_execution ? new Date(t.next_execution).toLocaleDateString('ru-RU') : 'Нет данных';
-  const assignee = t.assigned_to_name || 'Шурик';
+  const assignee = t.assigned_to_name || (t.assigned_user_id === 3 ? 'Биба' : 'Шурик');
   
   document.getElementById('templateDetailsBody').innerHTML = `
     <div>✨ <strong>Награда:</strong> <span>${t.points} ✨</span></div>

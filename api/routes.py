@@ -269,20 +269,38 @@ async def get_batch_tasks(start_date: str, end_date: str, user: User = Depends(g
             last_completed_map = dict(last_completed_res.all())
 
         # Next execution dates (for showing "next_execution" metadata)
+        from bot.handlers.base import get_template_next_date
         next_execution_map = {}
+        active_assignee_map = {}
         if tmpl_ids:
             next_execution_res = await session.execute(
                 select(TaskInstance.template_id, func.min(TaskInstance.date))
                 .where(
                     and_(
                         TaskInstance.template_id.in_(tmpl_ids),
-                        TaskInstance.status == "free",
-                        TaskInstance.date > today
+                        TaskInstance.status.in_(["free", "in_progress"]),
+                        TaskInstance.date >= today
                     )
                 )
                 .group_by(TaskInstance.template_id)
             )
             next_execution_map = dict(next_execution_res.all())
+
+            active_inst_res = await session.execute(
+                select(TaskInstance.template_id, TaskInstance.done_by_user_id)
+                .where(
+                    and_(
+                        TaskInstance.template_id.in_(tmpl_ids),
+                        TaskInstance.status.in_(["free", "in_progress"]),
+                        TaskInstance.date >= today,
+                        TaskInstance.done_by_user_id.isnot(None)
+                    )
+                )
+                .order_by(TaskInstance.date.asc())
+            )
+            for tmpl_id, uid in active_inst_res.all():
+                if tmpl_id not in active_assignee_map:
+                    active_assignee_map[tmpl_id] = uid
 
         # Resolve done_by_user_id
         user_result = await session.execute(
@@ -510,10 +528,10 @@ async def get_batch_tasks(start_date: str, end_date: str, user: User = Depends(g
                     "periodicity": t.periodicity,
                     "period_days": t.period_days,
                     "start_date": str(t.start_date) if t.start_date else None,
-                    "assigned_user_id": t.assigned_user_id,
-                    "assigned_to_name": users_map[t.assigned_user_id].display_name if (t.assigned_user_id in users_map and users_map[t.assigned_user_id].display_name) else "Шурик",
+                    "assigned_user_id": active_assignee_map.get(t.id) or t.assigned_user_id,
+                    "assigned_to_name": users_map[active_assignee_map.get(t.id) or t.assigned_user_id].display_name if ((active_assignee_map.get(t.id) or t.assigned_user_id) in users_map and users_map[active_assignee_map.get(t.id) or t.assigned_user_id].display_name) else "Шурик",
                     "last_completed": last_completed_map.get(t.id).isoformat() if last_completed_map.get(t.id) else None,
-                    "next_execution": next_execution_map.get(t.id).isoformat() if next_execution_map.get(t.id) else None
+                    "next_execution": (next_execution_map.get(t.id) or get_template_next_date(t, last_completed_map.get(t.id), None, today)).isoformat() if (next_execution_map.get(t.id) or get_template_next_date(t, last_completed_map.get(t.id), None, today)) else None
                 }
                 for t in templates
             ],
@@ -1468,13 +1486,35 @@ async def get_chores_templates(user: User = Depends(get_current_user)):
         )
         handled_dates = dict(handled_dates_result.all())
 
-        # Bulk query for min active date per template
+        # Bulk query for min active date per template (today or future)
         active_dates_result = await session.execute(
             select(TaskInstance.template_id, func.min(TaskInstance.date))
-            .where(and_(TaskInstance.template_id.in_(tmpl_ids), TaskInstance.status.in_(["free", "in_progress"])))
+            .where(and_(
+                TaskInstance.template_id.in_(tmpl_ids),
+                TaskInstance.status.in_(["free", "in_progress"]),
+                TaskInstance.date >= today
+            ))
             .group_by(TaskInstance.template_id)
         )
         active_dates = dict(active_dates_result.all())
+
+        # Map: template_id -> active instance's done_by_user_id
+        active_assignee_map = {}
+        active_inst_res = await session.execute(
+            select(TaskInstance.template_id, TaskInstance.done_by_user_id)
+            .where(
+                and_(
+                    TaskInstance.template_id.in_(tmpl_ids),
+                    TaskInstance.status.in_(["free", "in_progress"]),
+                    TaskInstance.date >= today,
+                    TaskInstance.done_by_user_id.isnot(None)
+                )
+            )
+            .order_by(TaskInstance.date.asc())
+        )
+        for tmpl_id, uid in active_inst_res.all():
+            if tmpl_id not in active_assignee_map:
+                active_assignee_map[tmpl_id] = uid
         
         house = await session.get(House, ACTIVE_HOUSE_ID)
         generation_done = (house.last_summary_date >= today) if (house and house.last_summary_date) else False
@@ -1491,10 +1531,12 @@ async def get_chores_templates(user: User = Depends(get_current_user)):
             if generation_done:
                 last_handled = today
                 
-            if active_inst_date and active_inst_date > today:
+            if active_inst_date:
                 nd = active_inst_date
             else:
                 nd = get_template_next_date(t, last_handled, active_inst_date, today)
+            
+            eff_uid = active_assignee_map.get(t.id) or t.assigned_user_id or user.id
             res_list.append({
                 "id": t.id,
                 "title": t.title,
@@ -1502,8 +1544,8 @@ async def get_chores_templates(user: User = Depends(get_current_user)):
                 "periodicity": t.periodicity,
                 "period_days": t.period_days,
                 "start_date": str(t.start_date) if t.start_date else None,
-                "assigned_user_id": t.assigned_user_id,
-                "assigned_to_name": user_name_map.get(t.assigned_user_id, "Шурик"),
+                "assigned_user_id": eff_uid,
+                "assigned_to_name": user_name_map.get(eff_uid, "Шурик"),
                 "last_completed": last_done.isoformat() if last_done else None,
                 "next_execution": nd.isoformat() if nd else None
             })
@@ -1795,6 +1837,9 @@ async def assign_chore_instance(instance_id: int, req: AssignTaskRequest, user: 
             raise HTTPException(status_code=400, detail="Invalid target user")
         inst.done_by_user_id = target_user.id
         inst.status = "in_progress"
+        tmpl = await session.get(TaskTemplate, inst.template_id)
+        if tmpl:
+            tmpl.assigned_user_id = target_user.id
         await session.commit()
     return {"ok": True, "done_by_user_id": target_user.id}
 
@@ -1819,24 +1864,44 @@ async def shift_chore_instance(instance_id: int, req: ShiftRequest, user: User =
             
         inst.status = "shifted"
         assignee_id = inst.done_by_user_id or tmpl.assigned_user_id or user.id
-        exists = await session.scalar(
+
+        # Look for existing active instance on new_date
+        active_on_target = await session.scalar(
             select(TaskInstance).where(
                 and_(
                     TaskInstance.template_id == inst.template_id,
                     TaskInstance.date == new_date,
-                    TaskInstance.status.in_(["free", "in_progress", "shifted"])
+                    TaskInstance.status.in_(["free", "in_progress"])
                 )
             )
         )
-        if not exists:
-            new_inst = TaskInstance(
-                template_id=inst.template_id,
-                date=new_date,
-                status="in_progress",
-                done_by_user_id=assignee_id,
-                priority=0
+        if active_on_target:
+            active_on_target.done_by_user_id = assignee_id
+            active_on_target.status = "in_progress"
+        else:
+            # Reactivate any existing shifted/skipped instance on new_date
+            inactive_on_target = await session.scalar(
+                select(TaskInstance).where(
+                    and_(
+                        TaskInstance.template_id == inst.template_id,
+                        TaskInstance.date == new_date,
+                        TaskInstance.status.in_(["shifted", "skipped"])
+                    )
+                )
             )
-            session.add(new_inst)
+            if inactive_on_target:
+                inactive_on_target.status = "in_progress"
+                inactive_on_target.done_by_user_id = assignee_id
+            else:
+                new_inst = TaskInstance(
+                    template_id=inst.template_id,
+                    date=new_date,
+                    status="in_progress",
+                    done_by_user_id=assignee_id,
+                    priority=0
+                )
+                session.add(new_inst)
+
         await session.commit()
     return {"ok": True}
 
@@ -1863,24 +1928,50 @@ async def shift_chore_template(template_id: int, req: ShiftRequest, user: User =
         raise HTTPException(status_code=400, detail="Invalid date format (YYYY-MM-DD)")
         
     async with AsyncSessionLocal() as session:
+        from bot.handlers.base import get_house_today_date
+        today = await get_house_today_date(session)
         tmpl = await session.get(TaskTemplate, template_id)
         if not tmpl or tmpl.house_id != user.house_id:
             raise HTTPException(status_code=404, detail="Template not found")
             
         tmpl.start_date = new_date
         
-        # Update any active instances
+        # Mark current active instances on today or past as shifted
         from sqlalchemy import update
         await session.execute(
             update(TaskInstance)
             .where(
                 and_(
                     TaskInstance.template_id == tmpl.id,
-                    TaskInstance.status.in_(["free", "in_progress", "shifted"])
+                    TaskInstance.date <= today,
+                    TaskInstance.status.in_(["free", "in_progress"])
                 )
             )
-            .values(date=new_date)
+            .values(status="shifted")
         )
+
+        assignee_id = tmpl.assigned_user_id or user.id
+        inst_on_target = await session.scalar(
+            select(TaskInstance).where(
+                and_(
+                    TaskInstance.template_id == tmpl.id,
+                    TaskInstance.date == new_date
+                )
+            )
+        )
+        if inst_on_target:
+            inst_on_target.status = "in_progress"
+            inst_on_target.done_by_user_id = assignee_id
+        else:
+            new_inst = TaskInstance(
+                template_id=tmpl.id,
+                date=new_date,
+                status="in_progress",
+                done_by_user_id=assignee_id,
+                priority=0
+            )
+            session.add(new_inst)
+
         await session.commit()
     return {"ok": True}
 
