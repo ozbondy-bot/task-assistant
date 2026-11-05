@@ -328,7 +328,7 @@ async function api(method, path, body = null, silent = false) {
   }
   
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 10000);
+  const timeoutId = setTimeout(() => controller.abort(), 35000);
 
   const opts = {
     method,
@@ -356,7 +356,7 @@ async function api(method, path, body = null, silent = false) {
   } catch (err) {
     clearTimeout(timeoutId);
     if (err.name === 'AbortError') {
-      throw new Error('Сервер не ответил за 10 сек (проверьте интернет или состояние сервиса)');
+      throw new Error('Сервер не ответил вовремя (проверьте интернет или состояние сервиса)');
     }
     throw err;
   } finally {
@@ -962,7 +962,7 @@ async function loadPersonalTab() {
           <div class="empty-icon">⏳</div>
           <div class="empty-title">Сервер не отвечает</div>
           <div class="empty-sub" style="margin-bottom: 12px;">${escHtml(e.message || 'Сервер Render просыпается или исчерпан лимит')}</div>
-          <button class="btn btn-primary" onclick="loadPersonalTab()" style="padding: 10px 18px; font-size: 13px; font-weight: 600;">Повторить попытку 🔄</button>
+          <button class="btn btn-primary" onclick="retryStartupLoad()" style="padding: 10px 18px; font-size: 13px; font-weight: 600;">Повторить попытку 🔄</button>
         </div>
       `;
     }
@@ -2393,15 +2393,49 @@ async function loadPartnerTab() {
   const display = document.getElementById('partnerActiveDateDisplay');
   if (display) display.textContent = getPartnerActiveDateLabel();
 
+  // If background preloading is active, await it to populate window.partnerMember
+  if (window.preloadPromise) {
+    try {
+      await window.preloadPromise;
+    } catch (e) {
+      console.warn("Failed awaiting preloadPromise in loadPartnerTab", e);
+    }
+  }
+
   if (window.partnerTasksCache && window.partnerTasksCache[dateStr]) {
     renderPartnerTasks(window.partnerTasksCache[dateStr].household || []);
     return;
   }
 
   showSpinnerIfNeeded(list, '.task-card');
-  const partner = window.partnerMember || (window.houseMembersList && window.houseMembersList.find(m => !m.is_me));
+  let partner = window.partnerMember || (window.houseMembersList && window.houseMembersList.find(m => !m.is_me));
   if (!partner) {
-    list.innerHTML = `<div class="empty-state"><div class="empty-title">Второй участник не найден</div></div>`;
+    try {
+      const members = await api('GET', '/api/house/members');
+      if (members && members.length) {
+        window.houseMembersList = members;
+        renderMembers(members);
+        partner = members.find(m => !m.is_me);
+        if (partner) {
+          window.partnerMember = partner;
+          const pLabel = document.getElementById('partnerTabLabel');
+          if (pLabel) pLabel.textContent = partner.display_name || 'Партнёр';
+        }
+      }
+    } catch (e) {
+      console.warn("Failed to load members in loadPartnerTab", e);
+    }
+  }
+
+  if (!partner) {
+    list.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">⏳</div>
+        <div class="empty-title">Сервер не отвечает</div>
+        <div class="empty-sub" style="margin-bottom: 12px;">Сервер Render просыпается. Данные второго участника ещё загружаются.</div>
+        <button class="btn btn-primary" onclick="retryStartupLoad()" style="padding: 10px 18px; font-size: 13px; font-weight: 600;">Повторить попытку 🔄</button>
+      </div>
+    `;
     return;
   }
 
@@ -2411,10 +2445,47 @@ async function loadPartnerTab() {
     window.partnerTasksCache[dateStr] = data;
     renderPartnerTasks(data.household || []);
   } catch (e) {
-    list.innerHTML = `<div class="empty-state"><div class="empty-title">Ошибка загрузки</div></div>`;
+    list.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">⏳</div>
+        <div class="empty-title">Ошибка загрузки</div>
+        <div class="empty-sub" style="margin-bottom: 12px;">${escHtml(e.message || 'Не удалось загрузить задачи партнёра')}</div>
+        <button class="btn btn-primary" onclick="loadPartnerTab()" style="padding: 10px 18px; font-size: 13px; font-weight: 600;">Повторить попытку 🔄</button>
+      </div>
+    `;
   }
 }
 window.loadPartnerTab = loadPartnerTab;
+
+async function retryStartupLoad() {
+  const personalList = document.getElementById('personalTasksList');
+  if (personalList) {
+    personalList.innerHTML = `<div class="loading-spinner"><div class="spinner"></div><div class="loading-text" style="margin-top: 8px;">Подключение к серверу...</div></div>`;
+  }
+  const partnerList = document.getElementById('partnerTasksList');
+  if (partnerList) {
+    partnerList.innerHTML = `<div class="loading-spinner"><div class="spinner"></div><div class="loading-text" style="margin-top: 8px;">Подключение к серверу...</div></div>`;
+  }
+
+  window.personalTasksCache = {};
+  window.partnerTasksCache = {};
+  window.preloadPromise = preloadCurrentWeek();
+
+  try {
+    await window.preloadPromise;
+    const activeTab = document.querySelector('.tab-btn.active')?.dataset.tab;
+    if (activeTab === 'partner') {
+      loadPartnerTab();
+    } else {
+      loadPersonalTab();
+    }
+    loadWeeklyGoal();
+  } catch (err) {
+    console.error("Retry startup failed:", err);
+    loadPersonalTab();
+  }
+}
+window.retryStartupLoad = retryStartupLoad;
 
 function renderPartnerTasks(household) {
   const list = document.getElementById('partnerTasksList');
