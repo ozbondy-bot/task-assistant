@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <link rel="stylesheet" href="style.css?v=52" />
+  <link rel="stylesheet" href="style.css?v=53" />
 </head>
 <body>
   <div id="app">
@@ -16,10 +16,7 @@
     <header class="app-header" style="padding: 6px 12px;">
       <div class="header-content" style="display: flex; flex-direction: column; align-items: center; width: 100%; gap: 4px;">
         <div style="display: flex; align-items: center; gap: 8px; width: 100%; justify-content: center;">
-          <div class="house-name" id="houseName" style="font-size: 12px; font-weight: 700; color: var(--text2); text-transform: uppercase; letter-spacing: 0.5px; margin: 0;">🏠 Уютное гнездышко</div>
-        </div>
-        <div id="membersListHeader" onclick="openWeeklyGoalExplanation()" style="display: flex; justify-content: space-between; align-items: center; width: 100%; font-size: 12px; color: var(--text1); padding: 0 4px; box-sizing: border-box; cursor: pointer;">
-          <!-- Left: Шурик: 217 ✨ | Right: Биба: 120 ✨ -->
+          <div class="house-name" id="houseName" style="font-size: 13px; font-weight: 700; color: var(--text2); text-transform: uppercase; letter-spacing: 0.5px; margin: 0;">🏠 Уютное гнездышко</div>
         </div>
       </div>
     </header>
@@ -178,11 +175,12 @@
     <!-- Shift Task Modal -->
     <div class="modal-overlay hidden" id="shiftTaskModal">
       <div class="modal-card">
-        <h3>Перенести задачу</h3>
-        <p class="modal-hint" id="shiftTaskTitle">Выберите новую дату для сдвига:</p>
-        <input id="shiftTaskDate" type="date" style="width:100%; margin-top:8px;" />
-        <div class="modal-actions" style="margin-top: 14px;">
-          <button class="btn btn-ghost" id="cancelShiftBtn" style="width: 100%;">Отмена</button>
+        <h3>Перенос даты</h3>
+        <p class="modal-hint" id="shiftTaskTitle">Выберите новую дату для переноса:</p>
+        <input id="shiftTaskDate" type="date" onchange="executeShiftTask(this.value)" oninput="if(this.value) executeShiftTask(this.value)" style="width:100%; margin-top:8px; padding: 10px; font-size: 15px;" />
+        <div class="modal-actions" style="margin-top: 14px; display: flex; flex-direction: column; gap: 8px;">
+          <button class="btn btn-primary" onclick="executeShiftTask(document.getElementById('shiftTaskDate').value)" style="width: 100%; padding: 12px; font-weight: 600;">Перенести на выбранную дату 🗓</button>
+          <button class="btn btn-ghost" onclick="closeModal('shiftTaskModal')" style="width: 100%; padding: 10px;">Отмена</button>
         </div>
       </div>
     </div>
@@ -373,6 +371,6 @@
   <!-- Toast notification -->
   <div class="toast hidden" id="toast"></div>
 
-  <script src="app.js?v=52"></script>
+  <script src="app.js?v=53"></script>
 </body>
 </html>

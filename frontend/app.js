@@ -114,8 +114,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   (async () => {
     try {
       const loadPromise = Promise.all([
-        loadPersonalTab(),
-        loadWeeklyGoal()
+        loadPersonalTab()
       ]);
       const timeoutPromise = new Promise(resolve => setTimeout(resolve, 3500));
       await Promise.race([loadPromise, timeoutPromise]);
@@ -375,20 +374,7 @@ async function api(method, path, body = null, silent = false) {
 }
 
 async function loadWeeklyGoal() {
-  try {
-    let dateStr = '';
-    const activeTab = document.querySelector('.tab-btn.active')?.dataset.tab;
-    if (activeTab === 'house') {
-      dateStr = getHouseActiveDateStr();
-    } else if (activeTab === 'personal') {
-      dateStr = getPersonalActiveDateStr();
-    }
-    const path = dateStr ? `/api/house/members?date=${dateStr}` : '/api/house/members';
-    const members = await api('GET', path);
-    renderMembers(members);
-  } catch (e) {
-    console.error('Failed to load weekly goal:', e);
-  }
+  // Points calculation removed per user request
 }
 window.loadWeeklyGoal = loadWeeklyGoal;
 
@@ -1348,38 +1334,9 @@ function setupModals() {
     }
   });
 
-  // Shift modal
-  document.getElementById('cancelShiftBtn').addEventListener('click', () => {
-    document.getElementById('shiftTaskModal').classList.add('hidden');
-  });
+  // Shift task handler
+  // Note: modal inputs call executeShiftTask directly via onchange / onclick
 
-  document.getElementById('shiftTaskDate').addEventListener('change', async (e) => {
-    const newDate = e.target.value;
-    if (!newDate) return;
-    
-    // Close modal and show success toast instantly (optimistic UI)
-    document.getElementById('shiftTaskModal').classList.add('hidden');
-    showToast('🗓 Задача перенесена!');
-    
-    try {
-      const taskId = shiftTaskId;
-      const taskType = shiftTaskType;
-      if (taskType === 'chore') {
-        await api('POST', `/api/house/tasks/${taskId}/shift`, { new_date: newDate });
-        loadHouseTab();
-        loadPersonalTab();
-      } else if (taskType === 'personal') {
-        await api('POST', `/api/tasks/${taskId}/shift`, { new_date: newDate });
-        loadPersonalTab();
-      } else if (taskType === 'template') {
-        await api('POST', `/api/chores/templates/${taskId}/shift`, { new_date: newDate });
-        loadHouseTab();
-        loadWeeklyGoal();
-      }
-    } catch (err) {
-      showToast(`⚠️ ${err.message}`);
-    }
-  });
 
   // Close modals on overlay click
   document.querySelectorAll('.modal-overlay').forEach(overlay => {
@@ -1789,6 +1746,42 @@ async function skipChore(id) {
     showToast(`⚠️ ${e.message}`);
   }
 }
+
+let isShifting = false;
+async function executeShiftTask(newDate) {
+  if (!newDate || isShifting) return;
+  isShifting = true;
+  closeModal('shiftTaskModal');
+  showToast('🗓 Задача перенесена!');
+
+  const taskId = shiftTaskId;
+  const taskType = shiftTaskType;
+
+  try {
+    if (taskType === 'chore') {
+      await api('POST', `/api/house/tasks/${taskId}/shift`, { new_date: newDate }, true);
+    } else if (taskType === 'personal') {
+      await api('POST', `/api/tasks/${taskId}/shift`, { new_date: newDate }, true);
+    } else if (taskType === 'template') {
+      await api('POST', `/api/chores/templates/${taskId}/shift`, { new_date: newDate }, true);
+    }
+    // Invalidate caches and reload current views
+    window.personalTasksCache = {};
+    window.partnerTasksCache = {};
+    window.templatesCache = [];
+    await preloadCurrentWeek();
+    loadPersonalTab();
+    loadPartnerTab();
+    if (document.querySelector('.tab-btn.active')?.dataset.tab === 'templates') {
+      loadTemplatesTab();
+    }
+  } catch (err) {
+    showToast(`⚠️ ${err.message}`);
+  } finally {
+    setTimeout(() => { isShifting = false; }, 500);
+  }
+}
+window.executeShiftTask = executeShiftTask;
 
 function openShiftModal(id, type) {
   shiftTaskId = id;
@@ -2440,10 +2433,14 @@ async function loadPartnerTab() {
   }
 
   try {
-    const data = await api('GET', `/api/tasks/today?date=${dateStr}&user_id=${partner.id}`);
+    const data = await api('GET', `/api/batch/tasks?start_date=${dateStr}&end_date=${dateStr}`);
     if (!window.partnerTasksCache) window.partnerTasksCache = {};
-    window.partnerTasksCache[dateStr] = data;
-    renderPartnerTasks(data.household || []);
+    if (data.partner && data.partner[dateStr]) {
+      window.partnerTasksCache[dateStr] = data.partner[dateStr];
+      renderPartnerTasks(data.partner[dateStr].household || []);
+    } else {
+      renderPartnerTasks([]);
+    }
   } catch (e) {
     list.innerHTML = `
       <div class="empty-state">
@@ -2599,8 +2596,8 @@ function renderTemplatesList(templates) {
 
   if (isOwner) {
     html += `
-      <div style="margin-bottom: 12px;">
-        <button class="btn btn-primary" onclick="openNewTemplateCreator();" style="width: 100%; padding: 12px; font-weight: 600; font-size: 14px;">+ Новый шаблон задачи</button>
+      <div style="margin-bottom: 6px;">
+        <button class="btn btn-primary" onclick="openNewTemplateCreator();" style="width: 100%; padding: 9px 12px; font-weight: 600; font-size: 13px;">+ Новый шаблон задачи</button>
       </div>
     `;
   }
@@ -2611,25 +2608,41 @@ function renderTemplatesList(templates) {
     return;
   }
 
-  const rows = templates.map(t => {
+  const sorted = [...templates].sort((a, b) => {
+    if (!a.next_execution && !b.next_execution) return 0;
+    if (!a.next_execution) return 1;
+    if (!b.next_execution) return -1;
+    return a.next_execution.localeCompare(b.next_execution);
+  });
+
+  const rows = sorted.map(t => {
     let nextStr = '--.--';
     if (t.next_execution) {
       const parts = t.next_execution.split('-');
       if (parts.length === 3) nextStr = `${parts[2]}.${parts[1]}.`;
+    }
+    let lastStr = '--.--';
+    if (t.last_completed) {
+      const dOnly = t.last_completed.split('T')[0];
+      const parts = dOnly.split('-');
+      if (parts.length === 3) lastStr = `${parts[2]}.${parts[1]}.`;
     }
 
     const assignee = t.assigned_to_name || 'Шурик';
     const pLabel = periodLabel(t.periodicity, t.period_days);
 
     return `
-      <div class="task-card house-task" onclick="openTemplateDetailsModal(${JSON.stringify(t).replace(/"/g, '&quot;')})" style="cursor: pointer; display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; margin-bottom: 8px;">
+      <div class="task-card house-task" onclick="openTemplateDetailsModal(${JSON.stringify(t).replace(/"/g, '&quot;')})" style="cursor: pointer; display: flex; flex-direction: column; gap: 3px; padding: 7px 10px; margin-bottom: 4px; border-radius: 8px; min-height: unset;">
         <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-          <span style="font-weight: 600; font-size: 14px; color: var(--text);">${escHtml(stripEmoji(t.title))}</span>
-          <span class="task-badge badge-points" style="font-size: 12px;">${t.points} ✨</span>
+          <span style="font-weight: 600; font-size: 13px; color: var(--text);">${escHtml(stripEmoji(t.title))}</span>
+          <span class="task-badge badge-points" style="font-size: 11px; padding: 2px 6px;">${t.points} ✨</span>
         </div>
-        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; font-size: 12px; color: var(--text3);">
+        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; font-size: 11px; color: var(--text3);">
           <span>👤 ${escHtml(assignee)} · 🔁 ${escHtml(pLabel)}</span>
-          <span class="task-badge" style="font-size: 11px; background: var(--surface2); color: var(--text2); border-radius: 4px; padding: 2px 6px;">⏭️ ${nextStr}</span>
+          <div style="display: flex; gap: 6px; align-items: center; white-space: nowrap;">
+            <span>🕒 ${lastStr}</span>
+            <span style="color: var(--accent); font-weight: 600;">⏭️ ${nextStr}</span>
+          </div>
         </div>
       </div>
     `;

@@ -213,6 +213,12 @@ async def get_batch_tasks(start_date: str, end_date: str, user: User = Depends(g
         await generate_daily_chores_if_needed(session, ACTIVE_HOUSE_ID)
         
         today = await get_house_today_date(session)
+        # Ensure chores are generated for the current calendar week
+        monday_date = today - timedelta(days=today.weekday())
+        from bot.handlers.base import generate_chores_for_week
+        await generate_chores_for_week(session, ACTIVE_HOUSE_ID, monday_date)
+        await session.commit()
+        
         house = await session.get(House, ACTIVE_HOUSE_ID)
 
         # Parse start and end date
@@ -289,6 +295,8 @@ async def get_batch_tasks(start_date: str, end_date: str, user: User = Depends(g
             select(User).where(User.house_id == ACTIVE_HOUSE_ID)
         )
         users_map = {u.id: u for u in user_result.scalars().all()}
+        partner_u = next((u for u in users_map.values() if u.id != user.id), None)
+        partner_id = partner_u.id if partner_u else None
 
         # --- 2. PRE-FETCH ALL PERSONAL TASKS ---
         pers_res = await session.execute(
@@ -457,75 +465,43 @@ async def get_batch_tasks(start_date: str, end_date: str, user: User = Depends(g
                 })
 
             # Household tasks assigned to current user for date `d`
-            my_chores = [c for c in chores_list if c["done_by_user_id"] == user.id]
+            # Unassigned household tasks fall to house owner
+            owner_u = next((u for u in users_map.values() if u.is_house_owner), user)
+            owner_id = owner_u.id if owner_u else user.id
+
+            my_chores = []
+            partner_chores = []
+            for c in chores_list:
+                assigned_id = c["done_by_user_id"] or owner_id
+                if assigned_id == user.id:
+                    my_chores.append(c)
+                elif partner_id and assigned_id == partner_id:
+                    partner_chores.append(c)
+                elif user.is_house_owner:
+                    my_chores.append(c)
+
             personal_by_date_res[d_str] = {
                 "personal": pers_list,
                 "household": my_chores
             }
 
-            # Household tasks assigned to partner for date `d`
-            partner_chores = [c for c in chores_list if partner_id and c["done_by_user_id"] == partner_id]
             partner_by_date_res[d_str] = {
                 "personal": [],
                 "household": partner_chores
             }
 
-        # --- 4. RESOLVE MEMBERS WITH WEEKLY SCORES AND TARGETS ---
-        import zoneinfo
-        msk_tz = zoneinfo.ZoneInfo("Europe/Moscow")
-        monday_date = today - timedelta(days=today.weekday())
-        
-        # Monday 00:00:00 MSK in UTC
-        start_msk = datetime.combine(monday_date, datetime.min.time()).replace(tzinfo=msk_tz)
-        start_utc = start_msk.astimezone(timezone.utc).replace(tzinfo=None)
-        
-        # Sunday 23:59:59 MSK in UTC
-        sunday_date = monday_date + timedelta(days=6)
-        end_msk = datetime.combine(sunday_date, datetime.max.time()).replace(tzinfo=msk_tz)
-        end_utc = end_msk.astimezone(timezone.utc).replace(tzinfo=None)
-        
-        from bot.handlers.base import calculate_weekly_target_points
-        total_weekly_target_points, _ = await calculate_weekly_target_points(session, ACTIVE_HOUSE_ID, today)
-        
+        # --- 4. RESOLVE MEMBERS ---
         sorted_members = sorted(users_map.values(), key=lambda x: x.id)
-        
-        # Bulk query earned points for all members
-        earned_res = await session.execute(
-            select(Completion.user_id, func.sum(Completion.points))
-            .where(
-                and_(
-                    Completion.user_id.in_([m.id for m in sorted_members]),
-                    Completion.created_at >= start_utc,
-                    Completion.created_at <= end_utc
-                )
-            )
-            .group_by(Completion.user_id)
-        )
-        earned_map = dict(earned_res.all())
-        
         members_list = []
-        for index, m in enumerate(sorted_members):
-            earned = earned_map.get(m.id, 0)
-            
-            # Split target 2/3 for first, 1/3 for second member
-            if len(sorted_members) == 2:
-                member_target = round(total_weekly_target_points * 2 / 3) if index == 0 else (total_weekly_target_points - round(total_weekly_target_points * 2 / 3))
-            elif len(sorted_members) >= 3:
-                member_target = int(total_weekly_target_points / len(sorted_members))
-            else:
-                member_target = total_weekly_target_points
-                
-            if member_target < 1:
-                member_target = 1
-                
+        for m in sorted_members:
             members_list.append({
                 "id": m.id,
                 "display_name": m.display_name or m.full_name or "Участник",
                 "points": m.points or 0,
                 "is_owner": m.is_house_owner,
                 "is_me": m.id == user.id,
-                "weekly_earned": earned,
-                "weekly_target": member_target
+                "weekly_earned": 0,
+                "weekly_target": 0
             })
 
         return {
@@ -1072,80 +1048,23 @@ async def unclaim_house_task(instance_id: int, user: User = Depends(get_current_
 # -- House info & members --
 @app.get("/api/house/members")
 async def get_house_members(date: Optional[str] = None, user: User = Depends(get_current_user)):
-    from bot.handlers.base import get_house_today_date, calculate_weekly_target_points
-    import zoneinfo
-    from datetime import date as dt_date, datetime, timedelta, timezone
-    
     async with AsyncSessionLocal() as session:
-        if date:
-            try:
-                today = datetime.strptime(date, "%Y-%m-%d").date()
-            except Exception:
-                today = await get_house_today_date(session)
-        else:
-            today = await get_house_today_date(session)
-            
-        # Calculate calendar week range in Europe/Moscow
-        msk_tz = zoneinfo.ZoneInfo("Europe/Moscow")
-        monday_date = today - timedelta(days=today.weekday())
-        
-        
-        # Monday 00:00:00 MSK in UTC
-        start_msk = datetime.combine(monday_date, datetime.min.time()).replace(tzinfo=msk_tz)
-        start_utc = start_msk.astimezone(timezone.utc).replace(tzinfo=None)
-        
-        # Sunday 23:59:59 MSK in UTC
-        sunday_date = monday_date + timedelta(days=6)
-        end_msk = datetime.combine(sunday_date, datetime.max.time()).replace(tzinfo=msk_tz)
-        end_utc = end_msk.astimezone(timezone.utc).replace(tzinfo=None)
-        
-        total_weekly_target_points, _ = await calculate_weekly_target_points(session, ACTIVE_HOUSE_ID, today)
-        
-        # Get members
         result = await session.execute(
             select(User).where(User.house_id == ACTIVE_HOUSE_ID)
         )
         members = result.scalars().all()
-        
         sorted_members = sorted(members, key=lambda x: x.id)
         
-        # Bulk query earned points for all members
-        earned_res = await session.execute(
-            select(Completion.user_id, func.sum(Completion.points))
-            .where(
-                and_(
-                    Completion.user_id.in_([m.id for m in sorted_members]),
-                    Completion.created_at >= start_utc,
-                    Completion.created_at <= end_utc
-                )
-            )
-            .group_by(Completion.user_id)
-        )
-        earned_map = dict(earned_res.all())
-        
         res_list = []
-        for index, m in enumerate(sorted_members):
-            earned = earned_map.get(m.id, 0)
-            
-            # Split target 2/3 for first, 1/3 for second member
-            if len(sorted_members) == 2:
-                member_target = round(total_weekly_target_points * 2 / 3) if index == 0 else (total_weekly_target_points - round(total_weekly_target_points * 2 / 3))
-            elif len(sorted_members) >= 3:
-                member_target = int(total_weekly_target_points / len(sorted_members))
-            else:
-                member_target = total_weekly_target_points
-                
-            if member_target < 1:
-                member_target = 1
-                
+        for m in sorted_members:
             res_list.append({
                 "id": m.id,
                 "display_name": m.display_name or m.full_name or "Участник",
                 "points": m.points or 0,
                 "is_owner": m.is_house_owner,
                 "is_me": m.id == user.id,
-                "weekly_earned": earned,
-                "weekly_target": member_target
+                "weekly_earned": 0,
+                "weekly_target": 0
             })
             
     return res_list

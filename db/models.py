@@ -21,8 +21,9 @@ async_engine = create_async_engine(
     echo=False,
     pool_pre_ping=True,
     pool_recycle=300,
-    pool_size=5,
-    max_overflow=10
+    pool_size=3,
+    max_overflow=5,
+    connect_args={"statement_cache_size": 0, "prepared_statement_cache_size": 0}
 )
 AsyncSessionLocal = async_sessionmaker(
     bind=async_engine,
