@@ -205,15 +205,27 @@ async def admin_reset_instances(user: User = Depends(get_current_user)):
 
 
 # -- Batch Tasks Loader --
+_generation_lock = asyncio.Lock()
+
+async def trigger_daily_generation_safe(house_id: int):
+    if _generation_lock.locked():
+        return
+    try:
+        async with _generation_lock:
+            async with AsyncSessionLocal() as session:
+                from bot.handlers.base import generate_daily_chores_if_needed
+                await generate_daily_chores_if_needed(session, house_id)
+    except Exception as e:
+        logger.error(f"Background daily chores generation error: {e}")
+
 @app.get("/api/batch/tasks")
 async def get_batch_tasks(start_date: str, end_date: str, user: User = Depends(get_current_user)):
     from bot.handlers.base import get_house_today_date, generate_daily_chores_if_needed
     async with AsyncSessionLocal() as session:
-        # Trigger daily chores generation and rollover once per day
-        await generate_daily_chores_if_needed(session, ACTIVE_HOUSE_ID)
-        
         today = await get_house_today_date(session)
         house = await session.get(House, ACTIVE_HOUSE_ID)
+        if house and house.last_summary_date != today and not _generation_lock.locked():
+            asyncio.create_task(trigger_daily_generation_safe(ACTIVE_HOUSE_ID))
 
         # Parse start and end date
         try:
@@ -544,10 +556,10 @@ async def get_batch_tasks(start_date: str, end_date: str, user: User = Depends(g
 async def get_today_tasks(date: Optional[str] = None, user_id: Optional[int] = None, user: User = Depends(get_current_user)):
     from bot.handlers.base import get_house_today_date, generate_daily_chores_if_needed
     async with AsyncSessionLocal() as session:
-        # Trigger daily chores generation and rollover on personal tab load too
-        await generate_daily_chores_if_needed(session, ACTIVE_HOUSE_ID)
-
         today = await get_house_today_date(session)
+        house = await session.get(House, ACTIVE_HOUSE_ID)
+        if house and house.last_summary_date != today and not _generation_lock.locked():
+            asyncio.create_task(trigger_daily_generation_safe(ACTIVE_HOUSE_ID))
         target_uid = user_id if (user_id and user.is_house_owner) else user.id
         
         target_date = today
@@ -776,13 +788,12 @@ async def delete_task(task_id: int, user: User = Depends(get_current_user)):
 # -- Household tasks --
 @app.get("/api/house/tasks")
 async def get_house_tasks(date: Optional[str] = None, user: User = Depends(get_current_user)):
-    from bot.handlers.base import get_house_today_date, generate_daily_chores_if_needed
+    from bot.handlers.base import get_house_today_date
     async with AsyncSessionLocal() as session:
-        # Auto-generate today's chores if needed
-        await generate_daily_chores_if_needed(session, ACTIVE_HOUSE_ID)
-        
         today = await get_house_today_date(session)
         house = await session.get(House, ACTIVE_HOUSE_ID)
+        if house and house.last_summary_date != today and not _generation_lock.locked():
+            asyncio.create_task(trigger_daily_generation_safe(ACTIVE_HOUSE_ID))
         target_date = today
         if date:
             try:
@@ -2470,6 +2481,14 @@ frontend_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__fi
 if os.path.exists(frontend_dir):
     app.mount("/app", NoCacheStaticFiles(directory=frontend_dir, html=True), name="frontend")
 
+
+@app.get("/style.css")
+async def get_style_css():
+    return FileResponse(os.path.join(frontend_dir, "style.css"), media_type="text/css")
+
+@app.get("/app.js")
+async def get_app_js():
+    return FileResponse(os.path.join(frontend_dir, "app.js"), media_type="application/javascript")
 
 @app.get("/")
 @app.head("/")

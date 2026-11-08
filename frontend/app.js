@@ -94,8 +94,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (av) av.textContent = 'Ш';
   }
 
-  // 1. Start the unified initial splash screen timer
-  startInitialSplashTimer();
+  // 1. Ensure initial splash is hidden immediately
+  hideInitialSplash();
 
   // 2. Instantly display correct localized dates in pagination bars
   const personalEl = document.getElementById('personalActiveDateDisplay');
@@ -107,25 +107,32 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupModals();
   setupFABs();
 
-  // 3. Start preloading (batch fetch tasks + members) in the background
+  // 3. Fast direct startup: load personal tab immediately without blocking modal
+  loadPersonalTab();
+
+  // Load house members concurrently to populate partner name & avatars
+  api('GET', '/api/house/members').then(members => {
+    if (members && members.length) {
+      window.houseMembersList = members;
+      renderMembers(members);
+      const partner = members.find(m => !m.is_me);
+      if (partner) {
+        window.partnerMember = partner;
+        const pLabel = document.getElementById('partnerTabLabel');
+        if (pLabel) pLabel.textContent = partner.display_name || 'Партнёр';
+      }
+      const me = members.find(m => m.is_me);
+      if (me) {
+        const up = document.getElementById('userPoints');
+        if (up) up.textContent = `${me.points} ✨`;
+        currentPoints = me.points;
+      }
+    }
+  }).catch(e => console.warn('Early members fetch error:', e));
+
+  // 4. Background preloading of remaining days
   window.preloadPromise = preloadCurrentWeek();
 
-  // 4. Load UI and hide splash screen once everything has rendered or after at most 3.5 seconds
-  (async () => {
-    try {
-      const loadPromise = Promise.all([
-        loadPersonalTab()
-      ]);
-      const timeoutPromise = new Promise(resolve => setTimeout(resolve, 3500));
-      await Promise.race([loadPromise, timeoutPromise]);
-    } catch (e) {
-      console.error("Initial load error:", e);
-    } finally {
-      // Hide the unified loading screen
-      hideInitialSplash();
-    }
-  })();
-  
   connectWebSocket();
 });
 
@@ -276,27 +283,7 @@ function hideLoadingOverlay() {
 let splashSafetyTimeoutId = null;
 
 function startInitialSplashTimer() {
-  const overlay = document.getElementById('globalLoadingOverlay');
-  const timerText = document.getElementById('globalLoadingTimer');
-  if (!overlay || !timerText) return;
-  
-  overlay.style.display = 'flex';
-  overlay.classList.remove('hidden');
-  
-  globalLoadingStartMs = performance.now();
-  loadingStartSecs = 0;
-  timerText.textContent = '0 сек';
-  
-  if (loadingTimerInterval) clearInterval(loadingTimerInterval);
-  loadingTimerInterval = setInterval(() => {
-    loadingStartSecs++;
-    timerText.textContent = `${loadingStartSecs} sec`;
-  }, 1000);
-
-  if (splashSafetyTimeoutId) clearTimeout(splashSafetyTimeoutId);
-  splashSafetyTimeoutId = setTimeout(() => {
-    hideInitialSplash();
-  }, 3500);
+  hideInitialSplash();
 }
 
 function hideInitialSplash() {
@@ -319,6 +306,8 @@ async function api(method, path, body = null, silent = false) {
   if (method !== 'GET') {
     window.tasksCache = {};
     window.personalTasksCache = {};
+    window.partnerTasksCache = {};
+    window.templatesCache = null;
     window.houseMembersList = null;
   }
   if (!silent) {
@@ -327,7 +316,7 @@ async function api(method, path, body = null, silent = false) {
   }
   
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 35000);
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
 
   const opts = {
     method,
@@ -1765,11 +1754,11 @@ async function executeShiftTask(newDate) {
     // Invalidate caches and reload current views
     window.personalTasksCache = {};
     window.partnerTasksCache = {};
-    window.templatesCache = [];
-    await preloadCurrentWeek();
+    window.templatesCache = null;
     loadPersonalTab();
     loadPartnerTab();
     loadTemplatesTab();
+    preloadCurrentWeek();
   } catch (err) {
     showToast(`⚠️ ${err.message}`);
   } finally {
@@ -1853,7 +1842,8 @@ let tasksArchiveDate = new Date();
 let purchasesArchivePage = 0;
 
 function closeModal(modalId) {
-  document.getElementById(modalId).classList.add('hidden');
+  const el = document.getElementById(modalId);
+  if (el) el.classList.add('hidden');
 }
 
 async function openChoresArchive() {
@@ -2462,10 +2452,10 @@ async function retryStartupLoad() {
 
   window.personalTasksCache = {};
   window.partnerTasksCache = {};
+  window.templatesCache = null;
   window.preloadPromise = preloadCurrentWeek();
 
   try {
-    await window.preloadPromise;
     const activeTab = document.querySelector('.tab-btn.active')?.dataset.tab;
     if (activeTab === 'partner') {
       loadPartnerTab();
@@ -2571,22 +2561,24 @@ function openPartnerTaskDetails(t) {
 window.openPartnerTaskDetails = openPartnerTaskDetails;
 
 /* ── Templates Tab ── */
-async function loadTemplatesTab() {
+async function loadTemplatesTab(force = false) {
   const list = document.getElementById('templatesList');
   if (!list) return;
 
-  if (window.templatesCache && window.templatesCache.length) {
+  if (!force && window.templatesCache && window.templatesCache.length) {
     renderTemplatesList(window.templatesCache);
-    return;
+  } else {
+    showSpinnerIfNeeded(list, '.template-card-compact');
   }
 
-  showSpinnerIfNeeded(list, '.task-card');
   try {
     const templates = await api('GET', '/api/chores/templates');
     window.templatesCache = templates;
     renderTemplatesList(templates);
   } catch (e) {
-    list.innerHTML = `<div class="empty-state"><div class="empty-title">Ошибка загрузки шаблонов</div></div>`;
+    if (!window.templatesCache) {
+      list.innerHTML = `<div class="empty-state"><div class="empty-title">Ошибка загрузки шаблонов</div></div>`;
+    }
   }
 }
 window.loadTemplatesTab = loadTemplatesTab;

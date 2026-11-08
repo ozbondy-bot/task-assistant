@@ -260,7 +260,7 @@ async def send_10am_task_notification():
             if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
                 app_url = app_url.rstrip("/") + "/app"
             if app_url:
-                app_url = app_url.rstrip("/") + "/?v=56"
+                app_url = app_url.rstrip("/") + "/?v=57"
                 
             builder = InlineKeyboardBuilder()
             builder.row(
@@ -353,8 +353,7 @@ async def generate_chores_for_week(session, house_id: int, monday_date: date):
     from sqlalchemy import select, and_, func, text
     from datetime import timedelta, date
     
-    # Acquire pg_advisory_xact_lock to prevent concurrent executions for the same house
-    await session.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": 81000 + house_id})
+    # Mutex handled by asyncio.Lock in background generation runner
     
     house = await session.get(House, house_id)
     if not house:
@@ -686,7 +685,7 @@ async def cmd_start(message: types.Message, db_user: User = None):
     if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
         app_url = app_url.rstrip("/") + "/app"
     if app_url:
-        app_url = app_url.rstrip("/") + "/?v=56"
+        app_url = app_url.rstrip("/") + "/?v=57"
     try:
         await message.bot.set_chat_menu_button(
             chat_id=message.chat.id,
@@ -1360,7 +1359,7 @@ async def catch_all_messages(message: types.Message):
     if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
         app_url = app_url.rstrip("/") + "/app"
     if app_url:
-        app_url = app_url.rstrip("/") + "/?v=56"
+        app_url = app_url.rstrip("/") + "/?v=57"
         
     builder = InlineKeyboardBuilder()
     builder.row(
