@@ -1,4 +1,5 @@
 import os
+import html
 import logging
 import asyncio
 from datetime import datetime, timedelta, date
@@ -7,7 +8,7 @@ from aiogram.filters import CommandStart, Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, Date, func
+from sqlalchemy import select, and_, or_, Date, func
 
 
 import sys
@@ -212,17 +213,34 @@ async def handle_reject_action(call: types.CallbackQuery, db_user: User = None):
 async def send_10am_task_notification():
     """10:00 AM daily notification sent to each house member with their assigned chores and personal tasks for today."""
     async with AsyncSessionLocal() as session:
-        today = await get_house_today_date(session)
-        await generate_daily_chores_if_needed(session, ACTIVE_HOUSE_ID)
-        users = (await session.execute(select(User).where(User.house_id == ACTIVE_HOUSE_ID))).scalars().all()
-        
-    if not users:
-        return
+        try:
+            await generate_daily_chores_if_needed(session, ACTIVE_HOUSE_ID)
+        except Exception as e:
+            logger.error(f"Daily chore generation failed inside 10am notification: {e}", exc_info=True)
+            await session.rollback()
 
-    async with AsyncSessionLocal() as session:
         today = await get_house_today_date(session)
+        users = (await session.execute(select(User).where(User.house_id == ACTIVE_HOUSE_ID))).scalars().all()
+        if not users:
+            return
+
+        app_url = MINI_APP_URL
+        if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
+            app_url = app_url.rstrip("/") + "/app"
+        if app_url:
+            app_url = app_url.rstrip("/") + "/?v=58"
+
+        builder = InlineKeyboardBuilder()
+        builder.row(
+            InlineKeyboardButton(
+                text="📱 Открыть App",
+                web_app=WebAppInfo(url=app_url)
+            )
+        )
+        markup = builder.as_markup()
+
         for u in users:
-            # 1. Household tasks assigned to this user today
+            # 1. Household tasks assigned to this user today (unclaimed free chores fall on house owner)
             h_res = await session.execute(
                 select(TaskTemplate.title)
                 .join(TaskInstance, TaskInstance.template_id == TaskTemplate.id)
@@ -230,13 +248,16 @@ async def send_10am_task_notification():
                     TaskTemplate.house_id == ACTIVE_HOUSE_ID,
                     TaskTemplate.deleted == False,
                     TaskInstance.date == today,
-                    TaskInstance.done_by_user_id == u.id,
-                    TaskInstance.status == "in_progress"
+                    TaskInstance.status.in_(["free", "in_progress"]),
+                    or_(
+                        TaskInstance.done_by_user_id == u.id,
+                        and_(u.is_house_owner == True, TaskInstance.done_by_user_id.is_(None)),
+                    ),
                 ))
                 .order_by(TaskTemplate.points.desc())
             )
             house_tasks = [clean_task_text(t) for t in h_res.scalars().all()]
-            
+
             # 2. Personal tasks for this user today
             p_res = await session.execute(
                 select(PersonalTask.text)
@@ -249,42 +270,27 @@ async def send_10am_task_notification():
                 .order_by(PersonalTask.id.asc())
             )
             personal_tasks = [clean_task_text(t) for t in p_res.scalars().all()]
-            
+
             all_user_tasks = house_tasks + personal_tasks
-            
+
             if not all_user_tasks:
-                logger.info(f"No tasks for user {u.telegram_id} on {today_date}, skipping 10am notification")
+                logger.info(f"No tasks for user {u.telegram_id} on {today}, skipping 10am notification")
                 continue
 
-            app_url = MINI_APP_URL
-            if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
-                app_url = app_url.rstrip("/") + "/app"
-            if app_url:
-                app_url = app_url.rstrip("/") + "/?v=57"
-                
-            builder = InlineKeyboardBuilder()
-            builder.row(
-                InlineKeyboardButton(
-                    text="📱 Открыть App",
-                    web_app=WebAppInfo(url=app_url)
-                )
-            )
-            markup = builder.as_markup()
-            
             formatted_tasks = []
             for t in all_user_tasks:
-                c = t.replace("*", "").replace("_", "").strip()
+                c = t.strip()
                 if c:
-                    formatted_tasks.append(f"*{c}*")
+                    formatted_tasks.append(f"<b>{html.escape(c)}</b>")
             tasks_joined = ", ".join(formatted_tasks)
             text = (
-                f"🌅 *Доброе утро!*\n\n"
+                f"🌅 <b>Доброе утро!</b>\n\n"
                 f"Не забудь сегодня {tasks_joined}.\n\n"
                 f"Хорошего дня! ✨"
             )
-                
+
             try:
-                await bot.send_message(chat_id=u.telegram_id, text=text, parse_mode="Markdown", reply_markup=markup)
+                await bot.send_message(chat_id=u.telegram_id, text=text, parse_mode="HTML", reply_markup=markup)
                 logger.info(f"Sent 10am task notification to {u.telegram_id} ({len(all_user_tasks)} tasks)")
             except Exception as e:
                 logger.error(f"Failed to send 10am notification to {u.telegram_id}: {e}")
@@ -323,7 +329,7 @@ async def scheduler_loop():
             hour = now.hour
             minute = now.minute
             
-            if hour == 10 and minute == 0 and (today, "10am_notification") not in sent_events:
+            if hour == 10 and minute <= 2 and (today, "10am_notification") not in sent_events:
                 await send_10am_task_notification()
                 sent_events.add((today, "10am_notification"))
                 
@@ -522,7 +528,7 @@ async def generate_chores_for_week(session, house_id: int, monday_date: date):
 
 
 
-async def generate_daily_chores_if_needed(session, house_id: int):
+async def generate_daily_chores_if_needed(session, house_id: int) -> bool:
     """Generate calendar week's task instances from templates. Uses atomic UPDATE to prevent race conditions."""
     from sqlalchemy import update, delete
     global _last_generation_check
@@ -530,16 +536,19 @@ async def generate_daily_chores_if_needed(session, house_id: int):
     
     # 1. In-memory check to bypass DB hits if already checked today
     if _last_generation_check == (house_id, today):
-        return
+        return False
 
     house = await session.get(House, house_id)
     if not house:
-        return
+        return False
 
     # Atomic claim: only one concurrent request can proceed to generate.
     result = await session.execute(
         update(House)
-        .where(and_(House.id == house_id, House.last_summary_date != today))
+        .where(and_(
+            House.id == house_id,
+            or_(House.last_summary_date.is_(None), House.last_summary_date != today)
+        ))
         .values(last_summary_date=today)
         .returning(House.id)
     )
@@ -547,9 +556,7 @@ async def generate_daily_chores_if_needed(session, house_id: int):
     claimed = result.fetchone()
     if not claimed:
         _last_generation_check = (house_id, today)
-        return
-
-    _last_generation_check = (house_id, today)
+        return False
 
     # 2. Rollover old uncompleted household task instances for this house
     owner_id = await session.scalar(
@@ -609,7 +616,6 @@ async def generate_daily_chores_if_needed(session, house_id: int):
     await session.flush()
 
     # Rollover old uncompleted personal tasks to today for users of this house
-    from db.models import User
     await session.execute(
         update(PersonalTask)
         .where(and_(
@@ -628,7 +634,9 @@ async def generate_daily_chores_if_needed(session, house_id: int):
     await generate_chores_for_week(session, house_id, monday_date)
 
     await session.commit()
+    _last_generation_check = (house_id, today)
     logger.info(f"Generated calendar week chores for house {house_id}")
+    return True
 
 
 # ── Middleware: auto-register users ──────────────────────────────────────────
@@ -685,7 +693,7 @@ async def cmd_start(message: types.Message, db_user: User = None):
     if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
         app_url = app_url.rstrip("/") + "/app"
     if app_url:
-        app_url = app_url.rstrip("/") + "/?v=57"
+        app_url = app_url.rstrip("/") + "/?v=58"
     try:
         await message.bot.set_chat_menu_button(
             chat_id=message.chat.id,
@@ -1041,6 +1049,13 @@ def find_scheduled_date_before_or_on(t: TaskTemplate, search_date: date) -> date
 
 def get_template_next_date(t: TaskTemplate, last_done_date: date, active_inst_date: date, today_date: date) -> date:
     """Compute the next scheduled execution date for a task template."""
+    if isinstance(last_done_date, datetime):
+        last_done_date = last_done_date.date()
+    if isinstance(active_inst_date, datetime):
+        active_inst_date = active_inst_date.date()
+    if isinstance(today_date, datetime):
+        today_date = today_date.date()
+
     p = t.periodicity
     if p == "once":
         if last_done_date:
@@ -1359,7 +1374,7 @@ async def catch_all_messages(message: types.Message):
     if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
         app_url = app_url.rstrip("/") + "/app"
     if app_url:
-        app_url = app_url.rstrip("/") + "/?v=57"
+        app_url = app_url.rstrip("/") + "/?v=58"
         
     builder = InlineKeyboardBuilder()
     builder.row(

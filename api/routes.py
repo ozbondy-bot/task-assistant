@@ -1,4 +1,6 @@
 import os
+import html
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -211,12 +213,15 @@ async def trigger_daily_generation_safe(house_id: int):
     if _generation_lock.locked():
         return
     try:
+        generated = False
         async with _generation_lock:
             async with AsyncSessionLocal() as session:
                 from bot.handlers.base import generate_daily_chores_if_needed
-                await generate_daily_chores_if_needed(session, house_id)
+                generated = bool(await generate_daily_chores_if_needed(session, house_id))
+        if generated:
+            await manager.broadcast_refresh(house_id)
     except Exception as e:
-        logger.error(f"Background daily chores generation error: {e}")
+        logger.error(f"Background daily chores generation error: {e}", exc_info=True)
 
 @app.get("/api/batch/tasks")
 async def get_batch_tasks(start_date: str, end_date: str, user: User = Depends(get_current_user)):
@@ -528,25 +533,30 @@ async def get_batch_tasks(start_date: str, end_date: str, user: User = Depends(g
                 "weekly_target": 0
             })
 
+        templates_payload = []
+        for t in templates:
+            eff_uid = active_assignee_map.get(t.id) or t.assigned_user_id
+            last_comp_val = last_completed_map.get(t.id)
+            last_comp_date = last_comp_val.date() if isinstance(last_comp_val, datetime) else last_comp_val
+            next_dt = next_execution_map.get(t.id) or get_template_next_date(t, last_comp_date, None, today)
+            templates_payload.append({
+                "id": t.id,
+                "title": t.title,
+                "points": t.points,
+                "periodicity": t.periodicity,
+                "period_days": t.period_days,
+                "start_date": str(t.start_date) if t.start_date else None,
+                "assigned_user_id": eff_uid,
+                "assigned_to_name": users_map[eff_uid].display_name if (eff_uid in users_map and users_map[eff_uid].display_name) else "Шурик",
+                "last_completed": last_comp_val.isoformat() if last_comp_val else None,
+                "next_execution": next_dt.isoformat() if next_dt else None,
+            })
+
         return {
             "house": house_by_date_res,
             "personal": personal_by_date_res,
             "partner": partner_by_date_res,
-            "templates": [
-                {
-                    "id": t.id,
-                    "title": t.title,
-                    "points": t.points,
-                    "periodicity": t.periodicity,
-                    "period_days": t.period_days,
-                    "start_date": str(t.start_date) if t.start_date else None,
-                    "assigned_user_id": active_assignee_map.get(t.id) or t.assigned_user_id,
-                    "assigned_to_name": users_map[active_assignee_map.get(t.id) or t.assigned_user_id].display_name if ((active_assignee_map.get(t.id) or t.assigned_user_id) in users_map and users_map[active_assignee_map.get(t.id) or t.assigned_user_id].display_name) else "Шурик",
-                    "last_completed": last_completed_map.get(t.id).isoformat() if last_completed_map.get(t.id) else None,
-                    "next_execution": (next_execution_map.get(t.id) or get_template_next_date(t, last_completed_map.get(t.id), None, today)).isoformat() if (next_execution_map.get(t.id) or get_template_next_date(t, last_completed_map.get(t.id), None, today)) else None
-                }
-                for t in templates
-            ],
+            "templates": templates_payload,
             "members": members_list
         }
 
@@ -560,7 +570,13 @@ async def get_today_tasks(date: Optional[str] = None, user_id: Optional[int] = N
         house = await session.get(House, ACTIVE_HOUSE_ID)
         if house and house.last_summary_date != today and not _generation_lock.locked():
             asyncio.create_task(trigger_daily_generation_safe(ACTIVE_HOUSE_ID))
-        target_uid = user_id if (user_id and user.is_house_owner) else user.id
+        target_uid = user.id
+        if user_id and user_id != user.id:
+            target_u = await session.get(User, user_id)
+            if target_u and target_u.house_id == user.house_id:
+                target_uid = target_u.id
+
+        is_viewing_self = (target_uid == user.id)
         
         target_date = today
         if date:
@@ -569,79 +585,82 @@ async def get_today_tasks(date: Optional[str] = None, user_id: Optional[int] = N
             except Exception:
                 pass
                 
-        if target_date == today:
-            cond = and_(
-                PersonalTask.user_id == target_uid,
-                PersonalTask.is_deleted == False,
-                or_(
-                    and_(PersonalTask.date_execution <= today, PersonalTask.is_completed == False),
-                    and_(PersonalTask.date_execution == today, PersonalTask.is_completed == True)
-                )
-            )
-        else:
-            if target_date < today:
+        res_personal = []
+        if is_viewing_self:
+            if target_date == today:
                 cond = and_(
                     PersonalTask.user_id == target_uid,
-                    PersonalTask.date_execution == target_date,
-                    PersonalTask.is_completed == True,
                     PersonalTask.is_deleted == False,
+                    or_(
+                        and_(PersonalTask.date_execution <= today, PersonalTask.is_completed == False),
+                        and_(PersonalTask.date_execution == today, PersonalTask.is_completed == True)
+                    )
                 )
             else:
-                cond = and_(
-                    PersonalTask.user_id == target_uid,
-                    PersonalTask.date_execution == target_date,
-                    PersonalTask.is_deleted == False,
-                )
+                if target_date < today:
+                    cond = and_(
+                        PersonalTask.user_id == target_uid,
+                        PersonalTask.date_execution == target_date,
+                        PersonalTask.is_completed == True,
+                        PersonalTask.is_deleted == False,
+                    )
+                else:
+                    cond = and_(
+                        PersonalTask.user_id == target_uid,
+                        PersonalTask.date_execution == target_date,
+                        PersonalTask.is_deleted == False,
+                    )
+                
+            result = await session.execute(
+                select(PersonalTask).where(cond).order_by(PersonalTask.id)
+            )
+            tasks = result.scalars().all()
             
-        result = await session.execute(
-            select(PersonalTask).where(cond).order_by(PersonalTask.id)
-        )
-        tasks = result.scalars().all()
-        
-        # Bulk queries for personal tasks
-        last_completed_res = await session.execute(
-            select(PersonalTask.text, func.max(PersonalTask.date_execution))
-            .where(and_(
-                PersonalTask.user_id == target_uid,
-                PersonalTask.is_completed == True,
-                PersonalTask.is_deleted == False
-            ))
-            .group_by(PersonalTask.text)
-        )
-        last_completed_dates = dict(last_completed_res.all())
+            # Bulk queries for personal tasks
+            last_completed_res = await session.execute(
+                select(PersonalTask.text, func.max(PersonalTask.date_execution))
+                .where(and_(
+                    PersonalTask.user_id == target_uid,
+                    PersonalTask.is_completed == True,
+                    PersonalTask.is_deleted == False
+                ))
+                .group_by(PersonalTask.text)
+            )
+            last_completed_dates = dict(last_completed_res.all())
 
-        next_exec_res = await session.execute(
-            select(PersonalTask.text, func.min(PersonalTask.date_execution))
-            .where(and_(
-                PersonalTask.user_id == target_uid,
-                PersonalTask.is_completed == False,
-                PersonalTask.is_deleted == False,
-                PersonalTask.date_execution > today
-            ))
-            .group_by(PersonalTask.text)
-        )
-        next_exec_dates = dict(next_exec_res.all())
+            next_exec_res = await session.execute(
+                select(PersonalTask.text, func.min(PersonalTask.date_execution))
+                .where(and_(
+                    PersonalTask.user_id == target_uid,
+                    PersonalTask.is_completed == False,
+                    PersonalTask.is_deleted == False,
+                    PersonalTask.date_execution > today
+                ))
+                .group_by(PersonalTask.text)
+            )
+            next_exec_dates = dict(next_exec_res.all())
 
-        res_personal = []
-        for t in tasks:
-            last_date = last_completed_dates.get(t.text)
-            next_date = next_exec_dates.get(t.text)
-            res_personal.append({
-                "id": t.id,
-                "text": t.text,
-                "date": str(t.date_execution),
-                "recurrence": t.recurrence,
-                "category": t.category,
-                "type": "personal",
-                "points": 0,
-                "is_completed": t.is_completed,
-                "last_completed": last_date.isoformat() if last_date else None,
-                "next_execution": next_date.isoformat() if next_date else None,
-            })
+            for t in tasks:
+                last_date = last_completed_dates.get(t.text)
+                next_date = next_exec_dates.get(t.text)
+                res_personal.append({
+                    "id": t.id,
+                    "text": t.text,
+                    "date": str(t.date_execution),
+                    "recurrence": t.recurrence,
+                    "category": t.category,
+                    "type": "personal",
+                    "points": 0,
+                    "is_completed": t.is_completed,
+                    "last_completed": last_date.isoformat() if last_date else None,
+                    "next_execution": next_date.isoformat() if next_date else None,
+                })
 
         # Get household tasks for target_date
         res_household = []
-        owner_u = next((u for u in (await session.execute(select(User).where(User.house_id == ACTIVE_HOUSE_ID))).scalars().all() if u.is_house_owner), user)
+        house_users = (await session.execute(select(User).where(User.house_id == ACTIVE_HOUSE_ID))).scalars().all()
+        house_users_map = {u.id: u for u in house_users}
+        owner_u = next((u for u in house_users if u.is_house_owner), user)
         owner_id = owner_u.id if owner_u else user.id
 
         house_cond = and_(
@@ -688,6 +707,9 @@ async def get_today_tasks(date: Optional[str] = None, user_id: Optional[int] = N
             for inst, tmpl in house_tasks:
                 last_date = last_completions.get(tmpl.id)
                 next_date = next_exec_dates_house.get(tmpl.id)
+                assignee_id = inst.done_by_user_id or tmpl.assigned_user_id or owner_id
+                assignee_user = house_users_map.get(assignee_id)
+                assignee_name = (assignee_user.display_name or assignee_user.full_name or "Участник") if assignee_user else "Шурик"
                 res_household.append({
                     "id": inst.id,
                     "text": tmpl.title,
@@ -698,6 +720,7 @@ async def get_today_tasks(date: Optional[str] = None, user_id: Optional[int] = N
                     "status": inst.status,
                     "is_completed": (inst.status == "done"),
                     "done_by_user_id": inst.done_by_user_id,
+                    "assigned_to_name": assignee_name,
                     "last_completed": last_date.isoformat() if last_date else None,
                     "next_execution": next_date.isoformat() if next_date else None,
                 })
@@ -1035,13 +1058,19 @@ async def complete_house_task(instance_id: int, points: Optional[int] = None, us
         inst = await session.get(TaskInstance, instance_id)
         if not inst:
             raise HTTPException(status_code=404, detail="Task not found")
-        if inst.status == "free":
+        if inst.status == "done":
+            return {"ok": True, "points_earned": 0, "already_done": True}
+
+        tmpl = await session.get(TaskTemplate, inst.template_id)
+        if inst.status == "free" or inst.done_by_user_id is None:
             inst.status = "in_progress"
             inst.done_by_user_id = user.id
         elif inst.done_by_user_id != user.id:
-            raise HTTPException(status_code=403, detail="Not your task")
-        
-        tmpl = await session.get(TaskTemplate, inst.template_id)
+            if user.is_house_owner and tmpl and tmpl.house_id == user.house_id:
+                inst.done_by_user_id = user.id
+            else:
+                raise HTTPException(status_code=403, detail="Not your task")
+
         inst.status = "done"
         inst.done_at = datetime.utcnow()
 
@@ -1539,13 +1568,14 @@ async def get_chores_templates(user: User = Depends(get_current_user)):
             last_handled = handled_dates.get(t.id)
             active_inst_date = active_dates.get(t.id)
             
-            if generation_done:
+            if generation_done and t.periodicity != "once":
                 last_handled = today
                 
             if active_inst_date:
                 nd = active_inst_date
             else:
-                nd = get_template_next_date(t, last_handled, active_inst_date, today)
+                last_handled_dt = last_handled.date() if isinstance(last_handled, datetime) else last_handled
+                nd = get_template_next_date(t, last_handled_dt, active_inst_date, today)
             
             eff_uid = active_assignee_map.get(t.id) or t.assigned_user_id or user.id
             res_list.append({
@@ -2029,11 +2059,13 @@ async def nudge_house_task(instance_id: int, user: User = Depends(get_current_us
         )
         others = result.scalars().all()
         
+        sender_name = html.escape(user.display_name or user.username or "Партнёр")
+        phrase_html = html.escape(phrase)
         for other in others:
             try:
                 await bot.send_message(
                     chat_id=other.telegram_id,
-                    text=f"🔔 *Намек от {user.display_name or user.username}*\n\n{phrase}",
+                    text=f"🔔 <b>Намек от {sender_name}</b>\n\n{phrase_html}",
                     parse_mode="HTML"
                 )
             except Exception as e:

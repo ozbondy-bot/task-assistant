@@ -676,6 +676,7 @@ function isPastDate(dateStr) {
 function renderHouseTasks(tasks) {
   window.currentHouseTasksList = tasks;
   const list = document.getElementById('houseTasksList');
+  if (!list) return;
   const isToday = houseActiveOffset === 0;
   const isFuture = houseActiveOffset > 0;
 
@@ -1013,18 +1014,35 @@ function renderPersonalTasks(personal, household) {
   list.innerHTML = rows.join('');
 }
 
+function findHouseTaskInCaches(id) {
+  const pDate = getPersonalActiveDateStr();
+  const cachedPersonal = window.personalTasksCache && window.personalTasksCache[pDate];
+  if (cachedPersonal && cachedPersonal.household) {
+    const found = cachedPersonal.household.find(item => item.id === id);
+    if (found) return found;
+  }
+  if (window.personalTasksCache) {
+    for (const d of Object.keys(window.personalTasksCache)) {
+      const hh = window.personalTasksCache[d]?.household;
+      if (hh) {
+        const found = hh.find(item => item.id === id);
+        if (found) return found;
+      }
+    }
+  }
+  const hDate = (typeof getHouseActiveDateStr === 'function') ? getHouseActiveDateStr() : pDate;
+  const tasks = window.tasksCache && window.tasksCache[hDate];
+  if (tasks) {
+    const found = tasks.find(item => item.id === id);
+    if (found) return found;
+  }
+  return null;
+}
+
 function optimisticCompleteHouseTask(id, pointsEarned) {
   const pDate = getPersonalActiveDateStr();
   const cachedPersonal = window.personalTasksCache && window.personalTasksCache[pDate];
-  let t = null;
-  if (cachedPersonal && cachedPersonal.household) {
-    t = cachedPersonal.household.find(item => item.id === id);
-  }
-  if (!t) {
-    const hDate = (typeof getHouseActiveDateStr === 'function') ? getHouseActiveDateStr() : pDate;
-    const tasks = window.tasksCache && window.tasksCache[hDate];
-    if (tasks) t = tasks.find(item => item.id === id);
-  }
+  const t = findHouseTaskInCaches(id);
   if (!t) return null;
   
   const rollbackState = {
@@ -1081,7 +1099,7 @@ function rollbackHouseTask(taskRef, rollbackState, rollbackPoints) {
 
 async function completePersonalTask(id) {
   const activeDate = getPersonalActiveDateStr();
-  const cached = window.personalTasksCache[activeDate];
+  const cached = window.personalTasksCache && window.personalTasksCache[activeDate];
   const t = (cached && cached.personal) ? cached.personal.find(item => item.id === id) : null;
 
   const originalCompleted = t ? t.is_completed : null;
@@ -1095,25 +1113,39 @@ async function completePersonalTask(id) {
 
   try {
     await api('POST', `/api/tasks/${id}/complete`, null, true);
-    const freshPersonal = await api('GET', `/api/tasks/today?date=${activeDate}`, null, true);
-    window.personalTasksCache[activeDate] = freshPersonal;
-    renderPersonalTasks(freshPersonal.personal, freshPersonal.household);
   } catch (e) {
-    if (t) {
+    if (t && cached) {
       t.is_completed = originalCompleted;
       renderPersonalTasks(cached.personal, cached.household);
     }
     showToast(`⚠️ ${e.message}`);
+    return;
+  }
+
+  // Refresh after successful commit (errors here must not roll back completion)
+  try {
+    if (t && t.recurrence && window.personalTasksCache) {
+      for (const d of Object.keys(window.personalTasksCache)) {
+        if (d !== activeDate) delete window.personalTasksCache[d];
+      }
+    }
+    const freshPersonal = await api('GET', `/api/tasks/today?date=${activeDate}`, null, true);
+    window.personalTasksCache[activeDate] = freshPersonal;
+    if (getPersonalActiveDateStr() === activeDate) {
+      renderPersonalTasks(freshPersonal.personal, freshPersonal.household);
+    }
+  } catch (refreshErr) {
+    console.warn('Post-complete personal refresh error:', refreshErr);
   }
 }
 
 let pendingCookingTaskId = null;
 
 async function completeHouseTask(id, title) {
-  const activeDate = getHouseActiveDateStr();
-  const tasks = window.tasksCache[activeDate];
-  const t = tasks ? tasks.find(item => item.id === id) : null;
-  const isCooking = title && (title.toLowerCase().includes('готов') || title.toLowerCase().includes('cook'));
+  const pDate = getPersonalActiveDateStr();
+  const t = findHouseTaskInCaches(id);
+  const taskTitle = title || (t && (t.title || t.text)) || '';
+  const isCooking = taskTitle && (taskTitle.toLowerCase().includes('готов') || taskTitle.toLowerCase().includes('cook'));
   
   if (isCooking) {
     pendingCookingTaskId = id;
@@ -1128,68 +1160,70 @@ async function completeHouseTask(id, title) {
 
   try {
     await api('POST', `/api/house/tasks/${id}/done`, null, true);
-    const freshMembers = await api('GET', `/api/house/members?date=${activeDate}`, null, true);
-    window.houseMembersList = freshMembers;
-    renderMembers(freshMembers);
   } catch (e) {
     if (opt) {
       rollbackHouseTask(opt.taskRef, opt.rollbackState, opt.rollbackPoints);
     }
     showToast(`⚠️ Ошибка: ${e.message}`);
+    return;
+  }
+
+  try {
+    window.partnerTasksCache = {};
+    window.templatesCache = null;
+    const [freshPersonal, freshMembers] = await Promise.all([
+      api('GET', `/api/tasks/today?date=${pDate}`, null, true),
+      api('GET', `/api/house/members?date=${pDate}`, null, true)
+    ]);
+    window.personalTasksCache[pDate] = freshPersonal;
+    if (getPersonalActiveDateStr() === pDate) {
+      renderPersonalTasks(freshPersonal.personal, freshPersonal.household);
+    }
+    window.houseMembersList = freshMembers;
+    renderMembers(freshMembers);
+    loadWeeklyGoal();
+  } catch (refreshErr) {
+    console.warn('Post-complete house refresh error:', refreshErr);
   }
 }
 
 async function submitCookingDone(points) {
   const id = pendingCookingTaskId;
+  pendingCookingTaskId = null;
   document.getElementById('cookingDurationModal').classList.add('hidden');
   if (!id) return;
 
-  const activeDate = getHouseActiveDateStr();
-  const tasks = window.tasksCache[activeDate];
-  const t = tasks ? tasks.find(item => item.id === id) : null;
-
-  const originalStatus = t ? t.status : null;
-  const originalCompletedBy = t ? t.completed_by : null;
-  
-  let originalPoints = null;
-  if (t && window.houseMembersList) {
-    const me = window.houseMembersList.find(m => m.is_me);
-    if (me) {
-      originalPoints = { points: me.points, weekly_earned: me.weekly_earned };
-      me.points += points;
-      me.weekly_earned += points;
-      renderMembers(window.houseMembersList);
-    }
-  }
-
-  if (t) {
-    t.status = 'done';
-    t.completed_by = (currentUser && currentUser.first_name) || 'Шурик';
-    renderHouseTasks(tasks);
-  }
+  const pDate = getPersonalActiveDateStr();
+  const opt = optimisticCompleteHouseTask(id, points);
 
   showToast(`✅ Готово! +${points} ✨`);
 
   try {
     await api('POST', `/api/house/tasks/${id}/done?points=${points}`, null, true);
-    const freshMembers = await api('GET', `/api/house/members?date=${activeDate}`, null, true);
-    window.houseMembersList = freshMembers;
-    renderMembers(freshMembers);
   } catch (e) {
-    if (t) {
-      t.status = originalStatus;
-      t.completed_by = originalCompletedBy;
-      renderHouseTasks(tasks);
-    }
-    if (originalPoints && window.houseMembersList) {
-      const me = window.houseMembersList.find(m => m.is_me);
-      if (me) {
-        me.points = originalPoints.points;
-        me.weekly_earned = originalPoints.weekly_earned;
-        renderMembers(window.houseMembersList);
-      }
+    if (opt) {
+      rollbackHouseTask(opt.taskRef, opt.rollbackState, opt.rollbackPoints);
     }
     showToast(`⚠️ Ошибка: ${e.message}`);
+    return;
+  }
+
+  try {
+    window.partnerTasksCache = {};
+    window.templatesCache = null;
+    const [freshPersonal, freshMembers] = await Promise.all([
+      api('GET', `/api/tasks/today?date=${pDate}`, null, true),
+      api('GET', `/api/house/members?date=${pDate}`, null, true)
+    ]);
+    window.personalTasksCache[pDate] = freshPersonal;
+    if (getPersonalActiveDateStr() === pDate) {
+      renderPersonalTasks(freshPersonal.personal, freshPersonal.household);
+    }
+    window.houseMembersList = freshMembers;
+    renderMembers(freshMembers);
+    loadWeeklyGoal();
+  } catch (refreshErr) {
+    console.warn('Post-cooking refresh error:', refreshErr);
   }
 }
 
@@ -1214,111 +1248,134 @@ window.toggleTaskPeriodDays = toggleTaskPeriodDays;
 
 // ── Add Task Modal ────────────────────────────────────────────────────────────
 function setupModals() {
-  document.getElementById('cancelTaskBtn').addEventListener('click', () => {
-    document.getElementById('addTaskModal').classList.add('hidden');
-  });
+  const cancelTaskBtn = document.getElementById('cancelTaskBtn');
+  if (cancelTaskBtn) {
+    cancelTaskBtn.addEventListener('click', () => {
+      document.getElementById('addTaskModal').classList.add('hidden');
+    });
+  }
 
-  document.getElementById('saveTaskBtn').addEventListener('click', async () => {
-    const text = document.getElementById('newTaskInput').value.trim();
-    if (!text) return;
-    const date = document.getElementById('newTaskDate').value || null;
-    let recurrence = document.getElementById('newTaskRecurrence').value || null;
-    if (recurrence === 'every_x_days') {
-      const daysInput = document.getElementById('taskTmplPeriodDays');
-      const days = parseInt(daysInput ? daysInput.value : 3) || 3;
-      recurrence = `every_x_days:${days}`;
-    }
-    
-    // Snappy modal close
-    document.getElementById('addTaskModal').classList.add('hidden');
-    document.getElementById('newTaskInput').value = '';
-    document.getElementById('newTaskDate').value = '';
-    document.getElementById('newTaskRecurrence').value = '';
-    const grp = document.getElementById('taskPeriodDaysGroup');
-    if (grp) grp.classList.add('hidden');
-    
-    try {
-      await api('POST', '/api/tasks', { text, date, recurrence });
-      showToast('✅ Задача добавлена!');
-      loadPersonalTab();
-    } catch (e) {
-      showToast(`⚠️ ${e.message}`);
-      loadPersonalTab();
-    }
-  });
+  const saveTaskBtn = document.getElementById('saveTaskBtn');
+  if (saveTaskBtn) {
+    saveTaskBtn.addEventListener('click', async () => {
+      const text = document.getElementById('newTaskInput').value.trim();
+      if (!text) return;
+      const date = document.getElementById('newTaskDate').value || null;
+      let recurrence = document.getElementById('newTaskRecurrence').value || null;
+      if (recurrence === 'every_x_days') {
+        const daysInput = document.getElementById('taskTmplPeriodDays');
+        const days = parseInt(daysInput ? daysInput.value : 3) || 3;
+        recurrence = `every_x_days:${days}`;
+      }
+      
+      // Snappy modal close
+      document.getElementById('addTaskModal').classList.add('hidden');
+      document.getElementById('newTaskInput').value = '';
+      document.getElementById('newTaskDate').value = '';
+      document.getElementById('newTaskRecurrence').value = '';
+      const grp = document.getElementById('taskPeriodDaysGroup');
+      if (grp) grp.classList.add('hidden');
+      
+      try {
+        await api('POST', '/api/tasks', { text, date, recurrence });
+        showToast('✅ Задача добавлена!');
+        window.personalTasksCache = {};
+        loadPersonalTab();
+      } catch (e) {
+        showToast(`⚠️ ${e.message}`);
+        loadPersonalTab();
+      }
+    });
+  }
 
-  document.getElementById('cancelShopBtn').addEventListener('click', () => {
-    document.getElementById('addShopModal').classList.add('hidden');
-  });
+  const cancelShopBtn = document.getElementById('cancelShopBtn');
+  if (cancelShopBtn) {
+    cancelShopBtn.addEventListener('click', () => {
+      const m = document.getElementById('addShopModal');
+      if (m) m.classList.add('hidden');
+    });
+  }
 
-  document.getElementById('saveShopBtn').addEventListener('click', async () => {
-    const name = document.getElementById('shopItemName').value.trim();
-    const price = parseInt(document.getElementById('shopItemPrice').value) || 0;
-    const urgent = document.getElementById('shopItemUrgent').checked;
-    if (!name) return;
-    
-    // Snappy modal close
-    document.getElementById('addShopModal').classList.add('hidden');
-    document.getElementById('shopItemName').value = '';
-    document.getElementById('shopItemPrice').value = '';
-    document.getElementById('shopItemUrgent').checked = false;
-    
-    try {
-      await api('POST', '/api/shopping', { item_name: name, price, priority: urgent ? 'high' : 'normal' });
-      showToast('🛒 Добавлено в список!');
-      loadShoppingTab();
-    } catch (e) {
-      showToast(`⚠️ ${e.message}`);
-      loadShoppingTab();
-    }
-  });
+  const saveShopBtn = document.getElementById('saveShopBtn');
+  if (saveShopBtn) {
+    saveShopBtn.addEventListener('click', async () => {
+      const shopNameEl = document.getElementById('shopItemName');
+      const shopPriceEl = document.getElementById('shopItemPrice');
+      const shopUrgentEl = document.getElementById('shopItemUrgent');
+      const addShopModal = document.getElementById('addShopModal');
+      const name = shopNameEl ? shopNameEl.value.trim() : '';
+      const price = shopPriceEl ? (parseInt(shopPriceEl.value) || 0) : 0;
+      const urgent = shopUrgentEl ? shopUrgentEl.checked : false;
+      if (!name) return;
+      
+      if (addShopModal) addShopModal.classList.add('hidden');
+      if (shopNameEl) shopNameEl.value = '';
+      if (shopPriceEl) shopPriceEl.value = '';
+      if (shopUrgentEl) shopUrgentEl.checked = false;
+      
+      try {
+        await api('POST', '/api/shopping', { item_name: name, price, priority: urgent ? 'high' : 'normal' });
+        showToast('🛒 Добавлено в список!');
+        loadShoppingTab();
+      } catch (e) {
+        showToast(`⚠️ ${e.message}`);
+        loadShoppingTab();
+      }
+    });
+  }
 
   // Chores templates modal
-  document.getElementById('cancelChoreBtn').addEventListener('click', () => {
-    document.getElementById('addChoreModal').classList.add('hidden');
-  });
-
-  document.getElementById('saveChoreTmplBtn').addEventListener('click', async () => {
-    const title = document.getElementById('choreTmplTitle').value.trim();
-    const points = parseInt(document.getElementById('choreTmplPoints').value) || 1;
-    const periodicity = document.getElementById('choreTmplPeriodicity').value;
-    const periodDaysInput = document.getElementById('choreTmplPeriodDays');
-    const periodDays = periodicity === 'every_x_days' ? (parseInt(periodDaysInput.value) || 30) : null;
-    const assigneeSelect = document.getElementById('choreTmplAssignee');
-    const assignedUserId = assigneeSelect ? (parseInt(assigneeSelect.value) || null) : null;
-
-    if (!title) return;
-    try {
-      if (currentEditingTemplateId) {
-        await api('PUT', `/api/chores/templates/${currentEditingTemplateId}`, {
-          title,
-          points,
-          periodicity,
-          period_days: periodDays,
-          assigned_user_id: assignedUserId
-        });
-        showToast('✅ Шаблон сохранен!');
-      } else {
-        await api('POST', '/api/chores/templates', {
-          title,
-          points,
-          periodicity,
-          period_days: periodDays,
-          assigned_user_id: assignedUserId
-        });
-        showToast('✅ Шаблон добавлен!');
-      }
+  const cancelChoreBtn = document.getElementById('cancelChoreBtn');
+  if (cancelChoreBtn) {
+    cancelChoreBtn.addEventListener('click', () => {
       document.getElementById('addChoreModal').classList.add('hidden');
-      document.getElementById('choreTmplTitle').value = '';
-      document.getElementById('choreTmplPoints').value = '1';
-      window.templatesCache = [];
-      window.personalTasksCache = {};
-      window.partnerTasksCache = {};
-      await Promise.all([loadPersonalTab(), loadPartnerTab(), loadTemplatesTab(), loadWeeklyGoal()]);
-    } catch (e) {
-      showToast(`⚠️ ${e.message}`);
-    }
-  });
+    });
+  }
+
+  const saveChoreTmplBtn = document.getElementById('saveChoreTmplBtn');
+  if (saveChoreTmplBtn) {
+    saveChoreTmplBtn.addEventListener('click', async () => {
+      const title = document.getElementById('choreTmplTitle').value.trim();
+      const points = parseInt(document.getElementById('choreTmplPoints').value) || 1;
+      const periodicity = document.getElementById('choreTmplPeriodicity').value;
+      const periodDaysInput = document.getElementById('choreTmplPeriodDays');
+      const periodDays = periodicity === 'every_x_days' ? (parseInt(periodDaysInput?.value) || 30) : null;
+      const assigneeSelect = document.getElementById('choreTmplAssignee');
+      const assignedUserId = assigneeSelect ? (parseInt(assigneeSelect.value) || null) : null;
+
+      if (!title) return;
+      try {
+        if (currentEditingTemplateId) {
+          await api('PUT', `/api/chores/templates/${currentEditingTemplateId}`, {
+            title,
+            points,
+            periodicity,
+            period_days: periodDays,
+            assigned_user_id: assignedUserId
+          });
+          showToast('✅ Шаблон сохранен!');
+        } else {
+          await api('POST', '/api/chores/templates', {
+            title,
+            points,
+            periodicity,
+            period_days: periodDays,
+            assigned_user_id: assignedUserId
+          });
+          showToast('✅ Шаблон добавлен!');
+        }
+        document.getElementById('addChoreModal').classList.add('hidden');
+        document.getElementById('choreTmplTitle').value = '';
+        document.getElementById('choreTmplPoints').value = '1';
+        window.templatesCache = null;
+        window.personalTasksCache = {};
+        window.partnerTasksCache = {};
+        await Promise.all([loadPersonalTab(), loadPartnerTab(), loadTemplatesTab(), loadWeeklyGoal()]);
+      } catch (e) {
+        showToast(`⚠️ ${e.message}`);
+      }
+    });
+  }
 
   // Shift task handler
   // Note: modal inputs call executeShiftTask directly via onchange / onclick
@@ -1490,7 +1547,11 @@ function escHtml(str) {
 }
 
 function escAttr(str) {
-  return (str || '').replace(/'/g, "\\'");
+  return (str || '')
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/"/g, '&quot;')
+    .replace(/\r?\n/g, ' ');
 }
 
 function stripEmoji(text) {
@@ -2211,15 +2272,25 @@ function openChoreDetails(t) {
 }
 
 function editChoreTemplateDirectly(t) {
-  currentEditingTemplateId = t.template_id;
+  currentEditingTemplateId = t.template_id || t.id;
   document.getElementById('addChoreModal').classList.remove('hidden');
   document.getElementById('choreTmplTitle').value = stripEmoji(t.title);
   document.getElementById('choreTmplPoints').value = t.points;
+
+  const assigneeSelect = document.getElementById('choreTmplAssignee');
+  if (assigneeSelect && t.assigned_user_id) {
+    assigneeSelect.value = String(t.assigned_user_id);
+  }
+
   document.getElementById('choreTmplPeriodicity').value = t.periodicity;
   toggleChorePeriodDays(t.periodicity);
   if (t.periodicity === 'every_x_days') {
     document.getElementById('choreTmplPeriodDays').value = t.period_days || 30;
   }
+  const h3 = document.querySelector('#addChoreModal h3');
+  if (h3) h3.textContent = 'Изменить шаблон задачи';
+  const btn = document.getElementById('saveChoreTmplBtn');
+  if (btn) btn.textContent = 'Сохранить ✓';
 }
 window.editChoreTemplateDirectly = editChoreTemplateDirectly;
 
@@ -2334,6 +2405,7 @@ function openMyTaskDetails(t, type) {
   document.getElementById('myTaskDetailsBody').innerHTML = body;
   
   const actions = document.getElementById('myTaskDetailsActions');
+  window._activeMyTaskTitle = title || '';
   if (type === 'household') {
     const partner = window.partnerMember || (window.houseMembersList && window.houseMembersList.find(m => !m.is_me));
     const partnerId = partner ? partner.id : null;
@@ -2346,17 +2418,17 @@ function openMyTaskDetails(t, type) {
 
     actions.innerHTML = `
       <div style="display: flex; gap: 6px; width: 100%;">
-        <button class="btn btn-primary" onclick="completeHouseTask(${t.id}, '${escAttr(title)}'); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center;">Done</button>
-        <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'chore'); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center;">Shift</button>
+        <button class="btn btn-primary" onclick="closeModal('myTaskDetailsModal'); completeHouseTask(${t.id}, window._activeMyTaskTitle);" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center;">Готово</button>
+        <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'chore'); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center;">Сдвиг</button>
         ${reassignBtn}
       </div>
     `;
   } else {
     actions.innerHTML = `
       <div style="display: flex; gap: 6px; width: 100%;">
-        <button class="btn btn-primary" onclick="completePersonalTask(${t.id}); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center;">Done</button>
-        <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'personal'); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center;">Shift</button>
-        <button class="btn btn-secondary" onclick="deletePersonalTask(${t.id});" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; background: var(--danger); border-color: var(--danger); color: #fff;">Delete</button>
+        <button class="btn btn-primary" onclick="closeModal('myTaskDetailsModal'); completePersonalTask(${t.id});" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center;">Готово</button>
+        <button class="btn btn-secondary" onclick="openShiftModal(${t.id}, 'personal'); closeModal('myTaskDetailsModal');" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center;">Сдвиг</button>
+        <button class="btn btn-secondary" onclick="deletePersonalTask(${t.id});" style="flex: 1; height: 42px; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; background: var(--danger); border-color: var(--danger); color: #fff;">Удалить</button>
       </div>
     `;
   }
@@ -2419,14 +2491,24 @@ async function loadPartnerTab() {
   }
 
   try {
-    const data = await api('GET', `/api/batch/tasks?start_date=${dateStr}&end_date=${dateStr}`);
-    if (!window.partnerTasksCache) window.partnerTasksCache = {};
-    if (data.partner && data.partner[dateStr]) {
-      window.partnerTasksCache[dateStr] = data.partner[dateStr];
-      renderPartnerTasks(data.partner[dateStr].household || []);
-    } else {
-      renderPartnerTasks([]);
+    let partnerHousehold = null;
+    try {
+      const data = await api('GET', `/api/batch/tasks?start_date=${dateStr}&end_date=${dateStr}`);
+      if (!window.partnerTasksCache) window.partnerTasksCache = {};
+      if (data.partner && data.partner[dateStr]) {
+        window.partnerTasksCache[dateStr] = data.partner[dateStr];
+        partnerHousehold = data.partner[dateStr].household || [];
+      } else {
+        partnerHousehold = [];
+      }
+    } catch (batchErr) {
+      console.warn('Batch load failed in loadPartnerTab, falling back to /api/tasks/today:', batchErr);
+      const fallback = await api('GET', `/api/tasks/today?user_id=${partner.id}&date=${dateStr}`);
+      if (!window.partnerTasksCache) window.partnerTasksCache = {};
+      window.partnerTasksCache[dateStr] = fallback;
+      partnerHousehold = fallback.household || [];
     }
+    renderPartnerTasks(partnerHousehold || []);
   } catch (e) {
     list.innerHTML = `
       <div class="empty-state">

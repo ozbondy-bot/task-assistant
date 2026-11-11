@@ -41,6 +41,8 @@ async def run_bot():
         app_url = MINI_APP_URL
         if app_url and not app_url.endswith("/app") and not app_url.endswith("/app/"):
             app_url = app_url.rstrip("/") + "/app"
+        if app_url:
+            app_url = app_url.rstrip("/") + "/?v=58"
         try:
             await bot.set_chat_menu_button(
                 menu_button=MenuButtonWebApp(
@@ -181,6 +183,15 @@ async def main():
         await migrate_template_emojis()
     except Exception as e:
         logger.error(f"Emoji migration cleanup failed: {e}")
+
+    # Pre-generate daily/weekly chores at startup so initial Mini App load sees them immediately
+    try:
+        from db.models import AsyncSessionLocal
+        from bot.handlers.base import generate_daily_chores_if_needed, ACTIVE_HOUSE_ID
+        async with AsyncSessionLocal() as session:
+            await generate_daily_chores_if_needed(session, ACTIVE_HOUSE_ID)
+    except Exception as e:
+        logger.error(f"Startup chore generation failed: {e}", exc_info=True)
 
     # Run bot polling, FastAPI, and scheduler loop concurrently
     await asyncio.gather(
